@@ -77,12 +77,16 @@ class NavMode:
 # main motor and vision controller class
 class MotorController:
     # constructor sets up cameras, pd gains, face detector models, and serial communication
-    def __init__(self, camera_index: int = 0, show_preview: bool = False, auto_popup: bool = False):
+    def __init__(self, camera_index: int = 0, show_preview: bool = False, auto_popup: Optional[bool] = None):
         self.camera_index = camera_index
         self.show_preview = show_preview
-        self.auto_popup = auto_popup  # Disabled by default so Raspberry Pi screen only displays Face UI
-        self.popup_active = False     # Explicit popup trigger flag
-        self.nav_mode = NavMode.STANDBY  # Always start locked at 0
+        # on windows testing we auto popup the camera feed during movement, but on raspberry pi 5 we disable it so only screen.py shows
+        if auto_popup is None:
+            self.auto_popup = sys.platform.startswith("win")
+        else:
+            self.auto_popup = auto_popup
+        self.popup_active = False     # explicit popup trigger flag
+        self.nav_mode = NavMode.STANDBY  # always start locked at 0
         self.running = False
         self.lock = threading.Lock()
 

@@ -463,6 +463,10 @@ To do:
   - **High-Contrast Dark Blue Optical Scanning Laser**: Replaced the low-contrast `#55ffff` scanning line in `screen.py` with a bold dark blue line (`#002b66`, width=3) for sharp visibility against the cyan eye.
   - **Comprehensive Beginner-Friendly Comments**: Added human, informal, lowercase, explanatory comments across every single block of `listen.py`, `motors.py`, `arduino.ino`, and `screen.py` for students and programming beginners.
   - **Environment-Based API Key**: Migrated `GROQ_API_KEY` in `listen.py` to load from `.env` using `python-dotenv` (`load_dotenv()` + `os.getenv`), keeping credentials secure and isolated from source control.
+  - **Unified Single-Pass AI Pipeline**: Replaced 4 sequential Groq API roundtrips (`groq_mean_check`, `classify_motor_intent`, `groq_camera_check`, and `chat.completions.create`) with ONE single fast call returning action tags (`<action>CAMERA</action>`, `<action>MEAN</action>`, `<action motor="...">`, or plain chat), eliminating API token suction (~75% token reduction) and dropping thinking latency from ~2.0s to ~0.3s.
+  - **Post-Speech Cutoff Latency Optimization**: Reduced `END_SILENCE_SECONDS` from 1.15s to 0.65s (0.5s faster post-sentence response without cutting off natural pauses).
+  - **Zero-Delay Warm Audio Stream**: Kept `sd.InputStream` continuously active across all conversation turns in `run_conversation_mode()`, eliminating 200–400ms PortAudio driver re-initialization lag, and pre-calibrated baseline noise floor to eliminate the 400ms delay on pressing Enter.
+  - **Platform-Aware Auto-Popup HUD**: Configured OpenCV camera preview HUD to automatically pop up during movement modes (`FOLLOW`, `APPROACH`, `ROAM`, `DEMONSTRATE`) exclusively on Windows for desktop testing, while strictly suppressing it on Linux / Raspberry Pi 5 so only `screen.py` displays.
 
 ## Reliability Notes
 

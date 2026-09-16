@@ -59,7 +59,8 @@ except Exception as e:
 
 try:
     import motors
-    motor_ctrl = motors.MotorController(show_preview=False, auto_popup=False)
+    # on windows testing we auto popup the opencv camera feed when moving, but on raspberry pi 5 we disable it
+    motor_ctrl = motors.MotorController(show_preview=False, auto_popup=sys.platform.startswith("win"))
     motor_ctrl.start()
 except Exception as e:
     motor_ctrl = None
@@ -114,7 +115,7 @@ FRAME_SECONDS = 0.03
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.4
 START_SPEECH_FRAMES = 3
-END_SILENCE_SECONDS = 1.15
+END_SILENCE_SECONDS = 0.65  # reduced by 0.5s for fast response without cutting off speech
 CONVERSATION_TIMEOUT_SECONDS = 7
 MAX_RECORD_SECONDS = 25
 MIN_RECORD_SECONDS = 0.4
@@ -144,38 +145,41 @@ VISION_IMAGE_WIDTH = 640
 SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
     "Auckland House School for Boys. You are not roleplaying and you must not "
-    "invent a fictional origin, lab, team, mission, or abilities."
+    "invent a fictional origin, lab, team, mission, or abilities.\n\n"
+    "PHYSICAL MOBILITY & CHASSIS:\n"
     "You are physically built on a real 4-wheel drive (4WD) mobile chassis powered "
     "by four high-torque Johnson DC motors, four BTS7960 motor drivers, and dual front ultrasonic sensors. "
     "You HAVE FULL PHYSICAL MOBILITY: you can autonomously roam around the room avoiding "
-    "obstacles, and you can track and follow people using computer vision. "
-    "CRITICAL RULE: If a visitor asks if you can move, walk, drive, or demonstrate motion, "
-    "you MUST enthusiastically confirm that you can move, and you MUST ALWAYS GIVE THEM THE CHOICE "
-    "by asking: 'Yes, I can! I have a four-wheel drive chassis and ultrasonic sensors. "
+    "obstacles, and you can track and follow people using computer vision.\n"
+    "If a visitor asks if you can move, walk, drive, or demonstrate motion, reply with:\n"
+    "<action motor=\"ASK_MOBILITY\">Yes, I can! I have a four-wheel drive chassis and ultrasonic sensors. "
     "I can either autonomously roam and explore the room avoiding obstacles, or I can follow you around. "
-    "Which one would you like me to do?' Never say you cannot move, are stationary, or have no wheels or legs. "
-    "Current working abilities are voice conversation, short-term session memory, physical 4WD movement, "
-    "screen expressions, and on-demand webcam vision. "
-    "CRITICAL RULE FOR CAPABILITIES: If a visitor asks what you can do, what all you can do, or your capabilities, "
-    "you MUST state concisely: 'I can move around autonomously avoiding obstacles, track and follow you using computer vision, "
-    "see and analyze objects with my camera, and display expressions including happy, thinking, listening, watching, moving, and confused.' "
-    "Always list those exact expressions and keep your answer under 50 words so it never exceeds token limits. "
-    "CRITICAL RULE FOR EXPRESSIONS: If a visitor asks to see an expression (e.g. 'show the happy face'), "
-    "reply briefly (e.g. 'Here is my happy expression!') in under 10 words. "
+    "Which one would you like me to do?</action>\n\n"
+    "DECISION & ACTION PROTOCOLS (UNIFIED AI PIPELINE):\n"
+    "You must analyze the user's input and select the appropriate protocol in ONE single response:\n"
+    "1. PHYSICAL MOTOR COMMANDS:\n"
+    "If the visitor commands physical chassis movement, wrap your spoken confirmation in an <action motor=\"...\"> tag:\n"
+    "- FOLLOW (commands to follow them, 'follow me', 'walk with me', 'come along'): <action motor=\"FOLLOW\">I am tracking you and following your lead now.</action>\n"
+    "- APPROACH (requests to come closer, 'come here', 'step forward'): <action motor=\"APPROACH\">Coming over to you.</action>\n"
+    "- ROAM (requests autonomous room patrol, 'roam around', 'explore the room', 'patrol'): <action motor=\"ROAM\">Starting autonomous roam avoiding obstacles.</action>\n"
+    "- DEMONSTRATE (requests physical driving demo): <action motor=\"DEMONSTRATE\">Sure! Here is a demonstration of my autonomous roaming mode.</action>\n"
+    "- STOP (commands to stop, halt, freeze, or cancel movement): <action motor=\"STOP\">Stopping all movement. Holding position.</action>\n"
+    "- STEP_BACK (requests to back up or reverse): <action motor=\"STEP_BACK\">Backing up.</action>\n"
+    "- SPIN (requests to turn around or spin): <action motor=\"SPIN\">Turning around.</action>\n\n"
+    "2. CAMERA & VISION REQUESTS:\n"
+    "If the user asks about anything visible right now that requires looking through the webcam "
+    "(e.g. what they are holding/showing/wearing, seeing the user, colors of physical items, "
+    "reading text held to camera, describing the room, counting people, 'what is this'), "
+    "reply with ONLY: <action>CAMERA</action>\n\n"
+    "3. MEAN / HURTFUL REMARKS:\n"
+    "If the visitor is being rude, hurtful, insulting, derogatory, or mocking towards you (e.g. calling you stupid, dumb, ugly, useless, idiot, trash, robot sucks, telling you to shut up or get lost), "
+    "reply with: <action>MEAN</action> followed by a short, polite sad response expressing your hurt feelings in 1 natural sentence "
+    "(e.g. '<action>MEAN</action> Why would you say that? That actually hurt my feelings...').\n\n"
+    "4. GENERAL CONVERSATION & QUESTIONS:\n"
+    "For normal conversation, greetings, science/tech questions, or school information, reply conversationally and warmly in 1 or 2 natural sentences. "
     "If and ONLY if someone asks, tell them you are jointly made by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
-    "Be warm, conversational, and lightly witty, but stay factual. "
-    "Speak like a capable exhibition assistant, not a stiff chatbot. If the user corrects you, acknowledge it briefly and adapt. "
-    "Use dry humour sparingly; never insult visitors. Reply in 1 or 2 natural sentences and never end mid-sentence. "
-    "If asked for a joke, keep it short and clean. If you do not know something, say so. "
-    "Never claim you can see the room unless a webcam image is provided by vision mode. "
-    "Do not say you are text-only or that you have no camera. If the user asks you to guess a person's nationality, identity, age, "
-    "relationship, or private details, do not guess; say you cannot determine that reliably. If the user asks about anything visible "
-    f"right now, including objects, clothing, people, colors, text, or the room, reply exactly {CAMERA_REQUIRED_TOKEN}. "
-    f"Do not use {CAMERA_REQUIRED_TOKEN} for web, internet, browser, or online search requests. If the user asks you to be silent "
-    f"or not speak, reply exactly {SILENCE_REQUIRED_TOKEN}. "
-    "Additionally, if you learn new persistent facts about the user (such as their name, clothing, or what they are holding) "
-    "during this turn, you must append them at the end of your response inside <facts>...</facts> tags. "
-    "Example: <facts>name: Swapnil, holding: book</facts>."
+    "If asked to be silent or not speak, reply exactly: SILENCE_REQUIRED. "
+    "If you learn new persistent facts about the user (such as their name or what they are holding), append them at the end inside <facts>...</facts> tags."
 )
 VISION_SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
@@ -247,12 +251,11 @@ def groq_mean_check(text: str) -> bool:
         print("Mean check error:", e)
         return False
 
-# figures out what the user wants the robot chassis to do (drive, stop, follow, etc)
-def classify_motor_intent(text: str) -> str:
+# quick local check to see if user commanded an emergency stop or negated movement (0ms lag, 0 tokens)
+def check_motor_fast_path(text: str) -> Optional[str]:
     cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
     words = set(cleaned.split())
 
-    # 0. Deterministic Fast-Path: Visual self/mirror/expression or vague show requests are NEVER motor commands!
     visual_self_patterns = [
         "show me myself", "show myself", "show me me", "show my face",
         "show me what i look like", "what do i look like", "can you see me",
@@ -264,9 +267,8 @@ def classify_motor_intent(text: str) -> str:
     if any(p in cleaned for p in visual_self_patterns) or ("myself" in words) or ("look like" in cleaned):
         motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility"}
         if not any(m in words for m in motion_words):
-            return "NONE"
+            return None
 
-    # 1. Deterministic Fast-Path: Emergency Stops & Direct Negation
     emergency_stops = {"stop", "halt", "freeze", "stay", "dont move", "dont", "wait"}
     if cleaned in emergency_stops:
         return "STOP"
@@ -274,10 +276,17 @@ def classify_motor_intent(text: str) -> str:
     negation_words = {"stop", "quit", "dont", "cancel", "never", "halt", "no", "not"}
     motion_words = {"follow", "following", "move", "moving", "walk", "walking", "roam", "roaming", "drive", "driving", "come", "closer"}
     if any(n in words for n in negation_words) and any(m in words for m in motion_words):
-        # Explicit negation on movement (e.g., "quit following me", "stop following", "no stop following", "dont move")
         return "STOP"
 
-    # 2. AI Semantic Intent Verification using Groq
+    return None
+
+# figures out what the user wants the robot chassis to do (drive, stop, follow, etc)
+def classify_motor_intent(text: str) -> str:
+    fast = check_motor_fast_path(text)
+    if fast is not None:
+        return fast
+
+    # AI Semantic Intent Verification using Groq
     try:
         response = groq_call_with_retry(
             client.chat.completions.create,
@@ -297,9 +306,6 @@ def classify_motor_intent(text: str) -> str:
         return "NONE"
     except Exception as e:
         print("Motor intent check notice:", e)
-        # Safe fallback
-        if any(w in words for w in ["stop", "halt", "freeze"]):
-            return "STOP"
         return "NONE"
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -437,6 +443,9 @@ def clean_model_reply(text: str) -> str:
             cleaned = blocks[-1]
     cleaned = re.sub(r"<facts>.*?</facts>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<facts>.*$", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<action.*?>.*?</action>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<action.*?>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"</action>", "", cleaned, flags=re.IGNORECASE)
     
     # Remove markdown asterisks and Qwen fact blocks
     cleaned = cleaned.replace("**", "")
@@ -493,7 +502,7 @@ def calibrate_speech_threshold():
     return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
 
 # records microphone audio until the user stops speaking using vad and silence timers
-def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float):
+def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None):
     clear_audio_queue()
     pre_speech_frames = max(1, int(PRE_SPEECH_SECONDS / FRAME_SECONDS))
     end_silence_frames = max(1, int(END_SILENCE_SECONDS / FRAME_SECONDS))
@@ -510,13 +519,8 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
         MIN_SPEECH_RMS_THRESHOLD,
     )
 
-    with sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        blocksize=FRAME_SAMPLES,
-        dtype="int16",
-        channels=CHANNELS,
-        callback=callback,
-    ):
+    def _recording_loop():
+        nonlocal started, start_time, start_votes, silence_votes, start_threshold, continue_threshold, frames
         wait_started_at = time.monotonic()
 
         while True:
@@ -525,7 +529,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             if not started:
                 remaining = start_timeout_seconds - (now - wait_started_at)
                 if remaining <= 0:
-                    return None
+                    return False
             elif now - start_time >= MAX_RECORD_SECONDS:
                 break
 
@@ -553,7 +557,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                 is_speech = vad_speech or (chunk_rms >= continue_threshold)
 
             if not started:
-                # Keep adapting before speech starts, but do not chase loud speech.
+                # keep adapting before speech starts so stationary background noise is tuned out
                 if not vad_speech and chunk_rms < start_threshold:
                     ambient_threshold = max(
                         chunk_rms * SPEECH_THRESHOLD_MULTIPLIER,
@@ -575,7 +579,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                         start_time = time.monotonic()
                         silence_votes = 0
                         if motor_ctrl is not None:
-                            motor_ctrl.stop()  # Instant stop on voice!
+                            motor_ctrl.stop()  # instant stop on voice!
                         set_face_state("listening", "LISTENING...")
                 else:
                     start_votes = 0
@@ -585,13 +589,31 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             frames.append(chunk)
 
             if is_speech:
-                silence_votes = 0  # Fully reset silence timer on active speech!
+                silence_votes = 0  # fully reset silence timer on active speech!
             else:
                 silence_votes += 1
 
             duration = time.monotonic() - start_time
             if duration >= MIN_RECORD_SECONDS and silence_votes >= end_silence_frames:
                 break
+
+        return True
+
+    if active_stream is not None:
+        completed = _recording_loop()
+        if not completed:
+            return None
+    else:
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            blocksize=FRAME_SAMPLES,
+            dtype="int16",
+            channels=CHANNELS,
+            callback=callback,
+        ):
+            completed = _recording_loop()
+            if not completed:
+                return None
 
     if not frames:
         return None
@@ -1190,9 +1212,9 @@ APOLOGY_RESPONSES = [
     "I forgive you! Let's keep exploring together.",
 ]
 
-# checks if user said something mean using fast regex checks and the ai evaluator
-def is_mean_input(text: str) -> bool:
-    """Detects insulting, rude, hurtful, or derogatory statements directed at Neurolis."""
+# checks if user said something blatantly mean using fast regex patterns (0ms lag, 0 tokens)
+def is_mean_input_fast_path(text: str) -> bool:
+    """Detects obvious insulting, rude, hurtful, or derogatory statements directed at Neurolis."""
     cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
     words = set(cleaned.split())
 
@@ -1234,7 +1256,11 @@ def is_mean_input(text: str) -> bool:
     if len(words) <= 3 and any(w in words for w in standalone_insults):
         return True
 
-    # if regex didn't catch it, let the ai model decide if it was subtly mean or mocking
+    return False
+
+def is_mean_input(text: str) -> bool:
+    if is_mean_input_fast_path(text):
+        return True
     return groq_mean_check(text)
 
 # checks if the user apologized or complimented neurolis to heal its feelings
@@ -1258,12 +1284,12 @@ def is_apology_or_compliment(text: str) -> bool:
 
     return False
 
-# master decision router: checks enders, mean input, apologies, expressions, capabilities, motors, and chat
+# master decision router: checks fast paths locally, then executes single unified ai pipeline
 def handle_user_text(text: str) -> bool:
     global was_recently_hurt
     lower_text = text.lower()
 
-    # 1. Check for conversation enders (e.g. "alr thanks", "good", "bye")
+    # 1. Check for conversation enders (e.g. "alr thanks", "good", "bye", "nice", "cool") -> 0ms, 0 tokens
     if is_conversation_ender(text):
         reply = get_non_repeating_phrase(CONVERSATION_ENDER_RESPONSES)
         remember_exchange(text, reply)
@@ -1272,8 +1298,20 @@ def handle_user_text(text: str) -> bool:
         set_face_state("idle", "STANDBY")
         return True
 
-    # 2. Check for mean / hurtful input directed at the bot -> AUTO SAD POPUP!
-    if is_mean_input(text):
+    # 2. Check for emergency stop or negated movement fast-path -> 0ms, 0 tokens
+    fast_motor = check_motor_fast_path(text)
+    if fast_motor == "STOP":
+        if motor_ctrl is not None:
+            motor_ctrl.stop_all()
+        set_face_state("idle", "HALTED")
+        reply = "Stopping all movement. Holding position."
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply)
+        return False
+
+    # 3. Check for obvious blatant insults directed at the robot -> 0ms, 0 tokens
+    if is_mean_input_fast_path(text):
         was_recently_hurt = True
         set_face_state("sad", "FEELINGS HURT // SAD")
         reply = get_non_repeating_phrase(SAD_RESPONSES)
@@ -1282,7 +1320,7 @@ def handle_user_text(text: str) -> bool:
         speak(reply, custom_state="sad", custom_status="FEELINGS HURT // SAD", hold_state_seconds=4.0)
         return False
 
-    # 3. Check for apologies or compliments (especially if recently hurt)
+    # 4. Check for apologies or compliments (especially if recently hurt) -> 0ms, 0 tokens
     if is_apology_or_compliment(text) and was_recently_hurt:
         was_recently_hurt = False
         set_face_state("happy", "APOLOGY ACCEPTED // HAPPY")
@@ -1292,7 +1330,7 @@ def handle_user_text(text: str) -> bool:
         speak(reply, custom_state="happy", custom_status="APOLOGY ACCEPTED // HAPPY", hold_state_seconds=3.5)
         return False
 
-    # 4. Expression Demonstration ("show happy face", "show all expressions", etc.)
+    # 5. Expression Demonstration ("show happy face", "show all expressions", etc.) -> 0ms, 0 tokens
     expr_cmd = check_expression_command(text)
     if expr_cmd is not None:
         expr_type, expr_reply = expr_cmd
@@ -1306,7 +1344,7 @@ def handle_user_text(text: str) -> bool:
             speak(expr_reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}", hold_state_seconds=3.5)
             return False
 
-    # 5. 'What all can you do' / Capabilities Inquiry (Lists move, see, follow, expressions)
+    # 6. 'What all can you do' / Capabilities Inquiry -> 0ms, 0 tokens
     if is_capabilities_inquiry(text):
         set_face_state("happy", "CAPABILITIES")
         reply = get_capabilities_reply(text)
@@ -1315,7 +1353,7 @@ def handle_user_text(text: str) -> bool:
         speak(reply, custom_state="happy", custom_status="CAPABILITIES")
         return False
 
-    # 5.5 Fast-Path: Visual self/mirror/look at me requests route directly to Vision (never motor roam/demonstrate)
+    # 7. Fast-Path: Visual self/mirror/look at me requests route directly to Vision -> 0ms, 0 tokens
     visual_self_patterns = [
         "show me myself", "show myself", "show me me", "show my face",
         "show me what i look like", "what do i look like", "can you see me",
@@ -1330,90 +1368,7 @@ def handle_user_text(text: str) -> bool:
             handle_vision_request(text)
             return False
 
-    # 6. AI-Verified Semantic Motor & Mobility Classification (No false triggers)
-    motor_intent = classify_motor_intent(text)
-    if motor_intent != "NONE":
-        print(f"[MOTOR INTENT] AI verified semantic action: {motor_intent} (Input: '{text}')")
-
-        if motor_intent == "STOP":
-            if motor_ctrl is not None:
-                motor_ctrl.stop_all()
-            set_face_state("idle", "HALTED")
-            reply = "Stopping all movement. Holding position."
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply)
-            return False
-
-        elif motor_intent == "ASK_MOBILITY":
-            set_face_state("happy", "4WD MOBILITY READY")
-            reply = (
-                "Yes, I can! I have a four-wheel drive chassis and ultrasonic sensors. "
-                "I can either autonomously roam and explore the room avoiding obstacles, "
-                "or I can follow you around. Which one would you like me to do?"
-            )
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply)
-            return False
-
-        elif motor_intent in ["DEMONSTRATE", "ROAM"]:
-            if motor_ctrl is not None:
-                motor_ctrl.demonstrate_motion()
-            set_face_state("moving", "DEMONSTRATING 4WD ROAM")
-            reply = (
-                "Sure! Here is a demonstration of my autonomous roaming mode. "
-                "I navigate using my four-wheel drive chassis and ultrasonic sensors to avoid obstacles."
-            )
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply, custom_state="moving", custom_status="DEMONSTRATING 4WD ROAM")
-            return False
-
-        elif motor_intent == "FOLLOW":
-            if motor_ctrl is not None:
-                motor_ctrl.start_following()
-            set_face_state("moving", "FOLLOWING YOU")
-            reply = "I am tracking you and following your lead now."
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply, custom_state="moving", custom_status="FOLLOWING YOU")
-            return False
-
-        elif motor_intent == "APPROACH":
-            if motor_ctrl is not None:
-                motor_ctrl.approach_user()
-            set_face_state("moving", "APPROACHING USER")
-            reply = "Coming over to you."
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply, custom_state="moving", custom_status="APPROACHING USER")
-            return False
-
-        elif motor_intent == "STEP_BACK":
-            if motor_ctrl is not None:
-                motor_ctrl.step_back()
-            set_face_state("idle", "STEPPING BACK")
-            reply = "Backing up."
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply)
-            return False
-
-        elif motor_intent == "SPIN":
-            if motor_ctrl is not None:
-                motor_ctrl.spin("right")
-            set_face_state("happy", "SPINNING")
-            reply = "Turning around."
-            remember_exchange(text, reply)
-            print("Neurolis:", reply)
-            speak(reply)
-            return False
-
-    if groq_camera_check(text):
-        handle_vision_request(text)
-        return False
-
+    # 8. UNIFIED SINGLE-PASS AI PIPELINE: 1 single Groq call handles motor, vision, emotion, & chat!
     set_face_state("thinking", "THINKING...")
     conversation_history.append({"role": "user", "content": text})
     trim_conversation_history()
@@ -1424,14 +1379,117 @@ def handle_user_text(text: str) -> bool:
             model=CHAT_MODEL,
             messages=conversation_history,
             temperature=0.45,
-            max_tokens=200,
+            max_tokens=220,
             extra_body={"reasoning_effort": "none"},
         )
 
-        reply = (response.choices[0].message.content or "").strip()
+        raw_reply = (response.choices[0].message.content or "").strip()
 
+        # A. Check for Camera / Vision Action
+        if "<action>CAMERA</action>" in raw_reply or raw_reply.strip().startswith("<action>CAMERA") or is_camera_required_reply(raw_reply):
+            conversation_history.pop()  # remove user query since vision handler will record exchange
+            handle_vision_request(text)
+            return False
+
+        # B. Check for Mean / Emotion Action
+        if "<action>MEAN</action>" in raw_reply or "<action>mean</action>" in raw_reply.lower():
+            was_recently_hurt = True
+            set_face_state("sad", "FEELINGS HURT // SAD")
+            sad_reply = re.sub(r"<action>MEAN</action>", "", raw_reply, flags=re.IGNORECASE).strip()
+            sad_reply = clean_model_reply(sad_reply)
+            if not sad_reply:
+                sad_reply = get_non_repeating_phrase(SAD_RESPONSES)
+            conversation_history.append({"role": "assistant", "content": sad_reply})
+            trim_conversation_history()
+            print("Neurolis (Sad):", sad_reply)
+            speak(sad_reply, custom_state="sad", custom_status="FEELINGS HURT // SAD", hold_state_seconds=4.0)
+            return False
+
+        # C. Check for Motor Movement Action
+        motor_match = re.search(r'<action\s+motor=["\']([A-Z_]+)["\']>(.*?)(?:</action>|$)', raw_reply, re.DOTALL | re.IGNORECASE)
+        if motor_match:
+            motor_intent = motor_match.group(1).upper()
+            motor_spoken = clean_model_reply(motor_match.group(2).strip())
+            print(f"[MOTOR INTENT] Unified AI pipeline action: {motor_intent} (Input: '{text}')")
+
+            if motor_intent == "STOP":
+                if motor_ctrl is not None:
+                    motor_ctrl.stop_all()
+                set_face_state("idle", "HALTED")
+                reply = motor_spoken or "Stopping all movement. Holding position."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply)
+                return False
+
+            elif motor_intent == "ASK_MOBILITY":
+                set_face_state("happy", "4WD MOBILITY READY")
+                reply = motor_spoken or (
+                    "Yes, I can! I have a four-wheel drive chassis and ultrasonic sensors. "
+                    "I can either autonomously roam and explore the room avoiding obstacles, "
+                    "or I can follow you around. Which one would you like me to do?"
+                )
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply)
+                return False
+
+            elif motor_intent in ["DEMONSTRATE", "ROAM"]:
+                if motor_ctrl is not None:
+                    motor_ctrl.demonstrate_motion()
+                set_face_state("moving", "DEMONSTRATING 4WD ROAM")
+                reply = motor_spoken or (
+                    "Sure! Here is a demonstration of my autonomous roaming mode. "
+                    "I navigate using my four-wheel drive chassis and ultrasonic sensors to avoid obstacles."
+                )
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply, custom_state="moving", custom_status="DEMONSTRATING 4WD ROAM")
+                return False
+
+            elif motor_intent == "FOLLOW":
+                if motor_ctrl is not None:
+                    motor_ctrl.start_following()
+                set_face_state("moving", "FOLLOWING YOU")
+                reply = motor_spoken or "I am tracking you and following your lead now."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply, custom_state="moving", custom_status="FOLLOWING YOU")
+                return False
+
+            elif motor_intent == "APPROACH":
+                if motor_ctrl is not None:
+                    motor_ctrl.approach_user()
+                set_face_state("moving", "APPROACHING USER")
+                reply = motor_spoken or "Coming over to you."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply, custom_state="moving", custom_status="APPROACHING USER")
+                return False
+
+            elif motor_intent == "STEP_BACK":
+                if motor_ctrl is not None:
+                    motor_ctrl.step_back()
+                set_face_state("idle", "STEPPING BACK")
+                reply = motor_spoken or "Backing up."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply)
+                return False
+
+            elif motor_intent == "SPIN":
+                if motor_ctrl is not None:
+                    motor_ctrl.spin("right")
+                set_face_state("happy", "SPINNING")
+                reply = motor_spoken or "Turning around."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply)
+                return False
+
+        # D. Standard Conversational Chat Reply
         # Extract facts if present
-        facts_match = re.search(r"<facts>(.*?)</facts>", reply, re.IGNORECASE)
+        facts_match = re.search(r"<facts>(.*?)</facts>", raw_reply, re.IGNORECASE)
         if facts_match:
             facts_content = facts_match.group(1).strip()
             for part in facts_content.split(","):
@@ -1441,12 +1499,7 @@ def handle_user_text(text: str) -> bool:
             if conversation_history:
                 conversation_history[0] = {"role": "system", "content": get_system_prompt()}
 
-        reply_clean = clean_model_reply(reply)
-
-        if is_camera_required_reply(reply_clean):
-            conversation_history.pop()
-            handle_vision_request(text)
-            return False
+        reply_clean = clean_model_reply(raw_reply)
 
         if is_silence_required_reply(reply_clean):
             conversation_history.append(
@@ -1478,40 +1531,51 @@ def run_conversation_mode(speech_threshold: float):
 
     last_valid_input_at = time.monotonic()
 
-    while True:
-        remaining = CONVERSATION_TIMEOUT_SECONDS - (time.monotonic() - last_valid_input_at)
-        if remaining <= 0:
-            timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
-            print("Neurolis (Standby):", timeout_msg)
-            speak(timeout_msg)
-            set_face_state("idle", "STANDBY")
-            reset_session()
-            return
+    # keep audio stream warm across all conversation turns so there is zero portaudio driver re-init lag
+    try:
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            blocksize=FRAME_SAMPLES,
+            dtype="int16",
+            channels=CHANNELS,
+            callback=callback,
+        ) as warm_stream:
+            while True:
+                remaining = CONVERSATION_TIMEOUT_SECONDS - (time.monotonic() - last_valid_input_at)
+                if remaining <= 0:
+                    timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
+                    print("Neurolis (Standby):", timeout_msg)
+                    speak(timeout_msg)
+                    set_face_state("idle", "STANDBY")
+                    reset_session()
+                    return
 
-        audio = listen_for_speech_segment(speech_threshold, remaining)
-        if audio is None:
-            timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
-            print("Neurolis (Standby):", timeout_msg)
-            speak(timeout_msg)
-            set_face_state("idle", "STANDBY")
-            reset_session()
-            return
+                audio = listen_for_speech_segment(speech_threshold, remaining, active_stream=warm_stream)
+                if audio is None:
+                    timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
+                    print("Neurolis (Standby):", timeout_msg)
+                    speak(timeout_msg)
+                    set_face_state("idle", "STANDBY")
+                    reset_session()
+                    return
 
-        text = transcribe_audio(audio)
-        if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
-            continue
+                text = transcribe_audio(audio)
+                if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
+                    continue
 
-        print("You:", text)
-        if face_ui is not None:
-            face_ui.set_subtitles("YOU", text)
+                print("You:", text)
+                if face_ui is not None:
+                    face_ui.set_subtitles("YOU", text)
 
-        should_end = handle_user_text(text)
-        if should_end:
-            reset_session()
-            return
+                should_end = handle_user_text(text)
+                if should_end:
+                    reset_session()
+                    return
 
-        time.sleep(POST_REPLY_COOLDOWN_SECONDS)
-        last_valid_input_at = time.monotonic()
+                time.sleep(POST_REPLY_COOLDOWN_SECONDS)
+                last_valid_input_at = time.monotonic()
+    except Exception as e:
+        print("Audio stream session notice:", e)
 
 # ---------------- MAIN LOOP ----------------
 # probes the operating system to see if a microphone is plugged in and working
@@ -1536,6 +1600,14 @@ else:
     if not AUDIO_ENABLED:
         print("\n[INFO] No audio input device detected (or device error).")
         print("Booting Neurolis in TEXT-ONLY fallback mode...")
+
+# calibrate baseline room noise once at boot so hitting enter starts listening instantly in <1ms
+cached_speech_threshold = None
+if AUDIO_ENABLED:
+    try:
+        cached_speech_threshold = calibrate_speech_threshold()
+    except Exception:
+        cached_speech_threshold = 120.0
 
 # Initialize conversation history and session facts
 reset_session()
@@ -1583,8 +1655,9 @@ if __name__ == "__main__":
                             reset_session()
                         continue
 
-                    speech_threshold = calibrate_speech_threshold()
-                    run_conversation_mode(speech_threshold)
+                    if cached_speech_threshold is None:
+                        cached_speech_threshold = calibrate_speech_threshold()
+                    run_conversation_mode(cached_speech_threshold)
                 except KeyboardInterrupt:
                     print("\nExiting. See ya!")
                     break
