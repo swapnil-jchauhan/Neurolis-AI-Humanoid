@@ -1,0 +1,15 @@
+# API
+.env
+
+# Python Cache Folders
+__pycache__/
+*.pyc
+
+# Local Auto-Downloaded Models & Empty Files
+face_detection_yunet_2023mar.onnx
+models.json
+
+# Temporary Output Captures
+_neurolis_vision.jpg
+*.wav
+*.mp3
