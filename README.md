@@ -2,6 +2,8 @@
 
 ( ONLY made for FOUR WHEEL POWERED chassis, can be changed to support two motors. )
 
+(NOTE: YOU DO NOT NEED MOTORS, DRIVERS, SENSORS FOR TESTING THE PROGRAM, GUARDRAILS HAVE BEEN ADDED TO MAKE SURE THE SIMULATION STILL RUNS OR SKIPS IT ENTIRELY IF CERTAIN REQUIRED HARDWARE IS NOT CONNECTED, ONCE CONNECTED, THE PROGRAM KICKS IN THE TASK IT'S SUPPOSED TO DO ON THAT HARDWARE )
+
 Project Neurolis is an end-to-end software and hardware pipeline designed to build an interactive, humanoid robot for minor projects. It integrates voice conversation using Groq's API, you may use other APIs provided it is multimodal, an expressive animated face UI, local computer vision for person tracking and interaction, and an Arduino-controlled 4WD skid-steer mobility platform[cite: 9, 12, 14, 15].
 
 The pipeline uses distributed roles[cite: 10, 15]:
@@ -55,9 +57,70 @@ CRUCIAL!!!
 
 Clone the repository and install the required Python packages:
 
-Thanks!
-
 ```bash
 git clone [https://github.com/YOUR-USERNAME/Project-Neurolis.git](https://github.com/YOUR-USERNAME/Project-Neurolis.git)
 cd Project-Neurolis
 pip install groq edge-tts opencv-python sounddevice soundfile numpy pyserial webrtcvad python-dotenv
+```
+
+---
+
+## 2. Customize System Prompt for Project Personalization
+
+Open `listen.py` in an editor and navigate to the `SYSTEM_PROMPT` configuration. Customize the prompt with your robot's name, role, school or creator information, and any domain-specific rules you want the robot to follow.
+
+```python
+SYSTEM_PROMPT = (
+    "You are [Robot Name], a humanoid robot prototype built for [Your Project]. "
+    "Keep responses conversational, concise, and factual. or whatever u want it to do.... :) "
+    "..."
+)
+```
+
+You can also customize the text-to-speech voice used by the robot by changing the `EDGE_TTS_VOICE` value in `listen.py`. For example:
+
+access voices here: [Edge TTS Voices](https://tts.travisvn.com/)
+
+```python
+EDGE_TTS_VOICE = "en-US-GuyNeural"
+```
+
+or:
+
+```python
+EDGE_TTS_VOICE = "en-US-AriaNeural"
+```
+
+---
+
+## 3. Create `.env` File
+
+Create a file named `.env` in the folder where u saved all programs. This file is used to securely store your API key without putting it directly into the Python source code.
+
+```env
+GROQ_API_KEY=your key here
+```
+
+## 4. Upload Arduino Firmware
+
+Open `arduino.ino` in the Arduino IDE.
+
+Under **Tools → Board**, select **Arduino Mega or Mega 2560**. Then, under **Tools → Port**, select the active COM/Serial port for your Arduino Mega.
+
+Once the correct board and port are selected, connect the Arduino to your computer and click **Upload**.
+
+Make sure the pin assignments in `arduino.ino` match your actual wiring before connecting or powering the motors. We don't want fireworks :)
+
+---
+
+## Running the Robot
+
+To launch the complete Neurolis pipeline, including voice conversation, the animated face UI, vision tracking, and motor control, run: 
+
+this automatically calls motors.py / screen.py, just keep em all in ONE place... 
+
+```bash
+python listen.py
+```
+
+THANKS FOR VIEWING !!! ;)
