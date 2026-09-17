@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 
 # Local Auto-Downloaded Models & Empty Files
+haarcascade_frontalface_default.xml
 face_detection_yunet_2023mar.onnx
 models.json
 
