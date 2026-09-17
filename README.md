@@ -1,4 +1,4 @@
-# Welcome to my first Project, for anyone who wants to implement my pipeline for their humanoid AI robot project.
+# AI Humanoid 4 Wheel Chassis - Software architecture and entire ready to use code, for anyone who wants to implement my pipeline for their humanoid AI robot project.
 
 ( ONLY made for FOUR WHEEL POWERED chassis, can be changed to support two motors. )
 
