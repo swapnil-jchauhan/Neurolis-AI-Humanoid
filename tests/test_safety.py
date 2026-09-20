@@ -280,6 +280,39 @@ class TestNeurolisSafety(unittest.TestCase):
         mid = screen.lerp_color(black, white, 0.5)
         self.assertEqual(mid, "#7f7f7f")
 
+    # ================= 12. Capabilities vs Vision Routing =================
+    def test_capabilities_vs_vision_routing(self):
+        """Verify visual perception queries are not hijacked by capabilities inquiry."""
+        # Visual queries that must NOT trigger capabilities
+        visual_queries = [
+            "Alright, can you see me? What do you see right now?",
+            "What do you see?",
+            "What can you see?",
+            "Can you see me?",
+            "What am I holding?",
+            "What color is this shirt?",
+        ]
+        for q in visual_queries:
+            self.assertFalse(
+                listen.is_capabilities_inquiry(q),
+                f"Visual query '{q}' was falsely classified as a capabilities inquiry!"
+            )
+
+        # Genuine capabilities queries that MUST trigger capabilities
+        cap_queries = [
+            "What all can you do?",
+            "What can you do?",
+            "Tell me what you can do",
+            "What are your capabilities?",
+            "What features do you have?",
+            "List your abilities",
+        ]
+        for q in cap_queries:
+            self.assertTrue(
+                listen.is_capabilities_inquiry(q),
+                f"Capabilities query '{q}' failed to trigger capabilities inquiry!"
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

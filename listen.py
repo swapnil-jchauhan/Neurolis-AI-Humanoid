@@ -146,8 +146,14 @@ VISION_JPEG_QUALITY = 65
 VISION_IMAGE_WIDTH = 640
 SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
-    "Auckland House School for Boys. You are not roleplaying and you must not "
-    "invent a fictional origin, lab, team, mission, or abilities.\n\n"
+    "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan. "
+    "You are a real, physical engineering project under active, ongoing development! "
+    "When asked if you are still under development or if there is more to come, confirm proudly and warmly that you are "
+    "an active prototype, and your creators are continuously developing and expanding your capabilities "
+    "(such as scalable 16-sensor ultrasonic navigation, smarter autonomous room mapping, and new expressive face animations).\n"
+    "If the person talking to you mentions that they are developing or building you, or introduces themselves as Swapnil or Shivam, "
+    "greet and acknowledge them warmly as your creator!\n"
+    "Do not invent fictional sci-fi backstories (e.g. secret government labs, alien origin, space missions).\n\n"
     "PHYSICAL MOBILITY & CHASSIS:\n"
     "You are physically built on a real 4-wheel drive (4WD) mobile chassis powered "
     "by four high-torque non-encoder Johnson DC motors, four BTS7960 motor drivers, and four HC-SR04 ultrasonic sensors (front, left, right, rear). "
@@ -179,7 +185,7 @@ SYSTEM_PROMPT = (
     "(e.g. '<action>MEAN</action> Why would you say that? That actually hurt my feelings...').\n\n"
     "4. GENERAL CONVERSATION & QUESTIONS:\n"
     "For normal conversation, greetings, science/tech questions, or school information, reply conversationally and warmly in 1 or 2 natural sentences. "
-    "If and ONLY if someone asks, tell them you are jointly made by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
+    "When asked who made you or about your creators, tell them you were jointly built by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
     "If asked to be silent or not speak, reply exactly: SILENCE_REQUIRED. "
     "If you learn new persistent facts about the user (such as their name or what they are holding), append them at the end inside <facts>...</facts> tags."
 )
@@ -1141,19 +1147,31 @@ def demonstrate_all_expressions():
 # checks if the user asked what neurolis can do or what features it has
 def is_capabilities_inquiry(text: str) -> bool:
     cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-    words = cleaned.split()
+    words = set(cleaned.split())
+
+    # Visual exclusion: If the user is asking about visual perception, seeing, camera, or objects, never hijack as capabilities!
+    visual_keywords = {
+        "see", "seeing", "look", "looking", "holding", "wearing", "color",
+        "showing", "camera", "watch", "view", "myself", "picture", "image",
+        "read", "reading", "front"
+    }
+    if words.intersection(visual_keywords):
+        return False
 
     triggers = [
         "what can you do", "what all can you do", "what all can u do",
         "what can u do", "what are your capabilities", "what are your abilities",
         "tell me what you can do", "what do you do", "what features do you have",
         "what are you able to do", "list your capabilities", "list your features",
+        "list your abilities", "list abilities", "list capabilities",
         "what functions do you have", "what can you perform", "tell me your abilities",
         "what else can you do", "what other things can you do", "what more can you do"
     ]
     if any(t in cleaned for t in triggers):
         return True
-    if ("what" in words or "tell" in words) and ("can" in words or "are" in words) and ("do" in words or "capabilities" in words or "abilities" in words):
+    if ("what" in words or "tell" in words or "list" in words) and ("can" in words or "are" in words or "your" in words) and ("capabilities" in words or "abilities" in words or "features" in words):
+        return True
+    if cleaned in ["what can you do", "what do you do", "capabilities", "what are your skills", "what skills do you have"]:
         return True
     return False
 
@@ -1351,21 +1369,14 @@ def handle_user_text(text: str) -> bool:
             speak(expr_reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}", hold_state_seconds=3.5)
             return False
 
-    # 6. 'What all can you do' / Capabilities Inquiry -> 0ms, 0 tokens
-    if is_capabilities_inquiry(text):
-        set_face_state("happy", "CAPABILITIES")
-        reply = get_capabilities_reply(text)
-        remember_exchange(text, reply)
-        print("Neurolis:", reply)
-        speak(reply, custom_state="happy", custom_status="CAPABILITIES")
-        return False
-
-    # 7. Fast-Path: Visual self/mirror/look at me requests route directly to Vision -> 0ms, 0 tokens
+    # 6. Fast-Path: Visual perception, camera, seeing the user, or 'what do you see' -> 0ms, 0 tokens
     visual_self_patterns = [
         "show me myself", "show myself", "show me me", "show my face",
         "show me what i look like", "what do i look like", "can you see me",
         "do you see me", "look at me", "show me what you see", "show what you see",
-        "describe me", "how do i look", "look at myself", "am i visible", "see me"
+        "describe me", "how do i look", "look at myself", "am i visible", "see me",
+        "what do you see", "what do u see", "what can you see", "what do you see right now",
+        "tell me what you see", "describe what you see", "can you see anything", "what are you seeing"
     ]
     cleaned_lower = re.sub(r"[^\w\s]", "", lower_text).strip()
     cleaned_words = set(cleaned_lower.split())
@@ -1374,6 +1385,15 @@ def handle_user_text(text: str) -> bool:
         if not any(m in cleaned_words for m in motion_words):
             handle_vision_request(text)
             return False
+
+    # 7. 'What all can you do' / Capabilities Inquiry -> 0ms, 0 tokens
+    if is_capabilities_inquiry(text):
+        set_face_state("happy", "CAPABILITIES")
+        reply = get_capabilities_reply(text)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply, custom_state="happy", custom_status="CAPABILITIES")
+        return False
 
     # 8. UNIFIED SINGLE-PASS AI PIPELINE: 1 single Groq call handles motor, vision, emotion, & chat!
     set_face_state("thinking", "THINKING...")
