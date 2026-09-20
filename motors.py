@@ -41,26 +41,36 @@ MODEL_PATH = BASE_DIR / "face_detection_yunet_2023mar.onnx"
 
 # check if yunet face model exists locally, if not download the 300kb neural file from opencv zoo
 def ensure_yunet_model():
-    """Downloads the official OpenCV YuNet 300KB model if missing."""
+    """downloads official opencv yunet 300kb neural face model if missing using secure ssl"""
     if not MODEL_PATH.exists():
         print("[Motors] Downloading official OpenCV YuNet neural face model...")
         url = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
-        ctx = ssl._create_unverified_context()
         try:
-            with urllib.request.urlopen(url, context=ctx) as response, open(MODEL_PATH, "wb") as out_file:
+            # try standard verified ssl connection first
+            with urllib.request.urlopen(url, timeout=15) as response, open(MODEL_PATH, "wb") as out_file:
                 out_file.write(response.read())
             print("[Motors] YuNet model downloaded successfully.")
-        except Exception as e:
-            print(f"[Motors] Model download warning: {e}")
+        except Exception as e_verified:
+            # fallback if local python install is missing certifi / ca roots
+            try:
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(url, context=ctx, timeout=15) as response, open(MODEL_PATH, "wb") as out_file:
+                    out_file.write(response.read())
+                print("[Motors] YuNet model downloaded via fallback context.")
+            except Exception as e:
+                print(f"[Motors] Model download warning: {e}")
 
 
-# data container for ultrasonic distance measurements coming back from the arduino
+
+# data container for ultrasonic distance measurements coming back from the arduino (supports up to 16 sensors)
 @dataclass
 class TelemetryData:
     front_us_cm: float = 999.0
     left_us_cm: float = 999.0
     right_us_cm: float = 999.0
     rear_us_cm: float = 999.0
+    active_sensor_count: int = 0
+    sensors_all: Optional[list] = None
     battery_mv: int = 12000
 
 
@@ -182,10 +192,11 @@ class MotorController:
         else:
             self._enter_sim("No physical Arduino Mega detected.")
 
-    # fallback into simulation mode if no arduino is plugged in so code doesn't crash on pc
+    # fallback into simulation mode if no arduino is plugged in so code runs smoothly on pc
     def _enter_sim(self, reason: str):
         self.is_simulated = True
-        print(f"[Motors] [SIMULATION MODE] {reason} (Virtual physics enabled)")
+        print(f"[Motors] [SIMULATION MODE] {reason}")
+        print("[Motors] Hardware-Free Testing Active: Virtual 16-Sensor 4WD Physics Enabled.")
 
     # scans all com ports looking for an arduino mega, ch340, or cp2102 chip
     def _find_arduino(self) -> Optional[str]:
@@ -230,12 +241,19 @@ class MotorController:
             self.popup_active = True
         print("[Motors] Mode: DEMONSTRATING AUTONOMOUS 4WD MOVEMENT.")
 
-    # backs up gently for 1.5 seconds and stops
-    def step_back(self):
+    # backs up gently for 1.5 seconds and stops (with rear obstacle collision check)
+    def step_back(self) -> bool:
+        with self.lock:
+            r_dist = self.telemetry.rear_us_cm
+        if r_dist < 28.0:
+            print(f"[Motors] Step back aborted: rear obstacle detected at {r_dist:.1f}cm.")
+            self.stop_all()
+            return False
         with self.lock:
             self.nav_mode = NavMode.STEP_BACK
             self._mode_start_time = time.time()
         print("[Motors] Mode: STEPPING BACK.")
+        return True
 
     # rotates chassis in place to turn around
     def spin(self, direction: str = "right"):
@@ -244,6 +262,27 @@ class MotorController:
             self._mode_start_time = time.time()
             self._spin_dir = 1 if direction == "right" else -1
         print(f"[Motors] Mode: SPINNING {direction.upper()}.")
+
+    # pre-flight safety check to verify if the intended direction has clearance
+    def can_move(self, direction: str = "forward") -> Tuple[bool, str]:
+        """checks if movement in the requested direction is safe based on ultrasonic telemetry"""
+        with self.lock:
+            f_dist = self.telemetry.front_us_cm
+            r_dist = self.telemetry.rear_us_cm
+
+        if direction == "forward":
+            if f_dist < 28.0:
+                return False, f"front obstacle detected ({f_dist:.1f}cm < 28cm)"
+            return True, "forward path clear"
+        elif direction == "backward":
+            if r_dist < 28.0:
+                return False, f"rear obstacle detected ({r_dist:.1f}cm < 28cm)"
+            return True, "rear path clear"
+        elif direction in ["spin", "turn"]:
+            if f_dist < 20.0 or r_dist < 20.0:
+                return False, f"space too tight for rotation (front: {f_dist:.1f}cm, rear: {r_dist:.1f}cm)"
+            return True, "rotation clear"
+        return True, "ready"
 
     # opens opencv debug window if desktop testing preview is requested
     def show_popup(self):
@@ -274,6 +313,10 @@ class MotorController:
         if self.telemetry.front_us_cm < 28.0 and speed > 0:
             speed = 0
 
+        # Safety override if rear ultrasonic obstacle detected (< 28cm)
+        if self.telemetry.rear_us_cm < 28.0 and speed < 0:
+            speed = 0
+
         with self.lock:
             self.last_cmd_speed = speed
             self.last_cmd_steer = steer
@@ -281,8 +324,8 @@ class MotorController:
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
                 self.ser.write(f"DRIVE,{speed},{steer}\n".encode("ascii"))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Motors] Serial drive command failed: {e}")
 
     # temporary pause or brake on current motion
     def stop(self):
@@ -292,8 +335,8 @@ class MotorController:
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
                 self.ser.write(b"STOP\n")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Motors] Serial stop command failed: {e}")
 
     # returns gaze coordinates (x, y) of the user's face so the screen eyes look at them
     def get_gaze_coordinates(self) -> Tuple[bool, float, float]:
@@ -447,7 +490,10 @@ class MotorController:
 
         # 5. STEP BACK MODE
         elif mode == NavMode.STEP_BACK:
-            if now - self._mode_start_time < 1.5:
+            if self.telemetry.rear_us_cm < 28.0:
+                print(f"[Motors] Rear obstacle detected ({self.telemetry.rear_us_cm:.1f}cm), braking!")
+                self.stop_all()
+            elif now - self._mode_start_time < 1.5:
                 self.drive(-110, 0)
             else:
                 self.stop_all()
@@ -483,7 +529,7 @@ class MotorController:
             spd, str_v = self.last_cmd_speed, self.last_cmd_steer
             cv2.putText(disp, f"MODE: {mode}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 100), 2)
             cv2.putText(disp, f"SPEED: {spd:+4d} | STEER: {str_v:+4d}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(disp, f"FRONT US: {self.telemetry.front_us_cm:.0f}cm", (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
+            cv2.putText(disp, f"FRONT US: {self.telemetry.front_us_cm:.0f}cm | REAR: {self.telemetry.rear_us_cm:.0f}cm", (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 200, 255), 1)
 
             with self.lock:
                 self.latest_display_frame = disp
@@ -546,11 +592,17 @@ class MotorController:
                         self.telemetry.front_us_cm = max(15.0, round(sim_wander_dist, 1))
                         self.telemetry.left_us_cm = sim_l
                         self.telemetry.right_us_cm = sim_r
+                        self.telemetry.rear_us_cm = 150.0
+                        self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
+                        self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [sim_l] * 4 + [sim_r] * 4 + [150.0] * 4
                 else:
                     with self.lock:
                         self.telemetry.front_us_cm = 999.0
                         self.telemetry.left_us_cm = 999.0
                         self.telemetry.right_us_cm = 999.0
+                        self.telemetry.rear_us_cm = 999.0
+                        self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
+                        self.telemetry.sensors_all = [999.0] * 16
 
                 time.sleep(0.05)
                 continue
@@ -560,14 +612,39 @@ class MotorController:
                     line = self.ser.readline().decode("ascii", errors="ignore").strip()
                     if line.startswith("SENSORS,"):
                         parts = line.split(",")
-                        if len(parts) >= 4:
+                        if len(parts) >= 5:
                             with self.lock:
                                 self.telemetry.front_us_cm = float(parts[1])
                                 self.telemetry.left_us_cm = float(parts[2])
                                 self.telemetry.right_us_cm = float(parts[3])
-                except Exception:
+                                self.telemetry.rear_us_cm = float(parts[4])
+                                if len(parts) > 5:
+                                    try:
+                                        self.telemetry.active_sensor_count = int(parts[5])
+                                        if len(parts) > 6:
+                                            self.telemetry.sensors_all = [float(p) for p in parts[6:]]
+                                    except (ValueError, IndexError):
+                                        pass
+                        elif len(parts) >= 4:
+                            with self.lock:
+                                self.telemetry.front_us_cm = float(parts[1])
+                                self.telemetry.left_us_cm = float(parts[2])
+                                self.telemetry.right_us_cm = float(parts[3])
+                except (ValueError, IndexError):
+                    # ignore occasional partial serial line fragments
                     pass
+                except Exception as e:
+                    print(f"[Motors] Serial telemetry error: {e}")
             time.sleep(0.02)
+
+    # configures active sensor count on physical arduino (e.g. 4, 8, 12, 16, or 'AUTO')
+    def set_sensor_config(self, count: int = 16):
+        """sends command to arduino to configure active sensors (4, 8, 12, 16, or 'AUTO')"""
+        if self.ser and self.ser.is_open and not self.is_simulated:
+            try:
+                self.ser.write(f"CONFIG_SENSORS,{count}\n".encode("ascii"))
+            except Exception as e:
+                print(f"[Motors] Failed to send sensor config: {e}")
 
     # cleanly shuts down camera capture, stops threads, and closes serial connections
     def close(self):

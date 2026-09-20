@@ -12,15 +12,36 @@ Features:
 """
 
 import math
+import os
+import platform
 import random
+import sys
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from typing import Optional
+
+# crisp system font family selection across windows and linux / raspberry pi
+FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "DejaVu Sans"
+
+
+# helper function to smoothly lerp between two hex colors (e.g. #040711 to #f8fafc)
+def lerp_color(color_a: str, color_b: str, t: float) -> str:
+    """smoothly blends between two hex colors based on t (0.0 to 1.0)"""
+    t = max(0.0, min(1.0, t))
+    r1, g1, b1 = int(color_a[1:3], 16), int(color_a[3:5], 16), int(color_a[5:7], 16)
+    r2, g2, b2 = int(color_b[1:3], 16), int(color_b[3:5], 16), int(color_b[5:7], 16)
+    r = int(r1 + (r2 - r1) * t)
+    g = int(g1 + (g2 - g1) * t)
+    b = int(b1 + (b2 - b1) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 # all the possible emotion and visual states the face can switch into
 class ExpressionState:
+    BOOT_GREETING = "boot_greeting"
+    BOOT_SEQUENCE = "boot_sequence"
     IDLE = "idle"
     LISTENING = "listening"
     THINKING = "thinking"
@@ -34,6 +55,181 @@ class ExpressionState:
     WATCHING = "watching"
 
 
+# checks all the physical wires, chips, and code scripts on startup
+class HardwareInspector:
+    # keeps track of the motor controller handle so we can read real serial and camera stats
+    def __init__(self, motor_controller=None):
+        self.motor_controller = motor_controller
+
+    # helper to check if physical arduino mega is connected over serial
+    def _is_arduino_connected(self):
+        # 1. check active serial on motor controller
+        if self.motor_controller is not None:
+            if not getattr(self.motor_controller, "is_simulated", True):
+                ser = getattr(self.motor_controller, "ser", None)
+                if ser is not None and getattr(ser, "is_open", False):
+                    return True, getattr(ser, "port", "USB")
+
+        # 2. scan live serial com ports
+        try:
+            import serial.tools.list_ports as lp
+            ports = list(lp.comports())
+            for p in ports:
+                desc = (p.description or "").lower()
+                hwid = (p.hwid or "").lower()
+                if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "usb serial"]):
+                    return True, p.device
+        except Exception:
+            pass
+
+        return False, None
+
+    # checks if a physical webcam or usb camera is plugged in and accessible
+    def check_camera(self):
+        # first check if motor controller already opened camera
+        if self.motor_controller is not None and getattr(self.motor_controller, "cap", None) is not None:
+            cap = self.motor_controller.cap
+            if cap is not None and cap.isOpened():
+                return True, "✓", "Connected"
+
+        # live test probe on device 0
+        try:
+            import cv2
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                cap.release()
+                return True, "✓", "Connected"
+            return False, "✗", "Not Detected"
+        except Exception:
+            return False, "✗", "Not Detected"
+
+    # checks if audio input microphone is plugged in and recognized
+    def check_mic(self):
+        try:
+            import sounddevice as sd
+            dev = sd.query_devices(kind="input")
+            if dev and dev.get("max_input_channels", 0) > 0:
+                return True, "✓", "Connected"
+            return False, "✗", "Not Detected"
+        except Exception:
+            return False, "✗", "Not Detected"
+
+    # checks if speakers or audio output devices are plugged in
+    def check_speakers(self):
+        try:
+            import sounddevice as sd
+            dev = sd.query_devices(kind="output")
+            if dev and dev.get("max_output_channels", 0) > 0:
+                return True, "✓", "Connected"
+            return False, "✗", "Not Detected"
+        except Exception:
+            return False, "✗", "Not Detected"
+
+    # checks if running directly on real raspberry pi hardware or pc simulation
+    def check_raspberry_pi(self):
+        try:
+            if os.path.exists("/proc/device-tree/model"):
+                with open("/proc/device-tree/model", "r", encoding="utf-8", errors="ignore") as f:
+                    model = f.read().strip().rstrip("\x00")
+                    if "Raspberry Pi" in model:
+                        return True, "✓", "Raspberry Pi 5"
+        except Exception:
+            pass
+        try:
+            if os.path.exists("/proc/cpuinfo"):
+                with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if "Model" in line and "Raspberry Pi" in line:
+                            return True, "✓", "Raspberry Pi 5"
+        except Exception:
+            pass
+        return False, "✗", f"{platform.system()} PC (Simulation)"
+
+    # verifies that listen.py core voice loop exists
+    def check_listen_py(self):
+        base_dir = Path(__file__).resolve().parent
+        listen_file = base_dir / "listen.py"
+        if listen_file.exists():
+            return True, "✓", "Online"
+        return False, "✗", "Not Found"
+
+    # checks if physical arduino mega is plugged into usb serial port
+    def check_arduino(self):
+        conn, port = self._is_arduino_connected()
+        if conn:
+            return True, "✓", f"Connected ({port})"
+        return False, "✗", "Not Detected"
+
+    # tests whether arduino.ino firmware is responding or running fallback simulation
+    def check_arduino_firmware(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            return True, "✓", "Online"
+        return False, "✗", "Testing Fallback (Simulation Mode)"
+
+    # checks if 4x bts7960 motor drivers are detected on hardware
+    def check_motor_drivers(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            return True, "✓", "Connected"
+        return False, "✗", "Not Detected"
+
+    # returns exact motor driver count: 4 if connected, 0 (Simulation Mode) with cross if none
+    def check_motor_driver_count(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            return True, "✓", "4"
+        return False, "✗", "0 (Simulation Mode)"
+
+    # checks if 4x johnson motors are detected on hardware
+    def check_motors(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            return True, "✓", "Connected"
+        return False, "✗", "Not Detected"
+
+    # returns exact motor count: 4 if connected, 0 (Simulation Mode) with cross if none
+    def check_motor_count(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            return True, "✓", "4"
+        return False, "✗", "0 (Simulation Mode)"
+
+    # verifies motors.py script exists
+    def check_motors_py(self):
+        base_dir = Path(__file__).resolve().parent
+        motors_file = base_dir / "motors.py"
+        if motors_file.exists():
+            return True, "✓", "Online"
+        return False, "✗", "Not Found"
+
+    # checks if ultrasonic distance sensors are detected
+    def check_ultrasound_detected(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            cnt = 0
+            if self.motor_controller is not None:
+                telem = getattr(self.motor_controller, "telemetry", None)
+                cnt = getattr(telem, "active_sensor_count", 0) if telem else 0
+            if cnt > 0:
+                return True, "✓", "Connected"
+            return False, "✗", "Not Detected (0 Active)"
+        return False, "✗", "Not Detected (Simulation Mode)"
+
+    # returns exact ultrasound count: 4, 8, 12, or 16 if connected, or 0 (Simulation Mode) with cross if none
+    def check_ultrasound_count(self):
+        conn, _ = self._is_arduino_connected()
+        if conn:
+            cnt = 0
+            if self.motor_controller is not None:
+                telem = getattr(self.motor_controller, "telemetry", None)
+                cnt = getattr(telem, "active_sensor_count", 0) if telem else 0
+            if cnt in [4, 8, 12, 16] or cnt > 0:
+                return True, "✓", str(cnt)
+            return False, "✗", "0 (Simulation Mode)"
+        return False, "✗", "0 (Simulation Mode)"
+
+
 # main class that creates and animates the robotic face on the screen
 class FaceUI:
     # constructor sets up the window dimensions, colors, eye sizes, and animation timers
@@ -43,17 +239,27 @@ class FaceUI:
         height: int = 600,
         fullscreen: bool = False,
         bg_color: str = "#040711",
+        enable_boot: bool = True,
     ):
         self.width = width
         self.height = height
         self.fullscreen = fullscreen
         self.bg_color = bg_color
+        self.enable_boot = enable_boot
 
-        # State management
-        self.state = ExpressionState.IDLE
-        self.status_text = "STANDBY // READY"
+        # State management - boots with apple-grade greeting and diagnostics
+        self.state = ExpressionState.BOOT_GREETING if enable_boot else ExpressionState.IDLE
+        self.status_text = "SYSTEM BOOT // DIAGNOSTICS" if enable_boot else "STANDBY // READY"
         self.lock = threading.Lock()
         self.running = False
+
+        # Launch sequence & hardware diagnostics
+        self.boot_start_time = time.time()
+        self.boot_scroll_y = 0.0
+        self.diagnostic_results = []
+        self.diagnostic_complete = False
+        self.hardware_inspector = HardwareInspector()
+        self._boot_thread: Optional[threading.Thread] = None
 
         # Eye tracking coordinates (-1.0 to 1.0)
         self.target_look_x = 0.0
@@ -101,6 +307,82 @@ class FaceUI:
         self.canvas: Optional[tk.Canvas] = None
         self._thread: Optional[threading.Thread] = None
 
+    # links the motor controller handle so hardware inspector can read real camera & serial stats
+    def set_motor_controller(self, motor_controller):
+        self.hardware_inspector.motor_controller = motor_controller
+
+    # lets developer or user skip the 18s boot sequence by tapping screen or pressing any key
+    def skip_boot(self):
+        with self.lock:
+            if self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
+                self.state = ExpressionState.IDLE
+                self.status_text = "STANDBY // READY"
+                self.subtitle_speaker = "NEUROLIS"
+                self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+
+    # handles key presses to support fullscreen, stop, and instant boot skipping
+    def _on_key(self, event):
+        key = (event.keysym or "").lower()
+        if key == "f":
+            self._toggle_fullscreen()
+        elif key == "escape":
+            self.stop()
+        else:
+            self.skip_boot()
+
+    # starts the background thread that tests each hardware component one after another
+    def _start_diagnostic_thread(self):
+        if self._boot_thread is None:
+            self._boot_thread = threading.Thread(target=self._boot_diagnostic_worker, daemon=True)
+            self._boot_thread.start()
+
+    # runs through all 14 component checks with human-friendly pacing (~1.15s per check)
+    def _boot_diagnostic_worker(self):
+        steps = [
+            ("Camera Detected?", self.hardware_inspector.check_camera),
+            ("Mic Detected?", self.hardware_inspector.check_mic),
+            ("Speakers Detected?", self.hardware_inspector.check_speakers),
+            ("Raspberry Pi Detected?", self.hardware_inspector.check_raspberry_pi),
+            ("listen.py Test Initiate", self.hardware_inspector.check_listen_py),
+            ("Arduino Detected?", self.hardware_inspector.check_arduino),
+            ("arduino.ino Test Initiate", self.hardware_inspector.check_arduino_firmware),
+            ("Motor Drivers Detected?", self.hardware_inspector.check_motor_drivers),
+            ("Motor Driver Number", self.hardware_inspector.check_motor_driver_count),
+            ("Motors Detected?", self.hardware_inspector.check_motors),
+            ("Motor Number", self.hardware_inspector.check_motor_count),
+            ("motors.py Test Initiate", self.hardware_inspector.check_motors_py),
+            ("Ultrasound Sensor Detected?", self.hardware_inspector.check_ultrasound_detected),
+            ("Ultrasound Number", self.hardware_inspector.check_ultrasound_count),
+        ]
+
+        for name, check_fn in steps:
+            if not self.running or self.state not in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
+                break
+            time.sleep(1.15)
+            if not self.running or self.state not in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
+                break
+            try:
+                res = check_fn()
+                if len(res) == 4:
+                    passed, badge, detail, is_fb = res
+                else:
+                    passed, badge, detail = res
+                    is_fb = False
+            except Exception as e:
+                passed, badge, detail, is_fb = False, "✗", f"Check Error: {e}", False
+
+            with self.lock:
+                self.diagnostic_results.append({
+                    "name": name,
+                    "passed": passed,
+                    "badge": badge,
+                    "detail": detail,
+                    "is_fallback": is_fb,
+                })
+
+        with self.lock:
+            self.diagnostic_complete = True
+
     # starts the face ui either in the background on another thread or right here on main
     def start(self, in_background: bool = True):
         if in_background:
@@ -125,6 +407,8 @@ class FaceUI:
 
         self.root.bind("<Escape>", lambda e: self.stop())
         self.root.bind("f", lambda e: self._toggle_fullscreen())
+        self.root.bind("<Button-1>", lambda e: self.skip_boot())
+        self.root.bind("<Key>", self._on_key)
 
         self.canvas = tk.Canvas(
             self.root,
@@ -260,6 +544,43 @@ class FaceUI:
             look_y = self.current_look_y
             sub_speaker = self.subtitle_speaker
             sub_text = self.subtitle_text
+
+        now = time.time()
+        # phase 1: oobe welcome greeting ("Hi there!")
+        if cur_state == ExpressionState.BOOT_GREETING:
+            elapsed = now - self.boot_start_time
+            if elapsed >= 3.8:
+                with self.lock:
+                    self.state = ExpressionState.BOOT_SEQUENCE
+                    cur_state = ExpressionState.BOOT_SEQUENCE
+                self._start_diagnostic_thread()
+            else:
+                self._draw_boot_greeting(w, h, elapsed)
+                return
+
+        # phase 2: cascading hardware & safety diagnostic checklist
+        if cur_state == ExpressionState.BOOT_SEQUENCE:
+            seq_elapsed = now - (self.boot_start_time + 3.8)
+            with self.lock:
+                diag_done = self.diagnostic_complete
+                diag_count = len(self.diagnostic_results)
+
+            if diag_count < 14:
+                pct = int((diag_count / 14.0) * 65.0)
+            else:
+                load_p = min(1.0, max(0.0, (seq_elapsed - 16.1) / 3.4))
+                pct = int(65.0 + load_p * 35.0)
+
+            if seq_elapsed >= 20.3 and diag_done and pct >= 100:
+                with self.lock:
+                    self.state = ExpressionState.IDLE
+                    self.status_text = "STANDBY // READY"
+                    self.subtitle_speaker = "NEUROLIS"
+                    self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+                cur_state = ExpressionState.IDLE
+            else:
+                self._draw_boot_sequence(w, h, seq_elapsed, pct)
+                return
 
         # Gaze lock: Keep eyes focused straight forward unless actively in optical observation/tracking
         if cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
@@ -1131,6 +1452,249 @@ class FaceUI:
             text="4WD CHASSIS // VISION TRACKING // ROBOTIC EXHIBITION AI",
             fill="#1b283b", font=("Segoe UI", 9, "bold")
         )
+
+    # phase 1: apple-grade greeting screen saying "Hi there!" with smooth cosine alpha fade
+    def _draw_boot_greeting(self, w: float, h: float, elapsed: float):
+        self.canvas.delete("all")
+        # solid oled black background
+        self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
+
+        # calculate smooth ease in, hold, and ease out alpha (0.0 to 1.0)
+        if elapsed < 1.0:
+            # 0.0s to 1.0s: smooth cosine fade in
+            alpha = 0.5 - 0.5 * math.cos(elapsed * math.pi)
+        elif elapsed < 2.5:
+            # 1.0s to 2.5s: hold full brightness
+            alpha = 1.0
+        elif elapsed < 3.5:
+            # 2.5s to 3.5s: smooth cosine fade out
+            fade_p = (elapsed - 2.5) / 1.0
+            alpha = 0.5 + 0.5 * math.cos(fade_p * math.pi)
+        else:
+            # 3.5s to 3.8s: brief black breath before cockpit sequence
+            alpha = 0.0
+
+        # silver-white premium typography
+        text_color = lerp_color(self.bg_color, "#f8fafc", alpha)
+        sub_color = lerp_color(self.bg_color, "#64748b", alpha)
+
+        # "Hi there!" text
+        self.canvas.create_text(
+            w / 2.0, h / 2.0 - 20,
+            text="Hi there!",
+            fill=text_color,
+            font=(FONT_FAMILY, 48, "bold")
+        )
+
+        # "Welcome to Project Neurolis" subtitle
+        self.canvas.create_text(
+            w / 2.0, h / 2.0 + 42,
+            text="Welcome to Project Neurolis",
+            fill=sub_color,
+            font=(FONT_FAMILY, 15)
+        )
+
+    # phase 2: futuristic diagnostic checklist verifying hardware with smooth auto-scroll
+    def _draw_boot_sequence(self, w: float, h: float, seq_elapsed: float, pct: int):
+        self.canvas.delete("all")
+        self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
+
+        # 1. top header pill badge
+        pill_w, pill_h = 320, 28
+        px1 = (w - pill_w) / 2.0
+        py1 = 16
+        self._create_rounded_rect(px1, py1, px1 + pill_w, py1 + pill_h, radius=14, fill="#081326", outline="#1c3452")
+        # glowing pulse cyan indicator dot
+        pulse = 0.5 + 0.5 * math.sin(self.anim_phase * 4.0)
+        dot_col = lerp_color("#007788", "#00f0ff", pulse)
+        self.canvas.create_oval(px1 + 14, py1 + 9, px1 + 24, py1 + 19, fill=dot_col, outline="")
+        self.canvas.create_text(
+            px1 + 165, py1 + 14,
+            text="NEUROLIS SYSTEM BOOT // V3.8",
+            fill="#cbd5e1",
+            font=(FONT_FAMILY, 9, "bold")
+        )
+
+        # 2. test sequence title banner
+        self.canvas.create_text(
+            w / 2.0, 60,
+            text="Neurolis Test Sequence ---",
+            fill="#f8fafc",
+            font=(FONT_FAMILY, 16, "bold")
+        )
+        self.canvas.create_text(
+            w / 2.0, 82,
+            text="[ Click screen or press any key to skip ]",
+            fill="#475569",
+            font=(FONT_FAMILY, 9)
+        )
+
+        # 3. main diagnostic glass card with ambient glow and cyber brackets
+        card_x1 = 110
+        card_y1 = 98
+        card_x2 = w - 110
+        card_y2 = 544
+        card_radius = 16
+
+        # outer subtle shadow/depth glow
+        self._create_rounded_rect(card_x1 - 3, card_y1 - 3, card_x2 + 3, card_y2 + 3, radius=18, fill="#040914", outline="#0d1b2e")
+        # inner glass cockpit card
+        self._create_rounded_rect(card_x1, card_y1, card_x2, card_y2, radius=card_radius, fill="#060c18", outline="#1c2e48")
+
+        # high-tech corner cyber accents
+        bracket_len = 16
+        # top-left
+        self.canvas.create_line(card_x1, card_y1 + bracket_len, card_x1, card_y1, card_x1 + bracket_len, card_y1, fill="#00f0ff", width=2)
+        # top-right
+        self.canvas.create_line(card_x2, card_y1 + bracket_len, card_x2, card_y1, card_x2 - bracket_len, card_y1, fill="#00f0ff", width=2)
+        # bottom-left
+        self.canvas.create_line(card_x1, card_y2 - bracket_len, card_x1, card_y2, card_x1 + bracket_len, card_y2, fill="#00f0ff", width=2)
+        # bottom-right
+        self.canvas.create_line(card_x2, card_y2 - bracket_len, card_x2, card_y2, card_x2 - bracket_len, card_y2, fill="#00f0ff", width=2)
+
+        # subtle glass card header divider
+        self.canvas.create_line(card_x1 + 24, card_y1 + 12, card_x2 - 24, card_y1 + 12, fill="#0e1d30", width=1)
+
+        # 4. smooth auto-scroll checklist math
+        with self.lock:
+            results = list(self.diagnostic_results)
+
+        total_revealed = len(results)
+        row_h = 27.0
+        # keep up to 8 items visible, then smoothly scroll to keep new items centered
+        if total_revealed > 8:
+            target_scroll = (total_revealed - 8) * row_h
+        else:
+            target_scroll = 0.0
+
+        self.boot_scroll_y += (target_scroll - self.boot_scroll_y) * 0.15
+
+        # 5. render verified check rows (high-contrast 3-column cockpit layout)
+        clip_top = card_y1 + 14
+        clip_bottom = card_y2 - 56
+
+        for idx, item in enumerate(results):
+            row_y = card_y1 + 30 + idx * row_h - self.boot_scroll_y
+            if clip_top <= row_y <= clip_bottom:
+                # Column 1: badge pill on left
+                bx1 = card_x1 + 24
+                by1 = row_y - 9
+                bx2 = card_x1 + 54
+                by2 = row_y + 9
+
+                badge = item.get("badge", "✓")
+                if badge == "✓":
+                    b_fill = "#022c17"
+                    b_outline = "#00ff88"
+                    b_text_col = "#00ff88"
+                elif badge == "~":
+                    b_fill = "#332500"
+                    b_outline = "#ffb703"
+                    b_text_col = "#ffb703"
+                else:
+                    b_fill = "#330812"
+                    b_outline = "#ff2d55"
+                    b_text_col = "#ff2d55"
+
+                self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill=b_fill, outline=b_outline)
+                self.canvas.create_text((bx1 + bx2) / 2.0, row_y, text=badge, fill=b_text_col, font=(FONT_FAMILY, 9, "bold"))
+
+                # Column 2: item name (left aligned)
+                self.canvas.create_text(
+                    card_x1 + 68, row_y,
+                    text=item.get("name", ""),
+                    fill="#f1f5f9",
+                    font=(FONT_FAMILY, 10, "bold"),
+                    anchor="w"
+                )
+
+                # Column 3: item status value (right aligned)
+                val_col = "#00ffaa" if item.get("passed") else "#fb7185"
+                self.canvas.create_text(
+                    card_x2 - 28, row_y,
+                    text=item.get("detail", ""),
+                    fill=val_col,
+                    font=(FONT_FAMILY, 10, "bold" if item.get("passed") else "normal"),
+                    anchor="e"
+                )
+
+        # active scanning indicator row
+        steps_order = [
+            "Camera Detected?", "Mic Detected?", "Speakers Detected?", "Raspberry Pi Detected?",
+            "listen.py Test Initiate", "Arduino Detected?", "arduino.ino Test Initiate",
+            "Motor Drivers Detected?", "Motor Driver Number", "Motors Detected?",
+            "Motor Number", "motors.py Test Initiate", "Ultrasound Sensor Detected?", "Ultrasound Number"
+        ]
+
+        if total_revealed < len(steps_order):
+            active_y = card_y1 + 30 + total_revealed * row_h - self.boot_scroll_y
+            if clip_top <= active_y <= clip_bottom:
+                bx1 = card_x1 + 24
+                by1 = active_y - 9
+                bx2 = card_x1 + 54
+                by2 = active_y + 9
+                self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill="#041c30", outline="#00f0ff")
+                self.canvas.create_text((bx1 + bx2) / 2.0, active_y, text="⟳", fill="#00f0ff", font=(FONT_FAMILY, 9, "bold"))
+
+                active_name = steps_order[total_revealed]
+                self.canvas.create_text(
+                    card_x1 + 68, active_y,
+                    text=active_name,
+                    fill="#38bdf8",
+                    font=(FONT_FAMILY, 10, "bold"),
+                    anchor="w"
+                )
+
+                dots = "." * (int(self.anim_phase * 3.0) % 4)
+                self.canvas.create_text(
+                    card_x2 - 28, active_y,
+                    text="Scanning" + dots,
+                    fill="#00f0ff",
+                    font=(FONT_FAMILY, 10, "italic"),
+                    anchor="e"
+                )
+
+        # 6. progress bar at bottom of card
+        bar_y1 = card_y2 - 34
+        bar_y2 = card_y2 - 16
+        bar_x1 = card_x1 + 24
+        bar_x2 = card_x2 - 24
+
+        # status text above progress bar
+        self.canvas.create_text(
+            bar_x1, bar_y1 - 10,
+            text="INITIATING NEUROLIS CORE UI...",
+            fill="#64748b",
+            font=(FONT_FAMILY, 9, "bold"),
+            anchor="w"
+        )
+
+        if pct < 100:
+            status_right_text = f"[ {pct}% ]"
+            bar_text_col = "#00f0ff"
+        else:
+            status_right_text = "100% // ALL SYSTEMS VERIFIED"
+            bar_text_col = "#00ff88"
+
+        self.canvas.create_text(
+            bar_x2, bar_y1 - 10,
+            text=status_right_text,
+            fill=bar_text_col,
+            font=(FONT_FAMILY, 10, "bold"),
+            anchor="e"
+        )
+
+        # track
+        self._create_rounded_rect(bar_x1, bar_y1, bar_x2, bar_y2, radius=7, fill="#070e1c", outline="#1c2e48")
+
+        # filled portion
+        fill_w = (bar_x2 - bar_x1) * (pct / 100.0)
+        if fill_w > 6:
+            fill_col = "#00ff88" if pct >= 100 else "#00f0ff"
+            self._create_rounded_rect(bar_x1, bar_y1, bar_x1 + fill_w, bar_y2, radius=7, fill=fill_col, outline="")
+            # leading edge white glow tip
+            if fill_w < (bar_x2 - bar_x1) - 4:
+                self.canvas.create_line(bar_x1 + fill_w, bar_y1 + 2, bar_x1 + fill_w, bar_y2 - 2, fill="#ffffff", width=2)
 
 
 # test runner to preview the face ui standalone on desktop without motors or speech

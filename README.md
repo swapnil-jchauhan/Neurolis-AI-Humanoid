@@ -25,43 +25,68 @@ The pipeline uses distributed roles[cite: 10, 15]:
 
 CHANGE AS PER YOUR SETUP.
 
-### Motors (4x BTS7960 Drivers to 12V Johnson Motors)
+### Motors (4x BTS7960 Drivers to 12V Non-Encoder Johnson Motors)
 - Front-Left: RPWM = 2, LPWM = 3, EN = 26
 - Rear-Left: RPWM = 4, LPWM = 5, EN = 27
 - Front-Right: RPWM = 6, LPWM = 7, EN = 28
-- Rear-Right: RPWM = 8, LPWM = 9, EN = 29[cite: 9]
+- Rear-Right: RPWM = 8, LPWM = 9, EN = 29
+*(Motor driver enable pins default to LOW during boot to prevent power-up jerk)*
 
-### Ultrasonic Sensors (HC-SR04 Bumper)
-- Left Sensor: Trigger = Pin 30, Echo = Pin 31[cite: 9]
-- Right Sensor: Trigger = Pin 32, Echo = Pin 33[cite: 9]
+### Ultrasonic Sensors (16-Sensor Scalable God-Tier Bank Architecture)
+The firmware is pre-configured for up to 16 sensors across 4 banks and auto-detects connected sensors at boot (supports 4, 8, 12, or 16 plugged in without touching code):
+- **Bank 1 (Base 4 Sensors - 1 per side)**:
+  * Front 1: Trig = Pin 30, Echo = Pin 31
+  * Left 1:  Trig = Pin 32, Echo = Pin 33
+  * Right 1: Trig = Pin 34, Echo = Pin 35
+  * Rear 1:  Trig = Pin 36, Echo = Pin 37
+- **Bank 2 (Expanded to 8 Sensors - 2 per side)**:
+  * Front 2: Trig = Pin 38, Echo = Pin 39
+  * Left 2:  Trig = Pin 40, Echo = Pin 41
+  * Right 2: Trig = Pin 42, Echo = Pin 43
+  * Rear 2:  Trig = Pin 44, Echo = Pin 45
+- **Bank 3 (Expanded to 12 Sensors - 3 per side)**:
+  * Front 3: Trig = Pin 46, Echo = Pin 47
+  * Left 3:  Trig = Pin 48, Echo = Pin 49
+  * Right 3: Trig = Pin 50, Echo = Pin 51
+  * Rear 3:  Trig = Pin 52, Echo = Pin 53
+- **Bank 4 (Expanded to 16 Sensors - 4 per side)**:
+  * Front 4: Trig = Pin 54 (A0), Echo = Pin 55 (A1)
+  * Left 4:  Trig = Pin 56 (A2), Echo = Pin 57 (A3)
+  * Right 4: Trig = Pin 58 (A4), Echo = Pin 59 (A5)
+  * Rear 4:  Trig = Pin 60 (A6), Echo = Pin 61 (A7)
 
-Serial Baud Rate: `115200`[cite: 9]
+Serial Baud Rate: `115200`
 
 ---
 
-## Prerequisites
+## Zero-Hardware Simulation Mode (Testing on PC)
 
-1. Python 3.12 (recommended for audio package compatibility).
-2. Arduino IDE (to flash the microcontroller).
-3. A USB webcam and an audio input/output device.
-4. An active Groq API key (available at console.groq.com).
-5. Pip libraries
+You **DO NOT** need any motors, drivers, sensors, microphone, or Arduino connected to test Neurolis!
+- Launch with: `python listen.py` (or `python listen.py --text` for text-only mode).
+- The system automatically detects missing hardware and launches in **Zero-Hardware Simulation Mode**.
+- You can converse with Neurolis, test facial animations on the 7-inch UI, test computer vision, and trigger virtual 4WD obstacle-avoiding physics directly in your terminal.
 
 ---
 
 ## Setup Instructions
 
-### 1. Install Dependencies
+### 1. Raspberry Pi 5 Quickstart (Run in Pi Terminal)
 
-CRUCIAL!!!
-
-Clone the repository and install the required Python packages:
+If you are deploying to a Raspberry Pi 5 running Raspberry Pi OS (Debian Bookworm):
 
 ```bash
-git clone [https://github.com/YOUR-USERNAME/Project-Neurolis.git](https://github.com/YOUR-USERNAME/Project-Neurolis.git)
-cd Project-Neurolis
-pip install groq edge-tts opencv-python sounddevice soundfile numpy pyserial webrtcvad python-dotenv
+# A. Install system audio, GUI, and OpenCV libraries
+sudo apt update && sudo apt install -y python3-pip python3-venv python3-tk portaudio19-dev libportaudio2 libasound2-dev libgl1-mesa-glx libglib2.0-0 alsa-utils
+
+# B. Create and activate a clean virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# C. Install Python packages
+pip install -r requirements.txt
 ```
+
+*(On Windows or macOS development PCs, simply run `pip install -r requirements.txt`)*
 
 ---
 
@@ -123,4 +148,15 @@ this automatically calls motors.py / screen.py, just keep em all in ONE place...
 python listen.py
 ```
 
+---
+
+## Running Automated Safety Tests
+
+To run the automated safety test suite (negation guards, emergency stop, PWM clamping, 4-sensor obstacle avoidance, and action parsing):
+
+```bash
+python tests/test_safety.py
+```
+
 THANKS FOR VIEWING !!! ;)
+

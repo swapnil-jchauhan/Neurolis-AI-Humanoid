@@ -1,0 +1,42 @@
+# ==============================================================================
+# PROJECT NEUROLIS - COMPREHENSIVE DEPENDENCY MANIFEST
+# Tested on: Windows 10/11 & Raspberry Pi 5 (Raspberry Pi OS 64-bit Bookworm)
+# ==============================================================================
+#
+# ------------------------------------------------------------------------------
+# QUICKSTART FOR RASPBERRY PI 5 (Run this in your Pi Terminal before pip install):
+# ------------------------------------------------------------------------------
+# 1. Update package list:
+#    sudo apt update && sudo apt upgrade -y
+#
+# 2. Install required system audio, GUI, and vision libraries:
+#    sudo apt install -y python3-pip python3-venv python3-tk portaudio19-dev libportaudio2 libasound2-dev libgl1-mesa-glx libglib2.0-0 alsa-utils
+#
+# 3. Create and activate a clean virtual environment (Recommended by Raspberry Pi OS):
+#    python3 -m venv venv
+#    source venv/bin/activate
+#
+# 4. Install all Python requirements:
+#    pip install -r requirements.txt
+#
+# (Alternatively, to install directly without a venv on Raspberry Pi OS Bookworm):
+#    pip install -r requirements.txt --break-system-packages
+# ------------------------------------------------------------------------------
+
+# --- Core AI & Voice ---
+groq>=0.11.0             # Groq Cloud API for Whisper STT and Qwen Vision/LLM
+edge-tts>=6.1.0         # Microsoft Edge Neural Speech Synthesizer (Zero API fees)
+python-dotenv>=1.0.0    # Automatic .env environment variable loader
+
+# --- Audio Processing & VAD ---
+sounddevice>=0.4.6      # Low-latency portaudio microphone capture & audio output
+soundfile>=0.12.1       # Fast audio file I/O for Edge-TTS playback
+numpy>=1.26.0           # Audio RMS amplitude calculations and math operations
+webrtcvad>=2.0.10; sys_platform != 'win32'         # Google WebRTC Voice Activity Detector for Linux/Raspberry Pi
+webrtcvad-wheels>=2.0.10; sys_platform == 'win32'  # Precompiled WebRTC VAD wheels for Windows 10/11
+
+# --- Vision & Face Tracking ---
+opencv-python>=4.8.0    # OpenCV library for webcam capture, HUD rendering, and YuNet AI face detector
+
+# --- Hardware Communication ---
+pyserial>=3.5           # High-speed USB serial bridge (115200 baud) to Arduino Mega 2560

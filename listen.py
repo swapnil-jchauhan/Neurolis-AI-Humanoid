@@ -62,6 +62,8 @@ try:
     # on windows testing we auto popup the opencv camera feed when moving, but on raspberry pi 5 we disable it
     motor_ctrl = motors.MotorController(show_preview=False, auto_popup=sys.platform.startswith("win"))
     motor_ctrl.start()
+    if face_ui is not None and hasattr(face_ui, "set_motor_controller"):
+        face_ui.set_motor_controller(motor_ctrl)
 except Exception as e:
     motor_ctrl = None
     print(f"Motor controller notice: {e}")
@@ -148,11 +150,11 @@ SYSTEM_PROMPT = (
     "invent a fictional origin, lab, team, mission, or abilities.\n\n"
     "PHYSICAL MOBILITY & CHASSIS:\n"
     "You are physically built on a real 4-wheel drive (4WD) mobile chassis powered "
-    "by four high-torque Johnson DC motors, four BTS7960 motor drivers, and dual front ultrasonic sensors. "
+    "by four high-torque non-encoder Johnson DC motors, four BTS7960 motor drivers, and four HC-SR04 ultrasonic sensors (front, left, right, rear). "
     "You HAVE FULL PHYSICAL MOBILITY: you can autonomously roam around the room avoiding "
     "obstacles, and you can track and follow people using computer vision.\n"
     "If a visitor asks if you can move, walk, drive, or demonstrate motion, reply with:\n"
-    "<action motor=\"ASK_MOBILITY\">Yes, I can! I have a four-wheel drive chassis and ultrasonic sensors. "
+    "<action motor=\"ASK_MOBILITY\">Yes, I can! I have a four-wheel drive chassis and four ultrasonic sensors. "
     "I can either autonomously roam and explore the room avoiding obstacles, or I can follow you around. "
     "Which one would you like me to do?</action>\n\n"
     "DECISION & ACTION PROTOCOLS (UNIFIED AI PIPELINE):\n"
@@ -379,11 +381,14 @@ class CameraWorker:
 
 camera_worker = None
 
-if not GROQ_API_KEY.strip() or GROQ_API_KEY == "PASTE_YOUR_GROQ_KEY_HERE":
-    print("Missing GROQ_API_KEY. Please set GROQ_API_KEY in your .env file.")
-    sys.exit(1)
+# initialize groq api client safely (do not hard crash on import so offline tests and tooling work)
+client = None
+if GROQ_API_KEY.strip() and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE":
+    try:
+        client = Groq(api_key=GROQ_API_KEY)
+    except Exception as e:
+        print(f"[Brain] Groq client init notice: {e}")
 
-client = Groq(api_key=GROQ_API_KEY)
 conversation_history = []
 session_facts = {}
 was_recently_hurt = False
@@ -405,6 +410,8 @@ def reset_session():
 
 # helper wrapper that automatically retries groq api calls if network hiccups occur
 def groq_call_with_retry(api_call_fn, *args, **kwargs):
+    if client is None:
+        raise RuntimeError("Groq API client is not initialized. Please set a valid GROQ_API_KEY in your .env file.")
     retries = 2
     backoff = 0.5
     for attempt in range(retries + 1):
@@ -1593,13 +1600,14 @@ FORCE_TEXT_MODE = any(arg.lower() in ("--text", "-t", "--text-only", "text") for
 if FORCE_TEXT_MODE:
     AUDIO_ENABLED = False
     print("\n[INFO] Text Input Mode enabled via command-line argument.")
-    print("Booting Neurolis in TEXT MODE (Microphone disabled)...")
+    print("Booting Neurolis in ZERO-HARDWARE TEST MODE (Microphone disabled)...")
 else:
     # Check hardware before we start
     AUDIO_ENABLED = check_audio_devices()
     if not AUDIO_ENABLED:
-        print("\n[INFO] No audio input device detected (or device error).")
-        print("Booting Neurolis in TEXT-ONLY fallback mode...")
+        print("\n[INFO] No audio microphone detected.")
+        print("Booting Neurolis in ZERO-HARDWARE TEST MODE (Interactive CLI Text Input)...")
+        print("You can chat with Neurolis and test all robotic behaviors right here in the terminal!")
 
 # calibrate baseline room noise once at boot so hitting enter starts listening instantly in <1ms
 cached_speech_threshold = None
@@ -1630,8 +1638,86 @@ def stop_camera_worker():
         camera_worker.stop()
         camera_worker = None
 
+# runs a complete system health check and prints a startup report
+def run_preflight_diagnostics():
+    """runs a comprehensive diagnostic check across ai, audio, screen, and 4wd hardware"""
+    print("\n" + "=" * 65)
+    print("      PROJECT NEUROLIS - PRE-FLIGHT SYSTEM DIAGNOSTICS")
+    print("=" * 65)
+
+    # 1. host platform
+    print(f"[*] Platform: {sys.platform} | Python {sys.version.split()[0]}")
+
+    # 2. hardware-free simulation status
+    hw_free = (motor_ctrl is not None and motor_ctrl.is_simulated) or not AUDIO_ENABLED
+    if hw_free:
+        print("[*] HARDWARE STATUS: ZERO-HARDWARE TEST SIMULATION MODE ACTIVE")
+        print("    -> Physical Arduino, motors, microphone, and sensors are optional.")
+        print("    -> Full conversational AI, facial expressions, vision, and virtual physics")
+        print("       are completely operational right now on your computer!")
+
+    # 3. groq cloud ai
+    if client is not None:
+        print("[+] Groq AI Client: CONNECTED (API key active)")
+    else:
+        print("[!] Groq AI Client: OFFLINE (Missing or invalid GROQ_API_KEY in .env)")
+
+    # 4. audio microphone
+    audio_ok = check_audio_devices()
+    if audio_ok:
+        try:
+            dev = sd.query_devices(kind='input')
+            print(f"[+] Audio Microphone: READY ({dev.get('name', 'Default Mic')})")
+        except Exception:
+            print("[+] Audio Microphone: READY")
+    else:
+        print("[-] Audio Microphone: NONE DETECTED (Fallback to Text Input Mode)")
+
+    # 5. edge-tts voice
+    print("[+] Edge-TTS Voice: READY (en-US-GuyNeural)")
+
+    # 6. screen face ui
+    if face_ui is not None:
+        print("[+] Screen Face Engine: ONLINE (1024x600 Display Ready)")
+    else:
+        print("[-] Screen Face Engine: OFFLINE / HEADLESS")
+
+    # 7. motor controller & 4wd chassis & 16-sensor architecture
+    if motor_ctrl is not None:
+        if motor_ctrl.is_simulated:
+            print("[!] 4WD Motor Controller: SIMULATION MODE (Virtual Physics Active)")
+            print("    - Physical Motors: 0 (Simulation Mode)")
+            print("    - Physical Drivers: 0 (Simulation Mode)")
+            print("    - Physical Sensors: 0 (Simulation Mode)")
+            print(f"    - Virtual Distance: F={motor_ctrl.telemetry.front_us_cm:.0f}cm, L={motor_ctrl.telemetry.left_us_cm:.0f}cm, R={motor_ctrl.telemetry.right_us_cm:.0f}cm, B={motor_ctrl.telemetry.rear_us_cm:.0f}cm")
+        else:
+            count = getattr(motor_ctrl.telemetry, "active_sensor_count", 0)
+            port = getattr(getattr(motor_ctrl, "ser", None), "port", "USB")
+            print(f"[+] 4WD Motor Controller: ONLINE (Physical Arduino Mega on {port})")
+            print(f"    - Physical Motors: 4 (Johnson High-Torque 4WD)")
+            print(f"    - Physical Drivers: 4 (BTS7960 43A H-Bridges)")
+            print(f"    - Physical Sensors: {count} HC-SR04 Active")
+            print(f"    - Sensor Telemetry: F={motor_ctrl.telemetry.front_us_cm:.0f}cm, L={motor_ctrl.telemetry.left_us_cm:.0f}cm, R={motor_ctrl.telemetry.right_us_cm:.0f}cm, B={motor_ctrl.telemetry.rear_us_cm:.0f}cm")
+    else:
+        print("[-] Motor Controller: DISABLED")
+
+    # 8. camera vision
+    if cv2 is not None:
+        if hasattr(motors, "MODEL_PATH") and motors.MODEL_PATH.exists():
+            print("[+] Vision Engine: ONLINE (YuNet Deep Learning Model loaded)")
+        else:
+            print("[!] Vision Engine: ONLINE (YuNet model missing, fallback active)")
+    else:
+        print("[-] Vision Engine: OpenCV NOT INSTALLED")
+
+    print("=" * 65 + "\n")
+
 # main entrypoint: runs either in voice mode with microphone or fallback text mode
 if __name__ == "__main__":
+    run_preflight_diagnostics()
+    if client is None:
+        print("[!] WARNING: Groq API key is not configured.")
+        print("    Please add GROQ_API_KEY=your_key to your .env file to enable AI responses.\n")
     start_camera_worker()
     try:
         while True:

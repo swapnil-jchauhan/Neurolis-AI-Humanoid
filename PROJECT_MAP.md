@@ -1,6 +1,6 @@
 # Project Neurolis Map
 
-Last updated: 2026-09-10
+Last updated: 2026-09-20
 
 ## Project Goal
 
@@ -25,10 +25,13 @@ Final 3-File Master Architecture:
   - THE ONLY FILE YOU RUN: Master Brain orchestrating Voice, Face UI & Motors.
   - Handles Groq Whisper STT (`whisper-large-v3-turbo`) & Groq Qwen 27B (`qwen/qwen3.8-27b`) LLM intelligence.
   - WebRTC VAD Level 3 + RMS noise filtering tuned for loud auditoriums.
-  - 4.0-second silence cutoff timer with non-repetitive standby wrap-ups.
+  - 7.0-second conversational follow-up timeout (0.65s end silence cutoff for snappy turn-taking) with non-repetitive standby wrap-ups.
   - Fast Intent Conversation Enders ("alr thanks", "bye", "good", "done", etc.) returning gracefully to standby.
-  - **AI-Verified Semantic Motor Classifier (`classify_motor_intent`)**:
-    - Groq semantic intent classifier + 0ms deterministic fast-path negation guards.
+  - **Unified Single-Pass AI Decision Pipeline**:
+    - 1 single Groq call handles motor commands, camera vision routing, and mean-remark empathy checks simultaneously, saving API tokens and cutting latency in half.
+    - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, and `<action>MEAN</action>`.
+  - **AI-Verified Semantic Motor Classifier & Negation Guards**:
+    - 0ms deterministic fast-path negation guards and emergency stop keywords.
     - Completely eliminates false-positive follow triggers on phrases like "quit following me" or "stop following".
     - Accurately classifies: `STOP`, `FOLLOW`, `APPROACH`, `ROAM`, `DEMONSTRATE`, `ASK_MOBILITY`, `STEP_BACK`, `SPIN`, and `NONE`.
   - **Active Expression Demonstrator Engine**:
@@ -44,11 +47,36 @@ Final 3-File Master Architecture:
     - CLI flag `--text` / `-t` boots Neurolis directly into Text Input Mode (bypasses microphone detection entirely).
     - In Voice Mode prompt: hit Enter to speak, type `'t'` to switch to persistent Text Mode, or directly type queries into prompt.
     - In Text Mode prompt: type queries, type `'v'` to switch back to Voice Mode (if mic detected), or `'exit'` to quit.
+  - **Pre-Flight Diagnostics Banner**:
+    - Automated boot check inspecting Python platform, Groq API key, microphone hardware, Edge-TTS, Screen Face UI, 4WD motor/telemetry links, and YuNet model.
+    - **Zero-Hardware Detection Honesty**: When running without physical hardware, reports `Physical Motors: 0 (Simulation Mode)`, `Physical Drivers: 0 (Simulation Mode)`, and `Physical Sensors: 0 (Simulation Mode)` with virtual physics active. When connected to Arduino Mega, reports exact physical hardware counts (`4` Johnson motors, `4` BTS7960 drivers, and `4/8/12/16` active ultrasonic sensors).
   - Speaks replies with `edge-tts`.
   - Keeps short-term memory for recent conversation exchanges.
 
 - `screen.py`
   - Dedicated 60 FPS animated 7-inch Touchscreen face UI engine (1024x600, 16:9).
+  - **Apple-Grade Launch Sequence & Hardware Diagnostics Engine (~24s)**:
+    - **Phase 1: OOBE Welcome Greeting (0.0s - 3.8s)**: Pure OLED black background (`#040711`), silver-white premium typography (`#f8fafc`) saying `"Hi there!"` with smooth cosine ease-in fade, hold, and ease-out fade.
+    - **Phase 2: Cascading Diagnostic Sequence (3.8s - 20.3s)**: Glass cockpit card with header pill `● NEUROLIS SYSTEM BOOT // V3.8`, auto-scrolling checklist running 14 real hardware probes with deliberate pacing (~1.15s per check):
+      * `Camera Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected`
+      * `Mic Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected`
+      * `Speakers Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected`
+      * `Raspberry Pi Detected?`: `[ ✓ ]` `Raspberry Pi 5` or `[ ✗ ]` `Windows PC (Simulation)`
+      * `listen.py Test Initiate`: `[ ✓ ]` `Online`
+      * `Arduino Detected?`: `[ ✓ ]` `Connected (Port)` or `[ ✗ ]` `Not Detected`
+      * `arduino.ino Test Initiate`: `[ ✓ ]` `Online` or `[ ✗ ]` `Testing Fallback (Simulation Mode)`
+      * `Motor Drivers Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected`
+      * `Motor Driver Number`: `[ ✓ ]` `4` or `[ ✗ ]` `0 (Simulation Mode)`
+      * `Motors Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected`
+      * `Motor Number`: `[ ✓ ]` `4` or `[ ✗ ]` `0 (Simulation Mode)`
+      * `motors.py Test Initiate`: `[ ✓ ]` `Online`
+      * `Ultrasound Sensor Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected (Simulation Mode)`
+      * `Ultrasound Number`: `[ ✓ ]` `4` / `8` / `12` / `16` or `[ ✗ ]` `0 (Simulation Mode)`
+    - **Zero-Hardware Honesty**: Zero fake numbers. When hardware is unplugged, physical counts display `0 (Simulation Mode)` with a ruby cross `[ ✗ ]`. When hardware is plugged in, exact numbers are dynamically detected and displayed with emerald ticks `[ ✓ ]`.
+    - **Dynamic Live Plug-In / Plug-Out Probing**: Probes live OpenCV device 0, `sounddevice` input/output channels, and serial COM ports on every boot with zero static caching.
+    - **Clean Cyber Cockpit Aesthetic**: 3-column cockpit layout (left neon pill badge, center component query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner L-brackets, active scanning indicator row, and cyber progress bar with glowing white tip. Zero technical jargon (no "YuNet", no "Virtual Bus Emulation").
+    - **Interactive Developer Skip Shortcut**: Tap/click screen (`<Button-1>`) or press any key (`<Key>`) to instantly bypass boot to `IDLE` during rapid testing.
+    - **Phase 3: Smooth Transition**: Seamless iris expansion into the standard robot cyber face once progress bar reaches `100% // ALL SYSTEMS VERIFIED`.
   - Pure OLED space black background (`#040711`) with high-contrast emissive neon cyber eyes.
   - Dedicated Real-Time **Subtitle Card** ($y \in [370, 556]$) with `[YOU]` in mint green and `[NEUROLIS]` in cyan, word-wrapped (830px) with live status telemetry.
   - **Modern Luminous OLED Robotic Face Architecture (Vector & EMO Inspired)**:
@@ -69,7 +97,7 @@ Final 3-File Master Architecture:
 
 - `motors.py`
   - Local Real-Time Edge Vision Tracker & Arduino Serial Bridge (100% Free, 0ms lag, ~15% Pi CPU).
-  - 4WD Skid-Steer chassis control: 4x Johnson DC Motors, 4x BTS7960 Motor Drivers, and 2x HC-SR04 front ultrasonic sensors.
+  - 4WD Skid-Steer chassis control: 4x Johnson DC Motors (non-encoder), 4x BTS7960 Motor Drivers, and up to 16x HC-SR04 ultrasonic distance sensors (4 banks: 4, 8, 12, or 16 total).
   - YuNet 300KB deep-learning face detector running at 30+ FPS for zero false-positive person tracking.
   - DirectShow conflict prevention: acts as single camera master; exposes `get_latest_raw_frame()` for Groq Vision queries.
   - Multi-Mode Navigation Engine:
@@ -77,20 +105,32 @@ Final 3-File Master Architecture:
     - `APPROACH ('Come here')`: Drives forward towards the human until within conversation range (~0.8m), then auto-brakes.
     - `FOLLOW ('Follow me')`: Real-time 30 FPS OpenCV continuous tracking & follow-me navigation.
     - `DEMONSTRATE`: Actively moves in autonomous roaming mode while speaking to demonstrate mobility.
-    - `STEP BACK ('Move back')`: Gently reverses for 1.5s and halts.
+    - `STEP BACK ('Move back')`: Gently reverses for 1.5s and halts (with rear ultrasonic obstacle guard).
     - `SPIN ('Turn around')`: Rotates chassis in place.
     - `STANDBY ('Stop')`: Motors locked at 0.
+  - Pre-flight movement validation (`can_move`) and directional obstacle avoidance.
   - PC-Only Debug HUD: OpenCV HUD camera preview window can pop up for desktop testing, but is completely suppressed in Pi production (only Face UI is visible).
-  - Master-to-Slave USB Serial communication with Arduino Mega (`DRIVE,speed,turn\n`, `STOP\n`).
-  - Built-in Virtual Simulation mode when developing without physical Arduino.
+  - Master-to-Slave USB Serial communication with Arduino Mega (`DRIVE,speed,turn\n`, `STOP\n`, `CONFIG_SENSORS,N\n`).
+  - **Zero-Hardware Simulation Mode**: Runs effortlessly on any PC without physical Arduino, motors, sensors, microphone, or camera. Virtual physics and AI dialog run fully in interactive terminal with default `active_sensor_count = 0` so no fake hardware is reported.
   - Automatic zero-CPU idle sleep when in standby.
 
 - `arduino.ino`
   - Companion firmware flashed onto the Arduino Mega 2560.
-  - Drives 4x BTS7960 motor drivers for 4x Johnson DC motors (4WD Skid-Steer Chassis).
-  - Pin assignments: M1 (2, 3, 26), M2 (4, 5, 27), M3 (6, 7, 28), M4 (8, 9, 29).
-  - Reads 2x HC-SR04 front ultrasonic sensors (Trig/Echo pins: Left 22/23, Right 24/25).
-  - Enforces independent hardware-level emergency stop (<20cm obstacle) and communication watchdog.
+  - Drives 4x BTS7960 motor drivers for 4x non-encoder Johnson DC motors (4WD Skid-Steer Chassis).
+  - Pin assignments: M1 (2, 3, 26), M2 (4, 5, 27), M3 (6, 7, 28), M4 (8, 9, 29). Driver enable pins default to LOW during boot to prevent power-up jerk.
+  - **God-Tier 16-Sensor Ultrasonic Bank Architecture**:
+    - Supports up to 16 sensors across 4 symmetrical banks (1 sensor per side per bank):
+      * Bank 1 (Slots 0..3)  -> 4 sensors total (1 per side): Front (30/31), Left (32/33), Right (34/35), Rear (36/37)
+      * Bank 2 (Slots 4..7)  -> 8 sensors total (2 per side): Front (38/39), Left (40/41), Right (42/43), Rear (44/45)
+      * Bank 3 (Slots 8..11) -> 12 sensors total (3 per side): Front (46/47), Left (48/49), Right (50/51), Rear (52/53)
+      * Bank 4 (Slots 12..15)-> 16 sensors total (4 per side): Front (54/55=A0/A1), Left (56/57=A2/A3), Right (58/59=A4/A5), Rear (60/61=A6/A7)
+    - **Hardware Auto-Detection & Hot-Plug**: Auto-probes connected pins at boot (tests echo pullup state) and snaps automatically to 4, 8, 12, or 16 active sensors without touching or recompiling code.
+    - **Time-Sliced Bank Interleaving**: Pings 1 bank of 4 sensors (one per side) each 50ms tick. Zero CPU choking (takes only 10-15ms) and zero acoustic cross-talk because simultaneous pings face opposite directions.
+    - **Continuous Side Minimums**: Calculates closest obstacle on each face (`dist_front`, `dist_left`, `dist_right`, `dist_rear`) across all active sensors for instant emergency braking.
+  - Enforces independent hardware-level emergency stop (<20cm obstacle forward or reverse) and 600ms communication watchdog.
+
+- `tests/test_safety.py`
+  - Automated unit and regression test suite (17 comprehensive tests) verifying emergency stop fast-path, negation guards, visual query filtering, PWM drive clamping, obstacle braking, 16-sensor telemetry parsing, action tag parsing, zero-hardware simulation initialization, simulation zero counts (`0 (Simulation Mode)` with `[ ✗ ]`), live hardware connection counts (`4`, `8`, `12`, `16` with `[ ✓ ]`), and CLI preflight banner simulation output.
 
 - `PROJECT_MAP.md`
   - Living project planner, communication specifications, and progress map.
@@ -118,7 +158,7 @@ Current PC testing flow:
    - Type `'exit'`: cleanly shuts down motors, camera, and display.
 4. When speech is used:
    - Local audio detection records user speech with WebRTC VAD Level 3.
-   - Stops when user finishes speaking (4s silence cutoff).
+   - Stops when user finishes speaking (0.65s silence cutoff, with a 7.0s conversational follow-up window).
    - WAV audio is transcribed by Groq Whisper (`whisper-large-v3-turbo`).
 5. The text transcript (or direct text input) is processed:
    - Intent checks: conversation ender checks, expression demonstrator, capabilities query, motor intents, or vision request.
@@ -157,8 +197,13 @@ Important:
 - Mean Input & Heartbroken Sad Reaction System: automatically triggers the `sad` expression with tears, droop brows, and trembling pout upon receiving mean remarks, with forgiveness healing loop on apology.
 - Dedicated Real-Time Subtitle Card on 7-inch display ($y \in [370, 556]$) with mint `[YOU]` and cyan `[NEUROLIS]`, word-wrapped with status telemetry.
 - 11 Fully Overhauled Animated Face Expression States in `screen.py` with tailored, synchronized expressive eyes AND mouths across all emotions.
+- **Apple-Grade Launch Sequence & Hardware Diagnostics Engine (~24s)**: "Hi there!" welcome greeting with smooth cosine ease-in/out fades, followed by an auto-scrolling 14-item diagnostic cockpit card running live hardware probes (~1.15s per check) and a cyber progress bar gliding to 100% (`ALL SYSTEMS VERIFIED`). Includes instant skip on tap or keypress.
+- **Honest Zero-Hardware Simulation Mode**: Runs 100% without physical Arduino, motors, or sensors. Accurately reports `0 (Simulation Mode)` with ruby crosses `[ ✗ ]` on screen and in CLI pre-flight diagnostics banner when hardware is unplugged, while dynamically detecting and displaying live counts (`4` motors, `4` drivers, `4/8/12/16` sensors) with emerald ticks `[ ✓ ]` when plugged in.
+- **Dynamic Live Probing**: Probes live OpenCV device 0, `sounddevice` input/output channels, and serial COM ports on every launch with zero static caching, ensuring hot-plugging hardware is detected dynamically.
+- **God-Tier 16-Sensor Scalable Ultrasonic Bank Architecture**: Supports 4, 8, 12, or 16 HC-SR04 sensors across 4 banks with time-sliced 50ms interleaving and continuous side minimums in `arduino.ino` and `motors.py`.
+- **Automated Safety & Regression Test Suite (`tests/test_safety.py`)**: 17 automated tests verifying emergency stops, negation guards, drive clamping, obstacle braking, 16-sensor telemetry, simulation zero counts, and live hardware detection.
 - Unified Vision & Camera Pipeline: `motors.py` is single camera master, providing thread-safe raw frames to Groq Vision and preventing DirectShow conflicts.
-- OpenCV HUD camera preview window auto-pops up on motion modes and cleanly auto-closes on STOP.
+- OpenCV HUD camera preview window auto-pops up on motion modes and cleanly auto-closes on STOP (Windows testing only, suppressed on Pi).
 - 4WD Johnson DC motor chassis with 4x BTS7960 drivers and dual front HC-SR04 ultrasonic obstacle avoidance.
 - Groq Chat replies with `qwen/qwen3.8-27b` (zero-latency `reasoning_effort: "none"`).
 - `edge-tts` voice output with dynamic duration estimation and hold-state capabilities.
@@ -410,6 +455,14 @@ Done:
 35. Built Active Expression Demonstrator Engine: displays and holds individual expressions for 3.5s with speech confirmation, and showcases all 6 expressions sequentially (`happy` -> `thinking` -> `listening` -> `watching` -> `moving` -> `confused`) with live descriptive subtitles.
 36. Redesigned `MOVING` expression into a front-facing humanoid robot moving forward (coming AHEAD toward viewer) with downward-rolling rubber treads, twin Xenon headlights with expanding road beams, suspension bounce, and two perspective road tracks streaming backward.
 37. Added direct capabilities inquiry handler delivering concise, token-safe replies (<45 words) stating physical mobility, person following, camera analysis, and listing all expressions.
+38. Implemented God-Tier Scalable 16-Sensor Ultrasonic Bank Architecture in `arduino.ino` and `motors.py`: modular support for 4, 8, 12, or 16 sensors across 4 symmetrical banks (1 per side per bank) with automatic pin echo pullup detection, hot-plug detection, time-sliced 50ms interleaving, and continuous side minimums for obstacle braking.
+39. Implemented Zero-Hardware Simulation Mode: runs seamlessly on any PC without physical Arduino, motors, sensors, microphone, or camera, using virtual physics and 16-sensor emulation.
+40. Built Apple-Grade Launch Sequence in `screen.py`: OOBE "Hi there!" welcome greeting with smooth cosine alpha ease-in, hold, and ease-out fades (0.0s – 3.8s) followed by the hardware diagnostic cockpit card.
+41. Tuned Deliberate Diagnostic Pacing: slowed down inspection timing to ~1.15s per check (~24s total sequence) with active scanning indicator row, dynamic auto-scroll, and cyber progress bar gliding from 65% to 100% (`ALL SYSTEMS VERIFIED`).
+42. Enforced Strict Zero-Hardware Detection Honesty: physical hardware counts display `0 (Simulation Mode)` with ruby crosses `[ ✗ ]` in both `screen.py` and `listen.py` CLI banner when unplugged, while accurately reporting exact numbers (`4` motors, `4` drivers, `4/8/12/16` sensors) with emerald ticks `[ ✓ ]` when connected.
+43. Refined Cyber Cockpit UI Layout: 3-column layout (left neon pill badge, center query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner brackets, radar pulse dot, glowing progress tip, and removed technical jargon.
+44. Dynamic Live Plug-In / Plug-Out Probing: eliminated static attribute caching on `HardwareInspector` to actively probe OpenCV camera device 0, `sounddevice` channels, and serial COM ports on every boot.
+45. Expanded Automated Safety & Regression Test Suite (`tests/test_safety.py`): 17 automated tests verifying fast-path emergency stops, negation guards, drive clamping, obstacle braking, 16-sensor telemetry parsing, zero-hardware simulation counts, live hardware count assertions, and CLI banner output.
 
 To do:
 
@@ -467,6 +520,16 @@ To do:
   - **Post-Speech Cutoff Latency Optimization**: Reduced `END_SILENCE_SECONDS` from 1.15s to 0.65s (0.5s faster post-sentence response without cutting off natural pauses).
   - **Zero-Delay Warm Audio Stream**: Kept `sd.InputStream` continuously active across all conversation turns in `run_conversation_mode()`, eliminating 200–400ms PortAudio driver re-initialization lag, and pre-calibrated baseline noise floor to eliminate the 400ms delay on pressing Enter.
   - **Platform-Aware Auto-Popup HUD**: Configured OpenCV camera preview HUD to automatically pop up during movement modes (`FOLLOW`, `APPROACH`, `ROAM`, `DEMONSTRATE`) exclusively on Windows for desktop testing, while strictly suppressing it on Linux / Raspberry Pi 5 so only `screen.py` displays.
+- 2026-09-18: Scalable 16-Sensor Architecture & Zero-Hardware Simulation Mode:
+  - **Scalable 16-Sensor Bank Architecture**: Upgraded `arduino.ino` and `motors.py` to support 4, 8, 12, or 16 ultrasonic distance sensors across 4 banks with time-sliced 50ms interleaving and continuous side minimums.
+  - **Zero-Hardware Simulation Mode**: Enabled hardware-free simulation across `motors.py`, `listen.py`, and `screen.py` with virtual physics and 16-sensor obstacle avoidance.
+- 2026-09-20: Apple-Grade Launch Sequence & Zero-Hardware Detection Polish:
+  - **Launch Sequence in screen.py**: OOBE "Hi there!" welcome greeting (0.0s – 3.8s) with smooth cosine alpha fades followed by a 14-item auto-scrolling diagnostic checklist.
+  - **Deliberate Diagnostic Pacing**: Slowed down inspection timing to ~1.15s per check (~24s total sequence) with active scanning indicator row and cyber progress bar gliding from 65% to 100% (`ALL SYSTEMS VERIFIED`).
+  - **Strict Zero-Hardware Honesty**: Physical hardware counts display `0 (Simulation Mode)` with ruby crosses `[ ✗ ]` in both `screen.py` and `listen.py` CLI banner when unplugged, while accurately reporting exact numbers (`4` motors, `4` drivers, `4/8/12/16` sensors) with emerald ticks `[ ✓ ]` when connected.
+  - **Clean Cyber Cockpit Aesthetic**: 3-column cockpit layout (left neon pill badge, center query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner brackets, radar pulse dot, and eliminated technical jargon.
+  - **Dynamic Live Probing**: Eliminated static attribute caching on `HardwareInspector` to actively probe OpenCV camera device 0, `sounddevice` channels, and serial COM ports on every boot.
+  - **17 Automated Tests**: Expanded `tests/test_safety.py` to 17 automated tests verifying safety stops, drive clamping, obstacle braking, 16-sensor telemetry, simulation zero counts, and live hardware detection.
 
 ## Reliability Notes
 

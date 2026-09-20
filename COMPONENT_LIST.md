@@ -28,7 +28,7 @@ Project context:
    Quantity: 1
    Role:
    - Low-level motor and sensor controller.
-   - Handles motors, encoders, distance sensors, and immediate movement commands.
+   - Handles 4 non-encoder DC motors, 4 ultrasonic distance sensors, and immediate movement commands.
    Notes:
    - Should handle movement safety independent of internet/API.
 
@@ -131,14 +131,33 @@ Project context:
 4. SENSORS
 ======================================================================
 
-1. HC-SR04 Ultrasonic Sensor
-   Quantity: 2
+1. HC-SR04 Ultrasonic Sensors (Scalable 16-Sensor God-Tier Bank System)
+   Quantity: Up to 16 total (auto-detects and seamlessly supports 4, 8, 12, or 16 plugged in)
    Role:
-   - Dual-sensor front bumper (Front-Left & Front-Right).
-   - Front-obstacle detection and <20cm emergency braking.
-   Notes:
-   - Useful for front/close-distance safety if stable.
-   - Arduino handles real-time pinging and hardware emergency stop.
+   - Full 360-degree perimeter collision avoidance:
+     * Bank 1 (Slots 0..3)  -> Base 4 Sensors (1 per side):
+       - Front 1: Trig 30, Echo 31
+       - Left 1:  Trig 32, Echo 33
+       - Right 1: Trig 34, Echo 35
+       - Rear 1:  Trig 36, Echo 37
+     * Bank 2 (Slots 4..7)  -> Expanded to 8 Sensors (2 per side):
+       - Front 2: Trig 38, Echo 39
+       - Left 2:  Trig 40, Echo 41
+       - Right 2: Trig 42, Echo 43
+       - Rear 2:  Trig 44, Echo 45
+     * Bank 3 (Slots 8..11) -> Expanded to 12 Sensors (3 per side):
+       - Front 3: Trig 46, Echo 47
+       - Left 3:  Trig 48, Echo 49
+       - Right 3: Trig 50, Echo 51
+       - Rear 3:  Trig 52, Echo 53
+     * Bank 4 (Slots 12..15)-> Expanded to 16 Sensors (4 per side):
+       - Front 4: Trig 54 (A0), Echo 55 (A1)
+       - Left 4:  Trig 56 (A2), Echo 57 (A3)
+       - Right 4: Trig 58 (A4), Echo 59 (A5)
+       - Rear 4:  Trig 60 (A6), Echo 61 (A7)
+   - Zero-Fuss Plug-and-Play: The code is pre-configured for all 16 sensors. Arduino auto-probes connected slots at boot and automatically configures 4, 8, 12, or 16 without needing code changes!
+   - Time-Sliced Bank Interleaving: Firing is interleaved 1 bank per tick (4 opposite-facing sensors: 1 per side), keeping CPU load light (<12ms) and completely eliminating acoustic echo cross-talk.
+   - Dual-Direction Hard Braking: Front obstacle <20cm stops forward motion; rear obstacle <20cm stops reverse motion. Independent hardware safety loop.
 
 3. SmartElex ToF Imager - VL53L5CX
    Quantity: 1 planned
