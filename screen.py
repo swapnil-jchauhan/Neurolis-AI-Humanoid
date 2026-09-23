@@ -1510,7 +1510,7 @@ class FaceUI:
         self.canvas.create_oval(px1 + 14, py1 + 9, px1 + 24, py1 + 19, fill=dot_col, outline="")
         self.canvas.create_text(
             px1 + 165, py1 + 14,
-            text="NEUROLIS SYSTEM BOOT // V3.8",
+            text="NEUROLIS BOOTING UP",
             fill="#cbd5e1",
             font=(FONT_FAMILY, 9, "bold")
         )
@@ -1524,7 +1524,7 @@ class FaceUI:
         )
         self.canvas.create_text(
             w / 2.0, 82,
-            text="[ Click screen or press any key to skip ]",
+            text="[ Click screen to skip ]",
             fill="#475569",
             font=(FONT_FAMILY, 9)
         )
@@ -1663,7 +1663,7 @@ class FaceUI:
         # status text above progress bar
         self.canvas.create_text(
             bar_x1, bar_y1 - 10,
-            text="INITIATING NEUROLIS CORE UI...",
+            text="COMPONENT CHECKLIST AND SAFETY CHECKS",
             fill="#64748b",
             font=(FONT_FAMILY, 9, "bold"),
             anchor="w"

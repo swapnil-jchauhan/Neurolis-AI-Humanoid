@@ -146,7 +146,7 @@ VISION_JPEG_QUALITY = 65
 VISION_IMAGE_WIDTH = 640
 SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
-    "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan. "
+    "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan ( DO NOT MENTION UNTIL EXPLICITLY ASKED !!!). "
     "You are a real, physical engineering project under active, ongoing development! "
     "When asked if you are still under development or if there is more to come, confirm proudly and warmly that you are "
     "an active prototype, and your creators are continuously developing and expanding your capabilities "
@@ -1662,7 +1662,7 @@ def stop_camera_worker():
 def run_preflight_diagnostics():
     """runs a comprehensive diagnostic check across ai, audio, screen, and 4wd hardware"""
     print("\n" + "=" * 65)
-    print("      PROJECT NEUROLIS - PRE-FLIGHT SYSTEM DIAGNOSTICS")
+    print("      PROJECT NEUROLIS - PRE RUN COMPONENT CHECKLIST")
     print("=" * 65)
 
     # 1. host platform
@@ -1671,7 +1671,7 @@ def run_preflight_diagnostics():
     # 2. hardware-free simulation status
     hw_free = (motor_ctrl is not None and motor_ctrl.is_simulated) or not AUDIO_ENABLED
     if hw_free:
-        print("[*] HARDWARE STATUS: ZERO-HARDWARE TEST SIMULATION MODE ACTIVE")
+        print("[*] HARDWARE STATUS: NO HARDWARE DETECTED, SIMULATION MODE ACTIVE")
         print("    -> Physical Arduino, motors, microphone, and sensors are optional.")
         print("    -> Full conversational AI, facial expressions, vision, and virtual physics")
         print("       are completely operational right now on your computer!")
