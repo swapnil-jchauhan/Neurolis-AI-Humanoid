@@ -1,6 +1,6 @@
 # Project Neurolis Map
 
-Last updated: 2026-09-20
+Last updated: 2026-09-24
 
 ## Project Goal
 
@@ -124,7 +124,8 @@ Final 3-File Master Architecture:
       * Bank 2 (Slots 4..7)  -> 8 sensors total (2 per side): Front (38/39), Left (40/41), Right (42/43), Rear (44/45)
       * Bank 3 (Slots 8..11) -> 12 sensors total (3 per side): Front (46/47), Left (48/49), Right (50/51), Rear (52/53)
       * Bank 4 (Slots 12..15)-> 16 sensors total (4 per side): Front (54/55=A0/A1), Left (56/57=A2/A3), Right (58/59=A4/A5), Rear (60/61=A6/A7)
-    - **Hardware Auto-Detection & Hot-Plug**: Auto-probes connected pins at boot (tests echo pullup state) and snaps automatically to 4, 8, 12, or 16 active sensors without touching or recompiling code.
+    - **Hardware Auto-Detection & Hot-Plug (0, 4, 8, 12, 16 Sensors)**: Auto-probes connected pins at boot (tests echo pullup state) and snaps automatically to 0, 4, 8, 12, or 16 active sensors without touching or recompiling code.
+    - **Zero-Sensor Bench Mode**: If zero sensors are connected, cleanly bypasses ping loops, eliminates floating-pin delays, sets all side distances to `999.0cm`, and allows unrestricted motor testing without false obstacle emergency stops.
     - **Time-Sliced Bank Interleaving**: Pings 1 bank of 4 sensors (one per side) each 50ms tick. Zero CPU choking (takes only 10-15ms) and zero acoustic cross-talk because simultaneous pings face opposite directions.
     - **Continuous Side Minimums**: Calculates closest obstacle on each face (`dist_front`, `dist_left`, `dist_right`, `dist_rear`) across all active sensors for instant emergency braking.
   - Enforces independent hardware-level emergency stop (<20cm obstacle forward or reverse) and 600ms communication watchdog.
@@ -137,8 +138,12 @@ Final 3-File Master Architecture:
   - Features:
     * **Cyber Cockpit Teleoperation**: Touchscreen D-Pad + full keyboard controls (`W`/`S` forward/reverse, `A`/`D` steer, `Q`/`E` spin, `Space` emergency brake). Live PWM speed and steer sliders.
     * **Individual Motor Polarity Calibrator (M1..M4)**: Independent test grid for each wheel (Front-Left, Rear-Left, Front-Right, Rear-Right) with forward/reverse pulse buttons (0.3s–3.0s duration) to verify and fix wiring polarity issues before running autonomous navigation.
-    * **16-Sensor Ultrasonic Radar HUD**: Real-time 2D chassis diagram displaying Front, Left, Right, and Rear distances with color-coded safety indicators (Green >50cm, Yellow 20–50cm, Red <20cm emergency brake zone) and bank count selector (4, 8, 12, 16).
+    * **16-Sensor Ultrasonic Radar HUD**: Real-time 2D chassis diagram displaying Front, Left, Right, and Rear distances with color-coded safety indicators (Green >50cm, Yellow 20–50cm, Red <20cm emergency brake zone) and bank count selector (0, 4, 8, 12, 16, AUTO).
     * **Serial Command Console**: Live bidirectional command and telemetry log with raw serial input.
+
+- `README.md`
+  - Polished repository documentation matching modern exhibition styling (centered banner, tiles/badges, Quick Access TOC).
+  - Contains: What is this?, Who is this for?, Things to know (Zero-hardware simulation, auto-detect pipeline, 0/4/8/12/16 sensor auto-scaling, dual safety layers, single-pass token saver), Required Final Hardware List, Step-by-Step Installation, Main Code (`listen.py`) usage, Manual Control (`manual_control.py`) usage, Automated Test guide, Features in simple language, and complete Arduino Mega pinout reference.
 
 - `tests/test_safety.py`
   - Automated unit and regression test suite (18 comprehensive tests) verifying emergency stop fast-path, negation guards, visual query filtering, PWM drive clamping, obstacle braking, 16-sensor telemetry parsing, action tag parsing, zero-hardware simulation initialization, simulation zero counts (`0 (Simulation Mode)` with `[ ✗ ]`), live hardware connection counts (`4`, `8`, `12`, `16` with `[ ✓ ]`), and CLI preflight banner simulation output.
