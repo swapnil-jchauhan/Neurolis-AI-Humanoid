@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 Project Neurolis
+#  Project Neurolis
 
 ### *An interactive, 4-foot AI humanoid robot with expressive 60 FPS OLED face, conversational voice, smart person tracking, and 4WD skid-steer mobility.*
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 📌 Quick Access
+##  Quick Access
 
 - [1. What is this?](#1-what-is-this)
 - [2. Who is this for?](#2-who-is-this-for)
@@ -90,18 +90,18 @@ Instead of throwing everything into one messy script that crashes and lags, Neur
 
 We spent massive engineering effort ensuring Neurolis is **bulletproof**. Here are the critical guardrails built directly into the system:
 
-### 🛡️ Zero-Hardware Simulation Mode (Test on Any PC)
+###  Zero-Hardware Simulation Mode (Test on Any PC)
 > **NOTE: YOU DO NOT NEED MOTORS, DRIVERS, SENSORS, OR AN ARDUINO TO DEVELOP OR TEST!**
 * Guardrails have been added to make sure the software runs smoothly on your computer even if physical hardware is completely missing.
 * When hardware is absent, the system activates **Virtual 4WD Physics & Distance Telemetry**.
 * The screen displays exact real numbers: it honestly reports `Physical Motors: 0 (Simulation Mode)` with a ruby cross `[ ✗ ]` instead of fake numbers.
 * You can converse, test facial expressions, verify vision, and test motor commands in the terminal with zero crashes.
 
-### 🔌 Automatic Hardware Detection & Pipeline Switch
+###  Automatic Hardware Detection & Pipeline Switch
 * The software probes USB serial COM ports, live webcams, microphones, and audio drivers on every launch.
 * **Zero code edits**: As soon as you plug your Arduino Mega or USB camera in, the program automatically detects it and kicks in the real hardware task it was meant to do!
 
-### 📡 0, 4, 8, 12, or 16 Ultrasonic Sensors (Zero Code Changes!)
+###  0, 4, 8, 12, or 16 Ultrasonic Sensors (Zero Code Changes!)
 * The Arduino firmware (`arduino.ino`) features an auto-detecting **16-Sensor Modular Array** divided into 4 symmetrical banks (1 sensor per side: Front, Left, Right, Rear):
   * **0 Sensors**: Plugged in on your desk with no sensors? The Arduino skips ultrasonic pings completely with zero delay, sets distances to `999.0 cm`, and lets you test motors freely without false obstacle stops.
   * **4 Sensors (Bank 1)**: Base perimeter (1 on each side).
@@ -110,12 +110,12 @@ We spent massive engineering effort ensuring Neurolis is **bulletproof**. Here a
   * **16 Sensors (All 4 Banks)**: Full 360° god-tier obstacle radar.
 * **Time-Sliced Bank Interleaving**: Only pings 1 bank per 50ms tick. Zero CPU choking and zero acoustic cross-talk because simultaneous pings face opposite directions!
 
-### 🚨 Dual-Layer Safety & 0ms Emergency Stop
+###  Dual-Layer Safety & 0ms Emergency Stop
 * **0ms Intent Fast-Path**: Words like *"stop"*, *"freeze"*, or *"halt"* bypass the LLM API completely and execute in 0 milliseconds, immediately locking wheels.
 * **Hardware Emergency Brake**: If any obstacle is closer than `20 cm` in the direction of travel, the Arduino firmware cuts PWM power to `0` directly in microcontroller machine code, overriding any high-level command.
 * **600ms Watchdog**: If the Pi crashes or serial communication disconnects for >600ms, the Arduino cuts all motor power automatically.
 
-### ⚡ Unified Single-Pass AI Pipeline (Token Saver)
+###  Unified Single-Pass AI Pipeline (Token Saver)
 * Previously, systems ran multiple LLM calls for motor intent, camera checks, and sentiment. 
 * Neurolis combines speech reply, motor actions (`<action motor="...">`), vision triggers (`<action>CAMERA</action>`), and empathy checks (`<action>MEAN</action>`) into **ONE single Groq API pass**.
 * This slashes token usage by over 60% and cuts response latency in half!
@@ -124,7 +124,7 @@ We spent massive engineering effort ensuring Neurolis is **bulletproof**. Here a
 
 ## 4. How to Use & Setup
 
-### 📦 Requirements & Dependencies
+###  Requirements & Dependencies
 
 #### Software Environment
 * **Operating System**: Windows 10/11 (for PC testing) or Raspberry Pi OS Debian Bookworm 64-bit (for robot deploy).
@@ -134,7 +134,7 @@ We spent massive engineering effort ensuring Neurolis is **bulletproof**. Here a
 
 ---
 
-### 📋 Required Final Hardware List
+###  Required Final Hardware List
 
 | Category | Component | Qty | Role & Notes |
 | :--- | :--- | :---: | :--- |
@@ -152,7 +152,7 @@ We spent massive engineering effort ensuring Neurolis is **bulletproof**. Here a
 
 ---
 
-### 🚀 Step-by-Step Installation
+###  Step-by-Step Installation
 
 #### 1. Clone or Download This Repository
 ```bash
@@ -194,7 +194,7 @@ GROQ_API_KEY=gsk_your_groq_api_key_here
 
 ---
 
-### 🧠 Main Code: Running the Robot Brain (`listen.py`)
+###  Main Code: Running the Robot Brain (`listen.py`)
 
 `listen.py` is the **only master file you run** for full robot operation. It automatically launches the 60 FPS face UI, initializes vision tracking, and connects to the Arduino:
 
@@ -212,7 +212,7 @@ python listen.py --text
 
 ---
 
-### 🎮 Manual Control & Calibrator (`manual_control.py`)
+###  Manual Control & Calibrator (`manual_control.py`)
 
 Want to test, calibrate, or drive the robot manually before the Raspberry Pi arrives? Run our standalone cyber web cockpit:
 
@@ -228,7 +228,7 @@ Open your browser to **`http://localhost:5000`** (or browse to `http://<YOUR_PC_
 
 ---
 
-### 🧪 Automated Safety Tests
+###  Automated Safety Tests
 
 Verify all 18 automated safety guardrails, emergency stop fast-paths, negation filters, and simulation fallbacks:
 
@@ -240,9 +240,9 @@ python -m unittest tests/test_safety.py
 
 ## 5. Features (In Simple Language)
 
-* 🎨 **Apple-Grade OOBE Launch Sequence**: 
+*  **Apple-Grade OOBE Launch Sequence**: 
   When powered on, displays a sleek `"Hi there!"` greeting with smooth cosine fade, followed by a 14-point live cascading hardware probe checklist verifying every camera, mic, speaker, Arduino, motor driver, and ultrasonic sensor with zero fake numbers.
-* 👁️ **60 FPS Animated OLED Robot Face**: 
+*  **60 FPS Animated OLED Robot Face**: 
   Minimalist cyber face (Vector & EMO inspired) with high-contrast emissive eyes on pure space black (`#040711`). Expresses **7 distinct emotional states**:
   * `IDLE`: Calm cyan glowing eyes with natural breathing pulse.
   * `HAPPY`: Emerald smiling crescents ($\cap \;\; \cap$) with vertical bounce.
@@ -252,22 +252,22 @@ python -m unittest tests/test_safety.py
   * `SPEAKING`: Voice-reactive eye squash/stretch cadence with a 15-pin dynamic audio spectrum baseline.
   * `WATCHING`: Optical viewfinder reticle brackets with vertical laser scanner line.
   * `MOVING`: Front-facing humanoid robot rolling forward towards viewer with twin headlights.
-* 💬 **Subtitle Card Telemetry**: 
+*  **Subtitle Card Telemetry**: 
   Real-time word-wrapped subtitles at the bottom of the screen showing `[YOU]` in mint green and `[NEUROLIS]` in cyan.
-* 💔 **Feelings Hurt & Empathy Engine**: 
+*  **Feelings Hurt & Empathy Engine**: 
   If someone insults or is rude to the robot ("you are stupid", "shut up", "i hate you"), Neurolis immediately shows its sad face with a falling teardrop and expresses its hurt feelings. Apologizing ("sorry", "you're good") heals the robot into a relieved happy expression with cyber blush!
-* 🚶 **Intelligent Person Following (`FOLLOW`)**: 
+*  **Intelligent Person Following (`FOLLOW`)**: 
   Uses local deep-learning YuNet face detection at 30+ FPS to smoothly steer and track the user as they walk around the room.
-* 🛑 **Smart Negation & Emergency Stop**: 
+*  **Smart Negation & Emergency Stop**: 
   Understands phrases like *"stop following me"* or *"don't move"* without false-triggering the follow mode. Hard stop triggers in 0ms.
-* 🔍 **On-Demand Visual Question Answering**: 
+*  **On-Demand Visual Question Answering**: 
   Ask *"What am I holding?"* or *"Look at this"*, and Neurolis captures a single camera frame to answer with Groq Vision without wasting tokens on continuous streaming.
 
 ---
 
 ## 6. Hardware Pinout Reference (Arduino Mega 2560)
 
-### 🏎️ Motors (4x BTS7960 Drivers to 12V Non-Encoder Johnson Motors)
+###  Motors (4x BTS7960 Drivers to 12V Non-Encoder Johnson Motors)
 
 | Motor | Wheel Position | RPWM (Fwd) | LPWM (Rev) | EN (Enable) |
 | :---: | :---: | :---: | :---: | :---: |
@@ -280,7 +280,7 @@ python -m unittest tests/test_safety.py
 
 ---
 
-### 📡 Ultrasonic Sensors (16-Sensor Scalable God-Tier Bank Architecture)
+###  Ultrasonic Sensors (16-Sensor Scalable God-Tier Bank Architecture)
 
 | Bank | Sensor Label | Side | Trig Pin | Echo Pin | Coverage Level |
 | :---: | :---: | :---: | :---: | :---: | :---: |
