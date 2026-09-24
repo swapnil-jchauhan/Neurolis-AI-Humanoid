@@ -119,6 +119,7 @@ void detect_installed_sensors();
 void setup() {
   // start serial communication with raspberry pi at 115200 baud
   Serial.begin(115200);
+  Serial.setTimeout(50); // prevents readStringUntil from blocking for >50ms
 
   // default enable pins to low during boot to prevent motor jitter on power-up
   digitalWrite(M1_EN, LOW);
@@ -288,18 +289,21 @@ void detect_installed_sensors() {
     }
   }
 
-  // snap to 4, 8, 12, or 16 active sensor banks
+  // snap to 0, 4, 8, 12, or 16 active sensor banks
   if (detected_count >= 14) {
     num_active_sensors = 16;
   } else if (detected_count >= 10) {
     num_active_sensors = 12;
   } else if (detected_count >= 6) {
     num_active_sensors = 8;
+  } else if (detected_count >= 2) {
+    num_active_sensors = 4; // base bank 1 (1 front, 1 left, 1 right, 1 rear)
   } else {
-    num_active_sensors = 4; // base bank 1 default (1 front, 1 left, 1 right, 1 rear)
-    // ensure base bank 1 is marked active for bench testing even if no hardware is wired yet
-    for (int i = 0; i < 4; i++) {
-      sensors[i].isConnected = true;
+    // zero sensors detected - bench test mode without ultrasonic hardware
+    num_active_sensors = 0;
+    for (int i = 0; i < MAX_ULTRASONIC_SENSORS; i++) {
+      sensors[i].isConnected = false;
+      sensors[i].distanceCm = 999.0;
     }
   }
 
@@ -333,6 +337,14 @@ float read_ultrasonic(int trig_pin, int echo_pin) {
 // time-sliced god-tier sensor reading: pings 1 bank (4 sensors: 1 per side) each 50ms tick
 // this keeps cpu load ultra low, guarantees zero acoustic cross-talk, and updates side minimums
 void read_all_sensors() {
+  if (num_active_sensors == 0) {
+    dist_front = 999.0;
+    dist_left  = 999.0;
+    dist_right = 999.0;
+    dist_rear  = 999.0;
+    return;
+  }
+
   int num_banks = num_active_sensors / 4;
   if (num_banks < 1) num_banks = 1;
   if (num_banks > 4) num_banks = 4;
@@ -399,6 +411,23 @@ void process_serial() {
         current_speed = constrain(current_speed, -255, 255);
         current_steer = constrain(current_steer, -255, 255);
       }
+    } else if (line.startsWith("MOTOR,")) {
+      // individual motor test command for wiring and polarity calibration: MOTOR,motor_num,pwm
+      // motor_num: 1 (Front-Left), 2 (Rear-Left), 3 (Front-Right), 4 (Rear-Right)
+      // pwm: -255 to 255
+      int comma = line.indexOf(',', 6);
+      if (comma > 0) {
+        int m_num = line.substring(6, comma).toInt();
+        int pwm_val = line.substring(comma + 1).toInt();
+        pwm_val = constrain(pwm_val, -255, 255);
+
+        // stop other motors and pulse requested motor
+        stop_all_motors();
+        if (m_num == 1) set_motor(M1_RPWM, M1_LPWM, pwm_val);
+        else if (m_num == 2) set_motor(M2_RPWM, M2_LPWM, pwm_val);
+        else if (m_num == 3) set_motor(M3_RPWM, M3_LPWM, pwm_val);
+        else if (m_num == 4) set_motor(M4_RPWM, M4_LPWM, pwm_val);
+      }
     } else if (line == "STOP") {
       // emergency stop command from the pi
       stop_all_motors();
@@ -410,10 +439,19 @@ void process_serial() {
         detect_installed_sensors();
       } else {
         int val = cfg.toInt();
-        if (val == 4 || val == 8 || val == 12 || val == 16) {
+        if (val == 0 || val == 4 || val == 8 || val == 12 || val == 16) {
           num_active_sensors = val;
           for (int i = 0; i < num_active_sensors; i++) sensors[i].isConnected = true;
-          for (int i = num_active_sensors; i < MAX_ULTRASONIC_SENSORS; i++) sensors[i].isConnected = false;
+          for (int i = num_active_sensors; i < MAX_ULTRASONIC_SENSORS; i++) {
+            sensors[i].isConnected = false;
+            sensors[i].distanceCm = 999.0;
+          }
+          if (val == 0) {
+            dist_front = 999.0;
+            dist_left  = 999.0;
+            dist_right = 999.0;
+            dist_rear  = 999.0;
+          }
           current_ping_bank = 0;
           Serial.print("CONFIG,SENSORS_SET,");
           Serial.println(num_active_sensors);

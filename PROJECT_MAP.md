@@ -129,8 +129,19 @@ Final 3-File Master Architecture:
     - **Continuous Side Minimums**: Calculates closest obstacle on each face (`dist_front`, `dist_left`, `dist_right`, `dist_rear`) across all active sensors for instant emergency braking.
   - Enforces independent hardware-level emergency stop (<20cm obstacle forward or reverse) and 600ms communication watchdog.
 
+- `manual_control.py`
+  - Standalone Localhost Web Controller & Hardware Calibrator running on `http://localhost:5000`.
+  - Zero external pip requirements (uses standard library Python `http.server` + JSON).
+  - Designed for calibration, testing, and teleoperation before mounting components onto the Raspberry Pi 5.
+  - Direct USB Serial Bridge to Arduino Mega @ 115200 baud with hot-plug auto-detection and virtual physics fallback when unplugged.
+  - Features:
+    * **Cyber Cockpit Teleoperation**: Touchscreen D-Pad + full keyboard controls (`W`/`S` forward/reverse, `A`/`D` steer, `Q`/`E` spin, `Space` emergency brake). Live PWM speed and steer sliders.
+    * **Individual Motor Polarity Calibrator (M1..M4)**: Independent test grid for each wheel (Front-Left, Rear-Left, Front-Right, Rear-Right) with forward/reverse pulse buttons (0.3s–3.0s duration) to verify and fix wiring polarity issues before running autonomous navigation.
+    * **16-Sensor Ultrasonic Radar HUD**: Real-time 2D chassis diagram displaying Front, Left, Right, and Rear distances with color-coded safety indicators (Green >50cm, Yellow 20–50cm, Red <20cm emergency brake zone) and bank count selector (4, 8, 12, 16).
+    * **Serial Command Console**: Live bidirectional command and telemetry log with raw serial input.
+
 - `tests/test_safety.py`
-  - Automated unit and regression test suite (17 comprehensive tests) verifying emergency stop fast-path, negation guards, visual query filtering, PWM drive clamping, obstacle braking, 16-sensor telemetry parsing, action tag parsing, zero-hardware simulation initialization, simulation zero counts (`0 (Simulation Mode)` with `[ ✗ ]`), live hardware connection counts (`4`, `8`, `12`, `16` with `[ ✓ ]`), and CLI preflight banner simulation output.
+  - Automated unit and regression test suite (18 comprehensive tests) verifying emergency stop fast-path, negation guards, visual query filtering, PWM drive clamping, obstacle braking, 16-sensor telemetry parsing, action tag parsing, zero-hardware simulation initialization, simulation zero counts (`0 (Simulation Mode)` with `[ ✗ ]`), live hardware connection counts (`4`, `8`, `12`, `16` with `[ ✓ ]`), and CLI preflight banner simulation output.
 
 - `PROJECT_MAP.md`
   - Living project planner, communication specifications, and progress map.
