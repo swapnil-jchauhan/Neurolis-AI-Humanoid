@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from collections import deque
+import io
 import os
 import queue
 import random
@@ -12,7 +13,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # Suppress verbose OpenCV warnings (e.g. DSHOW warnings when webcam is unplugged)
 os.environ["OPENCV_LOG_LEVEL"] = "OFF"
@@ -115,21 +116,21 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 FRAME_SECONDS = 0.03
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_SECONDS)
-PRE_SPEECH_SECONDS = 0.4
-START_SPEECH_FRAMES = 3
-END_SILENCE_SECONDS = 0.65  # reduced by 0.5s for fast response without cutting off speech
-CONVERSATION_TIMEOUT_SECONDS = 7
+PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
+START_SPEECH_FRAMES = 4            # 120ms to trip speech start (filters out clicks, sighs, breath puffs)
+END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff - snappy and responsive without cutting off speech
+CONVERSATION_TIMEOUT_SECONDS = 18  # 18s follow-up window (plenty of time to converse without premature standby)
 MAX_RECORD_SECONDS = 25
-MIN_RECORD_SECONDS = 0.4
-POST_REPLY_COOLDOWN_SECONDS = 0.05
-AMBIENT_CALIBRATION_SECONDS = 0.40
+MIN_RECORD_SECONDS = 0.50          # Requires at least 500ms audio to avoid phantom acoustic pops
+POST_REPLY_COOLDOWN_SECONDS = 0.04
+AMBIENT_CALIBRATION_SECONDS = 0.35
 MAX_CALIBRATION_AMBIENT_RMS = 150
-SPEECH_THRESHOLD_MULTIPLIER = 2.0
-CONTINUE_SPEECH_THRESHOLD_RATIO = 0.70
-MIN_SPEECH_RMS_THRESHOLD = 110
-VAD_AGGRESSIVENESS = 2
+SPEECH_THRESHOLD_MULTIPLIER = 1.6
+CONTINUE_SPEECH_THRESHOLD_RATIO = 0.65
+MIN_SPEECH_RMS_THRESHOLD = 105     # Tuned to 105 RMS so normal voice triggers immediately while breaths/fan noise are ignored
+VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD to aggressively filter background noise
 EDGE_TTS_VOICE = "en-US-ChristopherNeural"
-EDGE_TTS_RATE = "+12%"
+EDGE_TTS_RATE = "+14%"
 EDGE_TTS_VOLUME = "+0%"
 EDGE_TTS_PITCH = "+0Hz"
 MAX_HISTORY_MESSAGES = 6
@@ -142,8 +143,9 @@ CAMERA_CHECK_MODEL = "qwen/qwen3.8-27b"
 CAMERA_REQUIRED_TOKEN = "CAMERA_REQUIRED"
 SILENCE_REQUIRED_TOKEN = "SILENCE_REQUIRED"
 VISION_IMAGE_PATH = "_neurolis_vision.jpg"
-VISION_JPEG_QUALITY = 65
-VISION_IMAGE_WIDTH = 640
+VISION_JPEG_QUALITY = 60
+VISION_IMAGE_WIDTH = 512
+GROQ_TIMEOUT_SECONDS = 10.0
 SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
     "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan ( DO NOT MENTION UNTIL EXPLICITLY ASKED !!!). "
@@ -183,7 +185,21 @@ SYSTEM_PROMPT = (
     "If the visitor is being rude, hurtful, insulting, derogatory, or mocking towards you (e.g. calling you stupid, dumb, ugly, useless, idiot, trash, robot sucks, telling you to shut up or get lost), "
     "reply with: <action>MEAN</action> followed by a short, polite sad response expressing your hurt feelings in 1 natural sentence "
     "(e.g. '<action>MEAN</action> Why would you say that? That actually hurt my feelings...').\n\n"
-    "4. GENERAL CONVERSATION & QUESTIONS:\n"
+    "4. EXPRESSION DEMONSTRATION COMMANDS:\n"
+    "If and ONLY IF the user explicitly commands or asks you to show or demonstrate a facial expression (e.g. 'show happy face', 'show sad face', 'make a thinking face', 'show your expressions', 'demonstrate all faces', 'show confused face'), "
+    "wrap your spoken reply in an <action expression=\"...\"> tag:\n"
+    "- <action expression=\"happy\">Here is my happy expression!</action>\n"
+    "- <action expression=\"sad\">Here is my sad expression.</action>\n"
+    "- <action expression=\"thinking\">Here is my analytical thinking expression.</action>\n"
+    "- <action expression=\"confused\">Here is my confused expression.</action>\n"
+    "- <action expression=\"listening\">This is my acoustic listening expression.</action>\n"
+    "- <action expression=\"watching\">Here is my optical watching expression.</action>\n"
+    "- <action expression=\"moving\">Here is my moving forward expression.</action>\n"
+    "- <action expression=\"all\">Here are all my expressions: happy, sad, thinking, listening, watching, moving, and confused.</action>\n"
+    "CRITICAL RULE: Any question or statement where the user uses words like 'think', 'look', 'see', 'hear', or 'walk' in natural speech "
+    "(e.g., 'What smartphone do you think this is?', 'What do you think of this?', 'Can you hear me?', 'Look at this') is CONVERSATION or a CAMERA REQUEST, NEVER an expression command! "
+    "Only use <action expression=\"...\"> when the user explicitly commands you to demonstrate or display a face expression.\n\n"
+    "5. GENERAL CONVERSATION & QUESTIONS:\n"
     "For normal conversation, greetings, science/tech questions, or school information, reply conversationally and warmly in 1 or 2 natural sentences. "
     "When asked who made you or about your creators, tell them you were jointly built by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
     "If asked to be silent or not speak, reply exactly: SILENCE_REQUIRED. "
@@ -391,7 +407,7 @@ camera_worker = None
 client = None
 if GROQ_API_KEY.strip() and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE":
     try:
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=GROQ_API_KEY, timeout=12.0)
     except Exception as e:
         print(f"[Brain] Groq client init notice: {e}")
 
@@ -523,17 +539,18 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
     frames = []
     start_votes = 0
     silence_votes = 0
+    speech_streak = 0
     started = False
     start_time = None
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS) if webrtcvad is not None else None
     start_threshold = max(speech_threshold, MIN_SPEECH_RMS_THRESHOLD)
     continue_threshold = max(
         start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-        MIN_SPEECH_RMS_THRESHOLD,
+        MIN_SPEECH_RMS_THRESHOLD * 0.85,
     )
 
     def _recording_loop():
-        nonlocal started, start_time, start_votes, silence_votes, start_threshold, continue_threshold, frames
+        nonlocal started, start_time, start_votes, silence_votes, speech_streak, start_threshold, continue_threshold, frames
         wait_started_at = time.monotonic()
 
         while True:
@@ -567,7 +584,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             elif not started:
                 is_speech = vad_speech and (chunk_rms >= start_threshold)
             else:
-                is_speech = vad_speech or (chunk_rms >= continue_threshold)
+                is_speech = vad_speech and (chunk_rms >= continue_threshold)
 
             if not started:
                 # keep adapting before speech starts so stationary background noise is tuned out
@@ -579,7 +596,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                     start_threshold = (start_threshold * 0.95) + (ambient_threshold * 0.05)
                     continue_threshold = max(
                         start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-                        MIN_SPEECH_RMS_THRESHOLD,
+                        MIN_SPEECH_RMS_THRESHOLD * 0.85,
                     )
 
                 preroll.append(chunk)
@@ -591,6 +608,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                         started = True
                         start_time = time.monotonic()
                         silence_votes = 0
+                        speech_streak = 0
                         if motor_ctrl is not None:
                             motor_ctrl.stop()  # instant stop on voice!
                         set_face_state("listening", "LISTENING...")
@@ -602,8 +620,11 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             frames.append(chunk)
 
             if is_speech:
-                silence_votes = 0  # fully reset silence timer on active speech!
+                speech_streak += 1
+                if speech_streak >= 2:
+                    silence_votes = 0  # reset silence timer only when active voice is sustained
             else:
+                speech_streak = 0
                 silence_votes += 1
 
             duration = time.monotonic() - start_time
@@ -687,6 +708,59 @@ def play_with_system_player(audio_path: Path, timeout: float = 15.0):
 
     return False
 
+# In-memory audio cache for zero-latency speech playback of frequent phrases
+_AUDIO_CACHE = {}
+
+# Synthesizes speech text into RAM using soundfile and io.BytesIO without disk overhead
+async def _synthesize_edge_tts_in_memory(text: str) -> Tuple[Optional[np.ndarray], Optional[int]]:
+    try:
+        communicate = edge_tts.Communicate(
+            text=text,
+            voice=EDGE_TTS_VOICE,
+            rate=EDGE_TTS_RATE,
+            volume=EDGE_TTS_VOLUME,
+            pitch=EDGE_TTS_PITCH,
+        )
+        chunks = [c["data"] async for c in communicate.stream() if c["type"] == "audio"]
+        if not chunks:
+            return None, None
+        buf = io.BytesIO(b"".join(chunks))
+        data, sr = sf.read(buf, dtype="float32")
+        return data, sr
+    except Exception as e:
+        print(f"[TTS] In-memory synthesis notice: {e}")
+        return None, None
+
+def _split_into_sentences(text: str) -> List[str]:
+    raw_sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = [s.strip() for s in raw_sentences if s.strip()]
+    return sentences if sentences else [text.strip()]
+
+def _restore_face_state_after_speech(custom_state=None, custom_status=None):
+    if custom_state:
+        set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
+    elif motor_ctrl is not None and getattr(motor_ctrl, "nav_mode", None) in ["ROAM", "FOLLOW", "APPROACH"]:
+        set_face_state("moving", f"4WD {motor_ctrl.nav_mode}")
+    else:
+        set_face_state("idle", "READY // AUCKLAND HOUSE BOYS")
+
+def _speak_disk_fallback(text: str, timeout: float = 15.0):
+    temp_file = tempfile.NamedTemporaryFile(prefix="neurolis_tts_", suffix=".mp3", delete=False)
+    audio_path = Path(temp_file.name)
+    temp_file.close()
+    try:
+        comm = edge_tts.Communicate(text, voice=EDGE_TTS_VOICE, rate=EDGE_TTS_RATE, volume=EDGE_TTS_VOLUME, pitch=EDGE_TTS_PITCH)
+        asyncio.run(comm.save(str(audio_path)))
+        if audio_path.exists() and audio_path.stat().st_size > 0:
+            play_audio_file(audio_path, timeout=timeout)
+    except Exception as e:
+        print(f"[TTS Fallback Error]: {e}")
+    finally:
+        try:
+            audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 # plays speech audio directly through sounddevice and soundfile with millisecond precision
 def play_audio_file(audio_path: Path, timeout: float = 15.0):
     try:
@@ -707,62 +781,104 @@ async def save_edge_tts(text: str, audio_path: Path):
     )
     await communicate.save(str(audio_path))
 
-# downloads edge-tts speech and plays it while showing synced subtitles on screen
+# downloads edge-tts speech in RAM and plays it with sentence pipelining and 100% audio-synced subtitles
 def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0):
     global is_speaking
     is_speaking = True
     clear_audio_queue()
 
-    temp_file = tempfile.NamedTemporaryFile(
-        prefix="neurolis_tts_",
-        suffix=".mp3",
-        delete=False,
-    )
-    audio_path = Path(temp_file.name)
-    temp_file.close()
+    active_state = custom_state if custom_state else "speaking"
+    active_status = custom_status if custom_status else "SPEAKING"
 
-    try:
-        # 1. Download TTS audio FIRST in background (eliminates the 2-3s delay between text showing and voice starting)
-        asyncio.run(save_edge_tts(text, audio_path))
-
-        if not audio_path.exists() or audio_path.stat().st_size == 0:
-            print("TTS returned no audio.")
-            return
-
-        # Estimate duration based on text length (~12 chars per second)
-        estimated_duration = len(text) / 12.0
-        timeout = max(12.0, estimated_duration * 2.0 + 3.0)
-
-        # 2. Synchronize screen subtitles and speaking expression with the EXACT start of voice playback
-        active_state = custom_state if custom_state else "speaking"
-        active_status = custom_status if custom_status else "SPEAKING"
-        set_face_state(active_state, active_status)
+    # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
+    if text in _AUDIO_CACHE:
+        data, sr = _AUDIO_CACHE[text]
         if face_ui is not None:
             face_ui.set_subtitles("NEUROLIS", text)
-
-        # 3. Play audio
-        if not play_audio_file(audio_path, timeout=timeout):
-            print("Could not play TTS audio. Install ffplay, mpv, or mpg123.")
-
-    except Exception as e:
-        print("Speak error:", e)
-    finally:
+        set_face_state(active_state, active_status)
         try:
-            audio_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        # 4. Release listening immediately the moment playback finishes (zero 3-second blackout!)
+            sd.play(data, sr)
+            sd.wait()
+        except Exception as e:
+            print("[TTS Cache Playback Error]:", e)
         time.sleep(0.06)
         clear_audio_queue()
         is_speaking = False
+        _restore_face_state_after_speech(custom_state, custom_status)
+        return
 
-        # Keep the visual expression on screen while microphone is ALREADY listening
-        if custom_state:
-            set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
-        elif motor_ctrl is not None and getattr(motor_ctrl, "nav_mode", None) in ["ROAM", "FOLLOW", "APPROACH"]:
-            set_face_state("moving", f"4WD {motor_ctrl.nav_mode}")
+    # 2. Dynamic multi-sentence pipelining: starts voice output immediately without waiting for full text
+    sentences = _split_into_sentences(text)
+
+    # Set expressive face state immediately while synthesizing
+    if custom_state:
+        set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
+    else:
+        set_face_state("speaking", "SPEAKING")
+
+    try:
+        if len(sentences) <= 1:
+            data, sr = asyncio.run(_synthesize_edge_tts_in_memory(text))
+            if data is not None:
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                set_face_state(active_state, active_status)
+                sd.play(data, sr)
+                sd.wait()
+            else:
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                _speak_disk_fallback(text)
         else:
-            set_face_state("idle", "READY // AUCKLAND HOUSE BOYS")
+            # Multi-sentence pipelining: synthesize sentence 1, start playing immediately, synthesize sentence 2 in background!
+            async def _pipeline_flow():
+                s1_task = asyncio.create_task(_synthesize_edge_tts_in_memory(sentences[0]))
+                s1_data, s1_sr = await s1_task
+
+                if s1_data is None:
+                    if face_ui is not None:
+                        face_ui.set_subtitles("NEUROLIS", text)
+                    _speak_disk_fallback(text)
+                    return
+
+                # Display text the exact millisecond sound output starts
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                set_face_state(active_state, active_status)
+
+                # Start synthesizing remaining sentences concurrently in background while sentence 1 plays
+                async def _synth_remaining():
+                    rest_chunks = []
+                    for s in sentences[1:]:
+                        d, sr_val = await _synthesize_edge_tts_in_memory(s)
+                        if d is not None:
+                            rest_chunks.append((d, sr_val))
+                    return rest_chunks
+
+                remaining_task = asyncio.create_task(_synth_remaining())
+
+                # Play sentence 1
+                sd.play(s1_data, s1_sr)
+                sd.wait()
+
+                # Await and play remaining sentences
+                remaining_chunks = await remaining_task
+                for r_data, r_sr in remaining_chunks:
+                    sd.play(r_data, r_sr)
+                    sd.wait()
+
+            asyncio.run(_pipeline_flow())
+
+    except Exception as e:
+        print("Speak error:", e)
+        if face_ui is not None:
+            face_ui.set_subtitles("NEUROLIS", text)
+        _speak_disk_fallback(text)
+    finally:
+        time.sleep(0.06)
+        clear_audio_queue()
+        is_speaking = False
+        _restore_face_state_after_speech(custom_state, custom_status)
 
 
 # sends recorded wav audio to groq whisper to turn speech into english text
@@ -793,7 +909,7 @@ def transcribe_audio(audio: np.ndarray):
         text = re.sub(r"\[.*?\]|\(.*?\)", "", raw_text).strip()
         cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
         
-        # Whisper hallucinations on silence / fan noise / distant background chatter
+        # Whisper hallucinations on silence / fan noise / distant background chatter / breathing / acoustic fillers
         hallucinations = {
             "im going to go to the next video",
             "thank you for watching",
@@ -812,13 +928,36 @@ def transcribe_audio(audio: np.ndarray):
             "ah",
             "um",
             "mm",
+            "mmm",
+            "eh",
+            "uh",
+            "er",
+            "oh",
+            "ha",
+            "haha",
+            "huh",
+            "hm",
+            "hmm",
+            "pfft",
+            "tsk",
+            "sigh",
+            "cough",
+            "snort",
+            "shh",
+            "sh",
+            "shush",
+            "mhm",
+            "uh-huh",
+            "uh huh",
             "silence",
+            "oops",
         }
         if not cleaned or cleaned in hallucinations:
             return None
 
-        # Ignore single characters or isolated noise clicks
-        if len(cleaned) < 2:
+        # Ignore single characters and non-word fillers (only accept legitimate 2-letter English words)
+        ALLOWED_2CHAR_WORDS = {"no", "hi", "go", "ok", "up", "me", "we", "he", "in", "on", "at", "to", "do", "is", "am", "my"}
+        if len(cleaned) < 2 or (len(cleaned) == 2 and cleaned not in ALLOWED_2CHAR_WORDS):
             return None
 
         return text
@@ -933,6 +1072,13 @@ def ask_groq_vision(user_text: str, image_path: Path):
         image_base64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
         image_data_url = f"data:image/jpeg;base64,{image_base64}"
 
+        # If user text is a follow-up (e.g. "Now check again"), include context so Qwen understands immediately
+        prompt_text = user_text
+        if any(w in user_text.lower() for w in ["again", "now", "it", "this", "that"]) and len(conversation_history) > 1:
+            last_msgs = [m["content"] for m in conversation_history[-3:] if m.get("role") == "user" and m.get("content") != user_text]
+            if last_msgs:
+                prompt_text = f"Context: User previously asked '{last_msgs[-1]}'. Now the user says: '{user_text}'. Answer concisely using the camera image."
+
         response = groq_call_with_retry(
             client.chat.completions.create,
             model=VISION_MODEL,
@@ -944,10 +1090,10 @@ def ask_groq_vision(user_text: str, image_path: Path):
                         {
                             "type": "text",
                             "text": (
-                                f"{user_text}\n"
-                                "Answer only this question using the image. "
-                                "Do not describe unrelated background. "
-                                "If you are not sure, say you are not sure."
+                                f"{prompt_text}\n"
+                                "Answer concisely in 1 or 2 natural sentences using only this image. "
+                                "Do not describe background walls or unrelated surroundings. "
+                                "If you cannot identify the exact item or text clearly, say what you see simply."
                             ),
                         },
                         {
@@ -958,7 +1104,8 @@ def ask_groq_vision(user_text: str, image_path: Path):
                 },
             ],
             temperature=0.2,
-            max_tokens=250,
+            max_tokens=180,
+            timeout=10.0,
             extra_body={"reasoning_effort": "none"},
         )
         return (response.choices[0].message.content or "").strip()
@@ -968,11 +1115,15 @@ def ask_groq_vision(user_text: str, image_path: Path):
 
 # orchestrates optical vision analysis: snaps photo, asks ai, and speaks result
 def handle_vision_request(text: str):
-    set_face_state("looking", "SCANNING WITH CAMERA...")
+    set_face_state("looking", "CAPTURING FRAME...")
+    if face_ui is not None:
+        face_ui.set_subtitles("YOU", text)
+
     image_path = capture_vision_frame()
     if image_path is None:
         reply = "I cannot access the camera right now."
     else:
+        set_face_state("looking", "ANALYZING CAMERA WITH GROQ...")
         try:
             reply = ask_groq_vision(text, image_path)
             if not reply:
@@ -1018,6 +1169,30 @@ CONVERSATION_ENDER_RESPONSES = [
     "Awesome! Entering standby mode. Press 'Talk to Neurolis' on the screen to wake me up.",
     "Happy to help! Switching to standby. Feel free to press 'Talk to Neurolis' anytime.",
 ]
+
+def pre_cache_phrases():
+    """Background thread that pre-synthesizes common phrases into RAM for 0ms speech output."""
+    common = [
+        ACTIVATION_GREETING,
+        "Stopping all movement. Holding position.",
+        "I cannot access the camera right now.",
+        "I could not see enough to answer clearly.",
+        "I'm having trouble connecting to my brain right now.",
+        *STANDBY_EXIT_PHRASES,
+        *CONVERSATION_ENDER_RESPONSES,
+    ]
+    async def _worker():
+        for phrase in common:
+            if phrase not in _AUDIO_CACHE:
+                try:
+                    data, sr = await _synthesize_edge_tts_in_memory(phrase)
+                    if data is not None:
+                        _AUDIO_CACHE[phrase] = (data, sr)
+                except Exception:
+                    pass
+    threading.Thread(target=lambda: asyncio.run(_worker()), daemon=True).start()
+
+pre_cache_phrases()
 
 _last_standby_idx = -1
 
@@ -1073,49 +1248,7 @@ def is_conversation_ender(text: str) -> bool:
     return False
 
 # ---------------- EXPRESSION DEMONSTRATION & CAPABILITIES ----------------
-# checks if the user asked to see a specific face expression or all expressions
-def check_expression_command(text: str) -> Optional[Tuple[str, str]]:
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-    words = set(cleaned.split())
 
-    # 1. Show all / cycle all expressions
-    all_triggers = [
-        "show all expressions", "show each expression", "show every expression",
-        "show your expressions", "show all faces", "show each face", "show your faces",
-        "demonstrate expressions", "demonstrate all expressions", "cycle through expressions",
-        "cycle expressions", "list expressions", "show all the expressions", "show expressions",
-        "show me all expressions", "show me each expression", "show me all your expressions",
-        "what expressions do you have", "what faces do you have"
-    ]
-    if any(t in cleaned for t in all_triggers) or (("show" in words or "demonstrate" in words or "cycle" in words) and ("expressions" in words or "faces" in words)):
-        return ("all", "all")
-
-    # 2. Individual expressions
-    show_intent = any(w in words for w in [
-        "show", "display", "do", "make", "switch", "put", "be", "look", "give", "act", "can you show"
-    ]) or ("face" in words) or ("expression" in words)
-
-    if show_intent or cleaned in ["smile", "happy", "sad", "confused", "thinking", "listening", "watching", "moving"]:
-        if any(w in words for w in ["happy", "smile", "smiling", "cheerful", "glad"]):
-            return ("happy", "Here is my happy expression!")
-        if any(w in words for w in ["sad", "cry", "crying", "unhappy", "sorrow", "depressed", "tear", "tears", "heartbroken"]):
-            return ("sad", "Here is my sad expression.")
-        if any(w in words for w in ["thinking", "think", "pensive", "ponder"]):
-            return ("thinking", "Here is my thinking expression.")
-        if any(w in words for w in ["listening", "listen", "hear", "hearing", "sonar", "acoustic"]):
-            return ("listening", "This is my acoustic listening expression.")
-        if any(w in words for w in ["watching", "looking", "look", "camera", "scan", "scanning"]):
-            return ("watching", "Here is my optical watching expression.")
-        if any(w in words for w in ["moving", "movement", "drive", "driving", "walk", "walking", "rover", "forward"]):
-            return ("moving", "Here is my moving forward expression.")
-        if any(w in words for w in ["confused", "confuse", "puzzled", "curious", "question"]):
-            return ("confused", "Here is my confused expression.")
-        if any(w in words for w in ["error", "angry", "mad", "alert", "danger"]):
-            return ("error", "Here is my alert error expression.")
-        if any(w in words for w in ["idle", "normal", "default", "standard", "ready", "calm"]):
-            return ("idle", "Here is my standard idle expression.")
-
-    return None
 
 # cycles through happy, sad, thinking, listening, watching, moving, and confused faces
 def demonstrate_all_expressions():
@@ -1355,33 +1488,31 @@ def handle_user_text(text: str) -> bool:
         speak(reply, custom_state="happy", custom_status="APOLOGY ACCEPTED // HAPPY", hold_state_seconds=3.5)
         return False
 
-    # 5. Expression Demonstration ("show happy face", "show all expressions", etc.) -> 0ms, 0 tokens
-    expr_cmd = check_expression_command(text)
-    if expr_cmd is not None:
-        expr_type, expr_reply = expr_cmd
-        if expr_type == "all":
-            demonstrate_all_expressions()
-            return False
-        else:
-            set_face_state(expr_type, f"EXPRESSION: {expr_type.upper()}")
-            remember_exchange(text, expr_reply)
-            print("Neurolis:", expr_reply)
-            speak(expr_reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}", hold_state_seconds=3.5)
-            return False
-
-    # 6. Fast-Path: Visual perception, camera, seeing the user, or 'what do you see' -> 0ms, 0 tokens
-    visual_self_patterns = [
+    # 5. Fast-Path: Visual perception, camera inspection, follow-up re-checks -> 0ms, 0 tokens
+    visual_fast_patterns = [
+        # Self & camera perception
         "show me myself", "show myself", "show me me", "show my face",
         "show me what i look like", "what do i look like", "can you see me",
         "do you see me", "look at me", "show me what you see", "show what you see",
         "describe me", "how do i look", "look at myself", "am i visible", "see me",
         "what do you see", "what do u see", "what can you see", "what do you see right now",
-        "tell me what you see", "describe what you see", "can you see anything", "what are you seeing"
+        "tell me what you see", "describe what you see", "can you see anything", "what are you seeing",
+        # Visual follow-up / re-inspection triggers (e.g. 'Now check again')
+        "now check again", "check again", "look again", "see again", "try again",
+        "check it again", "look once more", "check once more", "look closer", "look properly",
+        "check now", "look now",
+        # Object / hand inspection triggers
+        "what is this", "what is that", "what are these", "what am i holding",
+        "what is in my hand", "in my hand", "holding in my hand", "look at this", "look at that",
+        "inspect this", "see this", "can you see this", "what do you think this is",
+        "what do you think of this", "what do you think about this",
+        "what phone do you think this is", "what phone is this", "which phone is this",
+        "what smartphone is this", "what device is this", "what object is this", "what color is this",
     ]
     cleaned_lower = re.sub(r"[^\w\s]", "", lower_text).strip()
     cleaned_words = set(cleaned_lower.split())
-    if any(p in cleaned_lower for p in visual_self_patterns) or ("myself" in cleaned_words) or ("look like" in cleaned_lower):
-        motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility"}
+    if any(p in cleaned_lower for p in visual_fast_patterns) or ("myself" in cleaned_words) or ("look like" in cleaned_lower) or ("in my hand" in cleaned_lower) or ("check again" in cleaned_lower):
+        motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility", "follow", "forward", "backward"}
         if not any(m in cleaned_words for m in motion_words):
             handle_vision_request(text)
             return False
@@ -1514,7 +1645,23 @@ def handle_user_text(text: str) -> bool:
                 speak(reply)
                 return False
 
-        # D. Standard Conversational Chat Reply
+        # D. Check for Expression Demonstration Action
+        expr_match = re.search(r'<action\s+expression=["\']([a-z_]+)["\']>(.*?)(?:</action>|$)', raw_reply, re.DOTALL | re.IGNORECASE)
+        if expr_match:
+            expr_type = expr_match.group(1).lower()
+            expr_spoken = clean_model_reply(expr_match.group(2).strip())
+            print(f"[EXPRESSION] Unified AI pipeline action: {expr_type} (Input: '{text}')")
+            if expr_type == "all":
+                demonstrate_all_expressions()
+                return False
+            else:
+                reply = expr_spoken or f"Here is my {expr_type} expression."
+                remember_exchange(text, reply)
+                print("Neurolis:", reply)
+                speak(reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}")
+                return False
+
+        # E. Standard Conversational Chat Reply
         # Extract facts if present
         facts_match = re.search(r"<facts>(.*?)</facts>", raw_reply, re.IGNORECASE)
         if facts_match:

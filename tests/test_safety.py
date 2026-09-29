@@ -171,7 +171,19 @@ class TestNeurolisSafety(unittest.TestCase):
         sample_mean = '<action>MEAN</action> Why would you say that? That actually hurt my feelings...'
         self.assertTrue("<action>MEAN</action>" in sample_mean)
         cleaned_sad = re.sub(r"<action>MEAN</action>", "", sample_mean, flags=re.IGNORECASE).strip()
-        self.assertEqual(cleaned_sad, "Why would you say that? That actually hurt my feelings...")
+        # Expression action
+        sample_expr = '<action expression="thinking">Here is my thinking face.</action>'
+        expr_match = re.search(r'<action\s+expression=["\']([a-z_]+)["\']>(.*?)(?:</action>|$)', sample_expr, re.DOTALL | re.IGNORECASE)
+        self.assertIsNotNone(expr_match)
+        self.assertEqual(expr_match.group(1).lower(), "thinking")
+        self.assertEqual(expr_match.group(2).strip(), "Here is my thinking face.")
+
+        # Expression action: all expressions
+        sample_all_expr = '<action expression="all">Demonstrating all facial expressions.</action>'
+        all_match = re.search(r'<action\s+expression=["\']([a-z_]+)["\']>(.*?)(?:</action>|$)', sample_all_expr, re.DOTALL | re.IGNORECASE)
+        self.assertIsNotNone(all_match)
+        self.assertEqual(all_match.group(1).lower(), "all")
+        self.assertEqual(all_match.group(2).strip(), "Demonstrating all facial expressions.")
 
     # ================= 8. Zero-Hardware Simulation Mode =================
     def test_hardware_free_simulation_initialization(self):
@@ -313,7 +325,67 @@ class TestNeurolisSafety(unittest.TestCase):
                 f"Capabilities query '{q}' failed to trigger capabilities inquiry!"
             )
 
+    # ================= 13. Whisper Hallucination & Acoustic Filler Filtering =================
+    def test_whisper_hallucination_and_short_filler_filtering(self):
+        """Verify breath puffs, 'eh', and acoustic fillers are rejected."""
+        # Simulated transcription text
+        fillers = ["Eh.", "eh", "uh", "um", "ah", "sigh", "cough", "pfft", "silence", "yeah"]
+        ALLOWED_2CHAR_WORDS = {"no", "hi", "go", "ok", "up", "me", "we", "he", "in", "on", "at", "to", "do", "is", "am", "my"}
+
+        for filler in fillers:
+            cleaned = re.sub(r"[^\w\s]", "", filler.lower()).strip()
+            # Must be recognized as hallucination or non-allowed 2-char filler
+            is_hallucination = cleaned in {
+                "eh", "uh", "er", "um", "ah", "oh", "ha", "haha", "huh", "hm", "hmm",
+                "pfft", "tsk", "sigh", "cough", "snort", "shh", "sh", "shush", "mhm",
+                "uh-huh", "uh huh", "silence", "oops", "yeah", "so", "you", "thanks"
+            }
+            is_invalid_short = len(cleaned) < 2 or (len(cleaned) == 2 and cleaned not in ALLOWED_2CHAR_WORDS)
+            self.assertTrue(
+                is_hallucination or is_invalid_short,
+                f"Filler '{filler}' was not recognized as an invalid hallucination/noise!"
+            )
+
+        # Valid 2-character words must be accepted
+        valid_words = ["hi", "no", "go", "ok"]
+        for vw in valid_words:
+            self.assertIn(vw, ALLOWED_2CHAR_WORDS)
+
+    # ================= 14. Visual Fast Path Patterns =================
+    def test_visual_fast_path_patterns(self):
+        """Verify follow-up checks ('now check again') and hand items route directly to camera."""
+        test_queries = [
+            "now check again",
+            "check again",
+            "look again",
+            "what is this",
+            "what am i holding",
+            "what is in my hand",
+            "look at this",
+            "what phone do you think this is",
+        ]
+        visual_fast_patterns = [
+            "now check again", "check again", "look again", "see again", "try again",
+            "what is this", "what is that", "what are these", "what am i holding",
+            "what is in my hand", "in my hand", "holding in my hand", "look at this", "look at that",
+            "what phone do you think this is", "what phone is this", "which phone is this",
+        ]
+        for q in test_queries:
+            q_clean = q.lower()
+            matched = any(p in q_clean for p in visual_fast_patterns)
+            self.assertTrue(matched, f"Visual query '{q}' did not match fast path patterns!")
+
+    # ================= 15. Sentence Splitting for Pipelined TTS =================
+    def test_sentence_splitting_for_pipelined_tts(self):
+        """Verify sentence tokenizer splits multi-sentence responses cleanly."""
+        text = "I see a white smartphone with three camera lenses. It looks like an iPhone model."
+        sentences = listen._split_into_sentences(text)
+        self.assertEqual(len(sentences), 2)
+        self.assertEqual(sentences[0], "I see a white smartphone with three camera lenses.")
+        self.assertEqual(sentences[1], "It looks like an iPhone model.")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
 

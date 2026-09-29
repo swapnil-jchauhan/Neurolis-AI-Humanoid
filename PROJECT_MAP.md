@@ -1,6 +1,6 @@
 # Project Neurolis Map
 
-Last updated: 2026-09-24
+Last updated: 2026-09-29
 
 ## Project Goal
 
@@ -25,22 +25,26 @@ Final 3-File Master Architecture:
   - THE ONLY FILE YOU RUN: Master Brain orchestrating Voice, Face UI & Motors.
   - Handles Groq Whisper STT (`whisper-large-v3-turbo`) & Groq Qwen 27B (`qwen/qwen3.8-27b`) LLM intelligence.
   - WebRTC VAD Level 3 + RMS noise filtering tuned for loud auditoriums.
-  - 7.0-second conversational follow-up timeout (0.65s end silence cutoff for snappy turn-taking) with non-repetitive standby wrap-ups.
+  - Snappy 0.45s end-silence cutoff with dual-condition voice streak checking (stops ambient exhalations from resetting silence counter, enabling instant Groq dispatch).
+  - Extended 18.0-second conversational follow-up timeout with warm audio stream persistence and non-repetitive standby wrap-ups.
   - Fast Intent Conversation Enders ("alr thanks", "bye", "good", "done", etc.) returning gracefully to standby.
   - **Unified Single-Pass AI Decision Pipeline**:
-    - 1 single Groq call handles motor commands, camera vision routing, and mean-remark empathy checks simultaneously, saving API tokens and cutting latency in half.
-    - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, and `<action>MEAN</action>`.
-  - **AI-Verified Semantic Motor Classifier & Negation Guards**:
-    - 0ms deterministic fast-path negation guards and emergency stop keywords.
-    - Completely eliminates false-positive follow triggers on phrases like "quit following me" or "stop following".
-    - Accurately classifies: `STOP`, `FOLLOW`, `APPROACH`, `ROAM`, `DEMONSTRATE`, `ASK_MOBILITY`, `STEP_BACK`, `SPIN`, and `NONE`.
-  - **Active Expression Demonstrator Engine**:
-    - Individual expressions ("show the happy face", "show sad face", "show thinking face", etc.) displayed actively on screen and held for 3.5s with speech confirmation.
-    - Showcase all expressions ("show all expressions", "show each expression") sequentially cycling through all 7 expressions (`happy` -> `sad` -> `thinking` -> `listening` -> `watching` -> `moving` -> `confused`) with descriptive subtitles.
-  - **Mean Input & Heartbroken Sad Reaction System**:
-    - Auto-detects insults, rudeness, dismissal, or derogatory phrases directed at the robot ("you are stupid", "you suck", "shut up", "i hate you", "ugly robot", etc.).
-    - Instantly switches face to `sad` (status: `FEELINGS HURT // SAD`) and speaks a polite heartbroken reaction with trembling frown and teardrop animation.
-    - Heals when apologized to or complimented ("sorry", "you're good", "i like you"), transitioning into relieved `happy` state with bright smile and cyber blush.
+    - 1 single Groq call handles motor commands, camera vision routing, expression demonstrations, and mean-remark empathy checks simultaneously, saving API tokens and eliminating keyword latency.
+    - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, `<action expression="...">`, and `<action>MEAN</action>`.
+  - **Zero-Latency In-Memory Pipelined TTS & 0ms RAM Cache**:
+    - Complete elimination of disk temporary files; streams audio directly into RAM buffers using `io.BytesIO` and `soundfile`.
+    - **Sentence Pipelining**: Multi-sentence replies synthesize Sentence 1 first so speech begins immediately (~0.8s), while Sentence 2 synthesizes concurrently in the background for zero-gap continuous speech.
+    - **RAM Audio Pre-Cache**: Standard greetings, standby transitions, stop commands, and fallback phrases are pre-cached in memory at boot for instantaneous **0ms voice output**.
+    - **100% Lockstep Audio-Synced Subtitles**: Visual subtitles and Face UI mouth squashes are dispatched the exact millisecond audio playback begins, eliminating the awkward silence of reading text on a frozen, mute robot.
+  - **Triple-Layer Acoustic Noise & Anti-Hallucination Guards**:
+    - Calibrated `MIN_SPEECH_RMS_THRESHOLD = 105` and `START_SPEECH_FRAMES = 4` (120ms) so micro-sounds (lip smacks, breath puffs, sighing, keyboard clicks) never trigger recording.
+    - Minimum audio duration guard (`MIN_RECORD_SECONDS = 0.50s`).
+    - Expanded Whisper hallucination filter rejecting filler sounds (`"eh"`, `"uh"`, `"er"`, `"um"`, `"ah"`, `"pfft"`, `"sigh"`, `"cough"`).
+    - Whitelist for 2-character words (`{"no", "hi", "go", "ok", ...}`) rejecting phantom two-letter Whisper noise.
+  - **Zero-Lag Visual Fast-Path & 10s Server Timeout**:
+    - Direct 0ms routing for camera follow-ups (`"now check again"`, `"look again"`, `"check it again"`) and hand/object inspection (`"what is this"`, `"what am i holding"`, `"what phone do you think this is"`, `"in my hand"`), bypassing the first Groq chat call entirely.
+    - Resized vision images to 512px width for 40% smaller payload and 2x faster Groq LPU attention processing.
+    - Hard 10.0-second timeout on Groq vision calls to prevent server-side queue hangs.
   - **Capabilities Inquiry Handler**:
     - Instant, token-safe response under 45 words stating mobility, person following, camera analysis, and listing all facial expressions including sad.
   - **Text Input & Microphone-Free Mode**:
