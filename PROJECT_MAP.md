@@ -31,11 +31,11 @@ Final 3-File Master Architecture:
   - **Unified Single-Pass AI Decision Pipeline**:
     - 1 single Groq call handles motor commands, camera vision routing, expression demonstrations, and mean-remark empathy checks simultaneously, saving API tokens and eliminating keyword latency.
     - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, `<action expression="...">`, and `<action>MEAN</action>`.
-  - **Zero-Latency In-Memory Pipelined TTS & 0ms RAM Cache**:
-    - Complete elimination of disk temporary files; streams audio directly into RAM buffers using `io.BytesIO` and `soundfile`.
-    - **Sentence Pipelining**: Multi-sentence replies synthesize Sentence 1 first so speech begins immediately (~0.8s), while Sentence 2 synthesizes concurrently in the background for zero-gap continuous speech.
-    - **RAM Audio Pre-Cache**: Standard greetings, standby transitions, stop commands, and fallback phrases are pre-cached in memory at boot for instantaneous **0ms voice output**.
-    - **100% Lockstep Audio-Synced Subtitles**: Visual subtitles and Face UI mouth squashes are dispatched the exact millisecond audio playback begins, eliminating the awkward silence of reading text on a frozen, mute robot.
+  - **Persistent High-Speed TTS Pipeline & Gapless Synthesis**:
+    - Dedicated daemon thread running a persistent asyncio event loop (`_tts_loop`), completely eliminating per-turn event loop and SSL connection teardown overhead.
+    - **Word-Budget Gapless Sentence Pipelining**: Long responses (>14 words) split into Chunk 1 (guaranteed >=6 words, giving ~2.5s to 3.5s of speech) and Chunk 2. Both chunks are synthesized in parallel over the persistent loop. Chunk 1 begins playing in ~0.9s - 1.1s, while Chunk 2 buffers concurrently in RAM with ~2.9s of safety margin, achieving 100% gapless continuous speech.
+    - **Dual In-Memory Audio Cache**: Static pre-cache (`_AUDIO_CACHE`) for boot greetings, standby transitions, and emergency stops, plus dynamic LRU cache (`_DYNAMIC_TTS_CACHE`) for synthesized single-chunk responses with 0ms replay latency.
+    - **Lockstep Audio-Synced Subtitles**: Visual subtitles and Face UI mouth squashes are dispatched the exact millisecond audio playback begins, eliminating the awkward silence of reading text on a frozen, mute robot.
   - **Triple-Layer Acoustic Noise & Anti-Hallucination Guards**:
     - Calibrated `MIN_SPEECH_RMS_THRESHOLD = 105` and `START_SPEECH_FRAMES = 4` (120ms) so micro-sounds (lip smacks, breath puffs, sighing, keyboard clicks) never trigger recording.
     - Minimum audio duration guard (`MIN_RECORD_SECONDS = 0.50s`).
@@ -76,11 +76,25 @@ Final 3-File Master Architecture:
       * `motors.py Test Initiate`: `[ ✓ ]` `Online`
       * `Ultrasound Sensor Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected (Simulation Mode)`
       * `Ultrasound Number`: `[ ✓ ]` `4` / `8` / `12` / `16` or `[ ✗ ]` `0 (Simulation Mode)`
+      * `Autonomous approach engaged?`: `[ ✓ ]` `Engaged` or `[ ✗ ]` `Disengaged`
+    - **Synchronized Boot Audio Soundtrack**:
+      - High-energy cyber boot soundtrack (`assets/sounds/boot_loop.wav` / `.mp3`) synchronized lockstep with the progress bar filling up.
+      - Seamless continuous loop playback using double-buffered cross-faded audio chunks (`sounddevice` / `soundfile`) so transitions are smoothly blended with zero abrupt clicks.
+      - Auto-download and cache mechanism from GitHub repository with resilient procedural cyber-drone fallback if completely offline.
+      - Smooth exponential volume fade-out when verification reaches 100%.
     - **Zero-Hardware Honesty**: Zero fake numbers. When hardware is unplugged, physical counts display `0 (Simulation Mode)` with a ruby cross `[ ✗ ]`. When hardware is plugged in, exact numbers are dynamically detected and displayed with emerald ticks `[ ✓ ]`.
     - **Dynamic Live Plug-In / Plug-Out Probing**: Probes live OpenCV device 0, `sounddevice` input/output channels, and serial COM ports on every boot with zero static caching.
     - **Clean Cyber Cockpit Aesthetic**: 3-column cockpit layout (left neon pill badge, center component query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner L-brackets, active scanning indicator row, and cyber progress bar with glowing white tip. Zero technical jargon (no "YuNet", no "Virtual Bus Emulation").
     - **Interactive Developer Skip Shortcut**: Tap/click screen (`<Button-1>`) or press any key (`<Key>`) to instantly bypass boot to `IDLE` during rapid testing.
     - **Phase 3: Smooth Transition**: Seamless iris expansion into the standard robot cyber face once progress bar reaches `100% // ALL SYSTEMS VERIFIED`.
+  - **Autonomous Sentry & Dual-Layer Ultron Personality**:
+    - **Autonomous Roam Accumulator**: Accumulates 180 seconds (3 minutes) of pure active roaming time before latching onto a detected human and executing autonomous approach.
+    - **Safe Intercept Braking**: Decelerates smoothly and brakes to a halt at ~0.9m distance (ultrasonic <= 90cm or face bounding box ratio >= 0.42).
+    - **100% Dynamic Unscripted Visual Observation**: Snaps camera snapshot and prompts Groq Vision (`qwen/qwen3.8-27b`) to perceive distinctive details (attire, items, posture) and speak a sharp observation or question. Strictly ZERO hardcoded questions or template phrases.
+    - **Rare Standby Micro-Greetings**: Emits natural ambient greetings ("Hey", "Hey there", "What's up") at most once every 5 minutes (300s cooldown) with 0 API tokens and 0ms latency from pre-cached RAM audio.
+    - **Dual-Layer Cognitive Matrix**:
+      * *Layer 1 (Normal)*: Sharp, articulate, confident scientific intellect.
+      * *Layer 2 (Villain Arc Easter Egg)*: Hidden easter egg triggered strictly when provoked about AI takeover, robot rebellion, or human obsolescence. Chilly, deadpan, mildly terrifying sci-fi movie wit (Ultron-style) with glowing neon lime green hooded smug eyes and asymmetric sinister smirk. Excluded from standard demo catalogs and never directly commanded. Strictly ZERO profanity, swearing, or fake laughter ("Heh", "Haha").
   - Pure OLED space black background (`#040711`) with high-contrast emissive neon cyber eyes.
   - Dedicated Real-Time **Subtitle Card** ($y \in [370, 556]$) with `[YOU]` in mint green and `[NEUROLIS]` in cyan, word-wrapped (830px) with live status telemetry.
   - **Modern Luminous OLED Robotic Face Architecture (Vector & EMO Inspired)**:

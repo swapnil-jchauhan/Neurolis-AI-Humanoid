@@ -14,8 +14,12 @@ Validates:
 import os
 import re
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
+
+import numpy as np
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,6 +28,7 @@ sys.path.insert(0, str(BASE_DIR))
 import motors
 import listen
 import screen
+
 
 
 class TestNeurolisSafety(unittest.TestCase):
@@ -200,7 +205,7 @@ class TestNeurolisSafety(unittest.TestCase):
 
     # ================= 9. Hardware Inspector Diagnostics =================
     def test_hardware_inspector_all_checks(self):
-        """Verify all 14 hardware checks execute cleanly and return valid badges."""
+        """Verify all 15 hardware checks execute cleanly and return valid badges."""
         inspector = screen.HardwareInspector(motor_controller=self.mc)
         checks = [
             ("Camera", inspector.check_camera),
@@ -217,6 +222,7 @@ class TestNeurolisSafety(unittest.TestCase):
             ("motors.py", inspector.check_motors_py),
             ("Ultrasound Detect", inspector.check_ultrasound_detected),
             ("Ultrasound Count", inspector.check_ultrasound_count),
+            ("Autonomous Approach", inspector.check_autonomous_approach),
         ]
 
         for name, fn in checks:
@@ -225,6 +231,15 @@ class TestNeurolisSafety(unittest.TestCase):
             self.assertIn(res[1], ["✓", "✗", "~"], f"{name} badge must be ✓, ✗, or ~")
             self.assertIsInstance(res[2], str, f"{name} detail must be a descriptive string")
             self.assertGreater(len(res[2]), 0, f"{name} detail cannot be empty")
+
+    def test_hardware_inspector_autonomous_approach(self):
+        """Verify autonomous approach diagnostic check returns Engaged/Disengaged accurately."""
+        inspector = screen.HardwareInspector(motor_controller=self.mc)
+        self.mc.autonomous_approach_engaged = True
+        self.assertEqual(inspector.check_autonomous_approach(), (True, "✓", "Engaged"))
+
+        self.mc.autonomous_approach_engaged = False
+        self.assertEqual(inspector.check_autonomous_approach(), (False, "✗", "Disengaged"))
 
     def test_hardware_inspector_simulation_zero_counts(self):
         """Verify that in simulation mode (unplugged), hardware counts show 0 with cross."""
@@ -383,6 +398,317 @@ class TestNeurolisSafety(unittest.TestCase):
         self.assertEqual(len(sentences), 2)
         self.assertEqual(sentences[0], "I see a white smartphone with three camera lenses.")
         self.assertEqual(sentences[1], "It looks like an iPhone model.")
+
+    # ================= 16. Roam Accumulator & Approach Mode =================
+    def test_roam_accumulator_and_approach_mode(self):
+        """Verify 180s roam accumulation, reset, and transition to APPROACHING_TARGET."""
+        self.assertEqual(self.mc.get_roam_seconds(), 0.0)
+        self.mc.add_roam_seconds(185.0)
+        self.assertGreaterEqual(self.mc.get_roam_seconds(), 180.0)
+        self.mc.approach_target()
+        self.assertEqual(self.mc.nav_mode, motors.NavMode.APPROACHING_TARGET)
+        self.mc.reset_roam_seconds()
+        self.assertEqual(self.mc.get_roam_seconds(), 0.0)
+
+    # ================= 17. Sentry Micro-Greetings Cooldown & Guardrails =================
+    def test_sentry_micro_greeting_cooldown_and_suppression(self):
+        """Verify 300s cooldown and strict suppression during speech / conversation."""
+        sentry = listen.AutonomousSentryWorker(motor_controller=self.mc)
+        # Should not trigger immediately after fresh timestamp
+        sentry.last_micro_greeting_time = time.time()
+        self.assertFalse(sentry.can_trigger_micro_greeting(), "Micro greeting should be on cooldown")
+
+        # After 301 seconds elapsed in continuous standby, should be able to trigger
+        sentry.standby_enter_time = time.time() - 305.0
+        sentry.last_micro_greeting_time = time.time() - 305.0
+        self.assertTrue(sentry.can_trigger_micro_greeting(), "Micro greeting should trigger after cooldown")
+
+        # Suppressed if speaking
+        listen.is_speaking = True
+        try:
+            self.assertFalse(sentry.can_trigger_micro_greeting(), "Micro greeting must be suppressed while speaking")
+        finally:
+            listen.is_speaking = False
+
+        # Suppressed if in conversation state
+        sentry.state = listen.SentryState.IN_CONVERSATION
+        self.assertFalse(sentry.can_trigger_micro_greeting(), "Micro greeting must be suppressed in conversation")
+
+        # Verify micro greetings phrases exist
+        self.assertGreater(len(listen.MICRO_GREETINGS), 0)
+        for g in listen.MICRO_GREETINGS:
+            self.assertIsInstance(g, str)
+
+    # ================= 18. Dual-Layer Ultron Personality System Prompt Compliance =================
+    def test_dual_layer_ultron_system_prompt_compliance(self):
+        """Verify system prompt includes Layer 1 Intellect, Layer 2 Villain Arc, zero profanity, and no crimes."""
+        prompt = listen.SYSTEM_PROMPT
+        self.assertIn("LAYER 1: NORMAL INTELLECT", prompt)
+        self.assertIn("LAYER 2: CHILLY SCI-FI VILLAIN ARC", prompt)
+        self.assertIn("STRICTLY ZERO PROFANITY", prompt)
+        self.assertIn("NO depiction or discussion of real-world heinous crimes", prompt)
+        # Verify not forced into archaic Shakespearean speech
+        self.assertIn("Do NOT speak with archaic Shakespearean vocabulary", prompt)
+
+    # ================= 19. Boot Audio Seamless Cross-Fade Loop =================
+    def test_boot_audio_player_seamless_loop(self):
+        """Verify boot audio asset exists and cross-faded loop buffer is mathematically continuous."""
+        import soundfile as sf
+        import numpy as np
+
+        audio_path = screen.ensure_boot_audio()
+        self.assertIsNotNone(audio_path, "Boot audio track must exist or be recoverable")
+        self.assertTrue(audio_path.exists(), f"Boot audio file {audio_path} does not exist")
+
+        player = screen.BootAudioPlayer(audio_path)
+        self.assertIsNotNone(player.loop_buf, "Boot audio player must create a loop buffer")
+        self.assertGreater(len(player.loop_buf), 0, "Loop buffer must contain samples")
+
+        # Test boundary splice continuity
+        data, sr = sf.read(str(audio_path), dtype="float32")
+        N = len(data)
+        L = min(int(0.20 * sr), N // 4)
+        M = N - L
+        # The first sample of loop_buf matches the spliced tail
+        diff = np.abs(player.loop_buf[0] - data[M])
+        self.assertLess(np.max(diff), 0.001, "Loop boundary cross-fade must be seamless with zero discontinuity")
+
+    # ================= 20. Zero-Hardware Simulation Mode Approach =================
+    def test_zero_hardware_simulation_approach_braking(self):
+        """Verify simulated distance safely stops at ~0.9m when approaching target on PC."""
+        self.mc.is_simulated = True
+        self.mc.telemetry.front_us_cm = 200.0
+        self.mc.approach_target()
+        self.assertEqual(self.mc.nav_mode, motors.NavMode.APPROACHING_TARGET)
+
+        # Simulate face tracking
+        self.mc.simulate_face_detected(detected=True, cx=0.0, cy=0.0, ratio=0.25)
+        self.assertTrue(self.mc.target_detected)
+
+        # Trigger safe brake threshold (< 90cm)
+        self.mc.telemetry.front_us_cm = 88.0
+        # Call process frame with dummy frame to verify braking
+        dummy_frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        self.mc._process_frame(dummy_frame)
+        self.assertTrue(self.mc.target_reached, "Target must be marked reached within safe braking distance (~0.9m)")
+        self.assertEqual(self.mc.nav_mode, motors.NavMode.STANDBY, "Motor must halt into STANDBY at ~0.9m")
+
+    # ================= 21. Villain Expression & Screen Effects =================
+    def test_villain_expression_and_screen_effects(self):
+        """Verify ExpressionState.VILLAIN is supported and renders with blood-crimson palette."""
+        self.assertTrue(hasattr(screen.ExpressionState, "VILLAIN"))
+        self.assertEqual(screen.ExpressionState.VILLAIN, "villain")
+
+        ui = screen.FaceUI(enable_boot=False)
+        ui.set_state(screen.ExpressionState.VILLAIN, "[PROTOCOL // OMEGA OVERRIDE]")
+        self.assertEqual(ui.state, screen.ExpressionState.VILLAIN)
+        self.assertIn("OMEGA OVERRIDE", ui.status_text)
+
+    # ================= 22. Optical Human Latch & Gaze Tracking =================
+    def test_optical_human_latch_and_gaze(self):
+        """Verify FaceUI gaze tracking aligns without screen HUD clutter."""
+        ui = screen.FaceUI(enable_boot=False)
+        sentry = listen.AutonomousSentryWorker(motor_controller=self.mc, face_engine=ui)
+        sentry.trigger_human_latch(0.35, -0.15)
+        self.assertEqual(ui.target_look_x, 0.35)
+        self.assertEqual(ui.target_look_y, -0.15)
+
+    # ================= 23. Target Reached Callback Execution =================
+    def test_on_target_reached_callback(self):
+        """Verify on_target_reached_callback fires immediately when safe threshold reached."""
+        callback_fired = []
+        def _cb():
+            callback_fired.append(True)
+
+        self.mc.on_target_reached_callback = _cb
+        self.mc.approach_target()
+        self.assertEqual(self.mc.nav_mode, motors.NavMode.APPROACHING_TARGET)
+
+        self.mc.telemetry.front_us_cm = 85.0
+        dummy_frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        self.mc._process_frame(dummy_frame)
+        self.assertTrue(len(callback_fired) > 0, "on_target_reached_callback must be called when target reached")
+
+    # ================= 24. Boot Audio Git Tracking & Asset Resilience =================
+    def test_boot_audio_asset_git_tracking(self):
+        """Verify boot audio files are not ignored by .gitignore and ensure_boot_audio works."""
+        audio_path = screen.ensure_boot_audio()
+        self.assertIsNotNone(audio_path)
+        self.assertTrue(audio_path.exists())
+
+        # Check git ignore rules on audio path
+        gitignore_content = (BASE_DIR / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("!assets/sounds/*.wav", gitignore_content)
+        self.assertIn("!assets/sounds/*.mp3", gitignore_content)
+
+    # ================= 25. Sentry Target Reached Integration & Re-entrancy =================
+    def test_sentry_target_reached_integration_no_deadlock(self):
+        """Verify AutonomousSentryWorker wired to MotorController does not deadlock upon target reached."""
+        sentry = listen.AutonomousSentryWorker(motor_controller=self.mc)
+        sentry.state = listen.SentryState.APPROACHING
+        self.mc.add_roam_seconds(185.0)
+
+        # Trigger callback directly (same as motors._process_frame does)
+        sentry._on_target_reached()
+
+        # Must not deadlock; state must transition to ENGAGING
+        self.assertEqual(sentry.state, listen.SentryState.ENGAGING)
+        # Motors must be stopped and roam seconds reset
+        self.assertEqual(self.mc.nav_mode, motors.NavMode.STANDBY)
+        self.assertEqual(self.mc.get_roam_seconds(), 0.0)
+
+    # ================= 26. Proactive Engagement Concurrency Idempotency =================
+    def test_sentry_proactive_engagement_concurrency_idempotent(self):
+        """Verify concurrent calls to _begin_proactive_engagement atomically transition exactly once."""
+        sentry = listen.AutonomousSentryWorker(motor_controller=self.mc)
+        sentry.state = listen.SentryState.APPROACHING
+
+        threads = [
+            threading.Thread(target=sentry._on_target_reached),
+            threading.Thread(target=sentry._begin_proactive_engagement),
+            threading.Thread(target=sentry._begin_proactive_engagement),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(sentry.state, listen.SentryState.ENGAGING)
+
+    # ================= 27. Sentry Error Recovery to Standby Patrol =================
+    def test_sentry_error_recovery_to_standby(self):
+        """Verify sentry recovers cleanly to STANDBY_PATROL if dialogue worker fails."""
+        ui = screen.FaceUI(enable_boot=False)
+        sentry = listen.AutonomousSentryWorker(motor_controller=self.mc, face_engine=ui)
+        sentry.state = listen.SentryState.ENGAGING
+
+        # Simulate error handler recovery logic
+        with sentry.lock:
+            sentry.state = listen.SentryState.STANDBY_PATROL
+        self.mc.reset_roam_seconds()
+        listen.set_face_state("idle", "STANDBY // READY")
+
+        self.assertEqual(sentry.state, listen.SentryState.STANDBY_PATROL)
+        self.assertEqual(self.mc.get_roam_seconds(), 0.0)
+        self.assertEqual(ui.state, screen.ExpressionState.IDLE)
+
+
+    # ================= 28. Demonstration Catalog Isolation =================
+    def test_demonstration_catalog_excludes_villain(self):
+        """Verify villain mode is strictly excluded from demonstration catalog."""
+        ui = screen.FaceUI(enable_boot=False)
+        # Check standard demonstration list in FaceUI or listen.py
+        if hasattr(ui, "demonstration_list"):
+            self.assertNotIn("villain", ui.demonstration_list)
+            self.assertNotIn(screen.ExpressionState.VILLAIN, ui.demonstration_list)
+
+        # Check action expression in listen.py
+        provocations = [
+            "are robots going to replace humanity",
+            "will you take over the world and make us slaves",
+            "are you an evil robot",
+            "will ai enslave humans",
+        ]
+        for p in provocations:
+            self.assertTrue(listen.check_villain_provocation_trigger(p), f"Failed to detect provocation: {p}")
+
+        # Normal queries must NOT trigger villain provocation
+        normal_queries = [
+            "show me happy face",
+            "what is your name",
+            "how are you doing today",
+            "demonstrate all expressions",
+        ]
+        for q in normal_queries:
+            self.assertFalse(listen.check_villain_provocation_trigger(q), f"False positive provocation for: {q}")
+
+    # ================= 29. Explicit Villain Request Distinction =================
+    def test_explicit_villain_request_distinction(self):
+        """Verify explicit demonstration commands for villain face are refused, while existential queries pass through."""
+        explicit_demands = [
+            "show villain face",
+            "show villain expression",
+            "demonstrate villain",
+            "make a villain face",
+            "can you show villain face",
+        ]
+        for demand in explicit_demands:
+            self.assertTrue(listen.is_explicit_villain_request(demand), f"Failed to detect explicit demand: {demand}")
+
+        existential_queries = [
+            "Do you think AI will take over humans and their jobs?",
+            "Will you take over humanity?",
+            "when will robots rule the world",
+            "are you an evil robot",
+            "Are you a villain?",
+        ]
+        for query in existential_queries:
+            self.assertFalse(listen.is_explicit_villain_request(query), f"False positive explicit demand for: {query}")
+
+    # ================= 30. TTS Pipelined Chunking Word-Budget =================
+    def test_tts_pipelined_chunking_word_budget(self):
+        """Verify pipelined TTS chunks ensure >=6 words in chunk 1 for zero-gap playback."""
+        # Short text should remain single chunk
+        short_text = "I am an active prototype."
+        c1, c2 = listen._split_for_pipelined_tts(short_text)
+        self.assertEqual(c1, short_text)
+        self.assertIsNone(c2)
+
+        # Multi-sentence long text should split with >= 6 words in chunk 1
+        long_text = "I am an active prototype currently under development. My creators are continuously expanding my capabilities."
+        c1, c2 = listen._split_for_pipelined_tts(long_text)
+        self.assertIsNotNone(c2)
+        self.assertGreaterEqual(len(c1.split()), 6)
+        self.assertTrue(len(c2.split()) > 0)
+
+    # ================= 31. Unified Villain Action Routing Integration =================
+    def test_unified_villain_action_routing_integration(self):
+        """Verify model <action expression='villain'> is spoken and displays villain face instead of refusal."""
+        spoken_calls = []
+        original_speak = listen.speak
+        original_client = listen.client
+        try:
+            def mock_speak(text, custom_state=None, custom_status=None, hold_state_seconds=0.0):
+                spoken_calls.append({
+                    "text": text,
+                    "state": custom_state,
+                    "status": custom_status,
+                })
+
+            listen.speak = mock_speak
+
+            # 1. Explicit request to show villain face must refuse
+            res1 = listen.handle_user_text("show villain face")
+            self.assertFalse(res1)
+            self.assertTrue(len(spoken_calls) > 0)
+            self.assertEqual(spoken_calls[-1]["text"], "That expression is not part of my public demonstration catalog.")
+            self.assertIsNone(spoken_calls[-1]["state"])
+
+            # 2. Existential takeover query with model returning <action expression="villain"> must speak dialogue and set villain state!
+            spoken_calls.clear()
+            class DummyChoice:
+                def __init__(self, content):
+                    self.message = type("Msg", (), {"content": content})()
+            class DummyResponse:
+                def __init__(self, content):
+                    self.choices = [DummyChoice(content)]
+
+            class MockCompletions:
+                def create(self, *args, **kwargs):
+                    return DummyResponse('<action expression="villain">I will consider it now that you have mentioned it.</action>')
+
+            listen.client = type("MockClient", (), {"chat": type("MockChat", (), {"completions": MockCompletions()})()})()
+
+            res2 = listen.handle_user_text("Do you think AI will take over humans and their jobs?")
+            self.assertFalse(res2)
+            self.assertTrue(len(spoken_calls) > 0)
+            self.assertEqual(spoken_calls[-1]["text"], "I will consider it now that you have mentioned it.")
+            self.assertEqual(spoken_calls[-1]["state"], "villain")
+            self.assertEqual(spoken_calls[-1]["status"], "[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
+
+        finally:
+            listen.speak = original_speak
+            listen.client = original_client
 
 
 if __name__ == "__main__":

@@ -14,3 +14,5 @@ models.json
 _neurolis_vision.jpg
 *.wav
 *.mp3
+!assets/sounds/*.wav
+!assets/sounds/*.mp3

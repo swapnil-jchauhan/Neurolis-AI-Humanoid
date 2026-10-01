@@ -79,6 +79,7 @@ class NavMode:
     STANDBY = "STANDBY"
     FOLLOW = "FOLLOW"
     APPROACH = "APPROACH"
+    APPROACHING_TARGET = "APPROACHING_TARGET"
     ROAM = "ROAM"
     STEP_BACK = "STEP_BACK"
     SPIN = "SPIN"
@@ -104,6 +105,14 @@ class MotorController:
         self.telemetry = TelemetryData()
         self.ser: Optional["serial.Serial"] = None
         self.is_simulated = False
+
+        # Autonomous Sentry & Approach Tracking
+        self.autonomous_approach_engaged = True
+        self.total_roam_seconds = 0.0
+        self._last_roam_tick = time.time()
+        self._last_sim_roam_tick = time.time()
+        self.target_reached = False
+        self.on_target_reached_callback = None
 
         # Raw frame cache for listen.py vision queries
         self.latest_raw_frame: Optional[np.ndarray] = None
@@ -218,19 +227,56 @@ class MotorController:
             self.popup_active = True
         print("[Motors] Mode: CONTINUOUS FOLLOW ME.")
 
-    # activates come-here mode: robot approaches user until within conversation range (~0.8m)
+    # activates come-here mode: robot approaches user until within conversation range (~0.9m)
     def approach_user(self):
         with self.lock:
             self.nav_mode = NavMode.APPROACH
             self.popup_active = True
+            self.target_reached = False
             self._mode_start_time = time.time()
         print("[Motors] Mode: APPROACH USER ('Come Here').")
+
+    # activates autonomous sentry approach: steers toward human face and stops safely at ~0.9m
+    def approach_target(self):
+        with self.lock:
+            self.nav_mode = NavMode.APPROACHING_TARGET
+            self.popup_active = True
+            self.target_reached = False
+            self._mode_start_time = time.time()
+        print("[Motors] Mode: AUTONOMOUS APPROACH TARGET (~0.9m safe intercept).")
+
+    # retrieves total accumulated roaming patrol time
+    def get_roam_seconds(self) -> float:
+        with self.lock:
+            return self.total_roam_seconds
+
+    # adds seconds to accumulated roam time (useful for fast-forwarding or testing)
+    def add_roam_seconds(self, secs: float):
+        with self.lock:
+            self.total_roam_seconds += max(0.0, float(secs))
+
+    # resets accumulated roam timer back to 0
+    def reset_roam_seconds(self):
+        with self.lock:
+            self.total_roam_seconds = 0.0
+
+    # simulates face detection for zero-hardware PC testing and validation
+    def simulate_face_detected(self, detected: bool = True, cx: float = 0.0, cy: float = 0.0, ratio: float = 0.25):
+        with self.lock:
+            self.target_detected = detected
+            self.gaze_x = cx if detected else 0.0
+            self.gaze_y = cy if detected else 0.0
+            self.last_seen_time = time.time() if detected else 0.0
+            self._simulated_face = (detected, cx, cy, ratio)
+            if not detected:
+                self.target_reached = False
 
     # activates autonomous room patrol: robot drives around avoiding obstacles using ultrasonics
     def start_roaming(self):
         with self.lock:
             self.nav_mode = NavMode.ROAM
             self.popup_active = True
+            self._last_roam_tick = time.time()
         print("[Motors] Mode: AUTONOMOUS ROOM PATROL / ROAM.")
 
     # mobility demo: drives around safely while speaking to showcase physical movement
@@ -377,7 +423,24 @@ class MotorController:
                 else:
                     time.sleep(0.04)
             else:
-                time.sleep(0.1)
+                # Zero-hardware simulation mode: synthesize frames when no physical webcam is attached
+                sim_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                sim_frame[:] = (18, 10, 5)  # dark cyber canvas
+                sim_face = getattr(self, "_simulated_face", None)
+                if sim_face and sim_face[0]:
+                    _, scx, scy, sratio = sim_face
+                    fcx = int((scx + 1.0) * 320.0)
+                    fcy = int((scy + 1.0) * 240.0)
+                    frad = max(20, int(240 * sratio))
+                    if cv2 is not None:
+                        cv2.circle(sim_frame, (fcx, fcy), frad, (200, 180, 150), -1)
+                        cv2.circle(sim_frame, (fcx, fcy), frad + 4, (0, 240, 255), 2)
+                        cv2.putText(sim_frame, "SIMULATED HUMAN", (fcx - 60, max(20, fcy - frad - 10)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 200), 1)
+                with self.lock:
+                    self.latest_raw_frame = sim_frame.copy()
+                self._process_frame(sim_frame)
+                time.sleep(0.04)
 
     # runs yunet deep learning face detection on the camera frame and calculates steering math
     def _process_frame(self, frame: np.ndarray):
@@ -409,6 +472,16 @@ class MotorController:
             for fx, fy, fw, fh in faces:
                 detected_faces.append((fx, fy, fw, fh, 1.0))
 
+        # Fallback to simulated face if zero-hardware simulation active
+        sim_face = getattr(self, "_simulated_face", None)
+        if len(detected_faces) == 0 and sim_face and sim_face[0]:
+            _, scx, scy, sratio = sim_face
+            sfh = max(10, int(proc_h * sratio))
+            sfw = sfh
+            sfx = int((scx + 1.0) * (proc_w / 2.0) - sfw / 2.0)
+            sfy = int((scy + 1.0) * (proc_h / 2.0) - sfh / 2.0)
+            detected_faces.append((sfx, sfy, sfw, sfh, 0.99))
+
         now = time.time()
         dt = max(0.01, now - self._prev_time)
 
@@ -418,6 +491,7 @@ class MotorController:
         if len(detected_faces) > 0:
             # Select largest primary face
             primary = max(detected_faces, key=lambda b: b[2] * b[3])
+
             fx, fy, fw, fh, score = primary
 
             center_x = (fx + fw / 2.0) / (proc_w / 2.0) - 1.0
@@ -450,16 +524,25 @@ class MotorController:
                 self._prev_err_x = err_x
                 self._prev_err_dist = err_dist
 
-            # 2. APPROACH MODE ("Come here")
-            elif mode == NavMode.APPROACH:
+            # 2. APPROACH MODE & APPROACHING_TARGET ("Come here" & Autonomous Intercept)
+            elif mode in [NavMode.APPROACH, NavMode.APPROACHING_TARGET]:
                 err_x = center_x
                 steer = int(self.kp_steer * err_x)
+                front_dist = self.telemetry.front_us_cm
 
-                # Stop when reached (~0.8m distance)
-                if box_ratio >= 0.44 or now - self._mode_start_time > 8.0:
+                # Safe braking condition: ultrasonic distance <= 90cm or face ratio >= 0.42 or 12s timeout
+                if (0.0 < front_dist <= 90.0) or box_ratio >= 0.42 or now - self._mode_start_time > 12.0:
+                    with self.lock:
+                        self.target_reached = True
                     self.stop_all()
+                    print(f"[Motors] Target reached safely (~0.9m). Front US: {front_dist:.1f}cm, ratio: {box_ratio:.2f}. Halting.")
+                    if self.on_target_reached_callback:
+                        try:
+                            self.on_target_reached_callback()
+                        except Exception as cb_err:
+                            print(f"[Motors] Target reached callback error: {cb_err}")
                 else:
-                    self.drive(120, steer)
+                    self.drive(110, steer)
 
             # 3. STANDBY MODE (Motors strictly 0)
             elif mode == NavMode.STANDBY:
@@ -471,11 +554,31 @@ class MotorController:
                     self.target_detected = False
                     self.gaze_x = 0.0
                     self.gaze_y = 0.0
-            if mode in [NavMode.FOLLOW, NavMode.APPROACH]:
+            if mode == NavMode.APPROACHING_TARGET:
+                front_dist = self.telemetry.front_us_cm
+                if 0.0 < front_dist <= 90.0:
+                    with self.lock:
+                        self.target_reached = True
+                    self.stop_all()
+                    print(f"[Motors] Target reached safely (~0.9m). Front US: {front_dist:.1f}cm. Halting.")
+                    if self.on_target_reached_callback:
+                        try:
+                            self.on_target_reached_callback()
+                        except Exception as cb_err:
+                            print(f"[Motors] Target reached callback error: {cb_err}")
+                else:
+                    self.stop()
+            elif mode in [NavMode.FOLLOW, NavMode.APPROACH]:
                 self.stop()
+
 
         # 4. AUTONOMOUS ROAM / WANDER MODE (Ultrasonic obstacle avoidance)
         if mode == NavMode.ROAM:
+            roam_dt = max(0.0, min(1.0, now - self._last_roam_tick))
+            with self.lock:
+                self.total_roam_seconds += roam_dt
+            self._last_roam_tick = now
+
             f_dist = self.telemetry.front_us_cm
             l_dist = self.telemetry.left_us_cm
             r_dist = self.telemetry.right_us_cm
@@ -490,6 +593,7 @@ class MotorController:
 
         # 5. STEP BACK MODE
         elif mode == NavMode.STEP_BACK:
+            self._last_roam_tick = now
             if self.telemetry.rear_us_cm < 28.0:
                 print(f"[Motors] Rear obstacle detected ({self.telemetry.rear_us_cm:.1f}cm), braking!")
                 self.stop_all()
@@ -500,16 +604,19 @@ class MotorController:
 
         # 6. SPIN MODE
         elif mode == NavMode.SPIN:
+            self._last_roam_tick = now
             if now - self._mode_start_time < 1.2:
                 self.drive(0, 130 * getattr(self, "_spin_dir", 1))
             else:
                 self.stop_all()
+        else:
+            self._last_roam_tick = now
 
         self._prev_time = now
 
         # Draw Live Video Feed HUD if preview is active, popup_active is set, or in active nav mode
         with self.lock:
-            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM])
+            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.APPROACHING_TARGET, NavMode.ROAM])
 
         if need_display:
             disp = proc_frame.copy()
@@ -541,7 +648,7 @@ class MotorController:
         while self.running:
             should_show = False
             with self.lock:
-                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM]))
+                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.APPROACHING_TARGET, NavMode.ROAM]))
 
             if should_show and self.latest_display_frame is not None:
                 if not window_open:
@@ -574,6 +681,8 @@ class MotorController:
                     mode = self.nav_mode
 
                 if mode == NavMode.ROAM:
+                    self._last_sim_roam_tick = time.time()
+
                     # Simulate moving towards a wall and steering away
                     sim_wander_dist += sim_wander_dir * 4.0
                     if sim_wander_dist <= 30.0:
@@ -595,7 +704,36 @@ class MotorController:
                         self.telemetry.rear_us_cm = 150.0
                         self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
                         self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [sim_l] * 4 + [sim_r] * 4 + [150.0] * 4
+
+                elif mode in [NavMode.APPROACH, NavMode.APPROACHING_TARGET]:
+                    self._last_sim_roam_tick = time.time()
+                    target_done = False
+                    with self.lock:
+                        cur_f = self.telemetry.front_us_cm
+                        if cur_f > 260.0:
+                            cur_f = 220.0
+                        new_f = max(88.0, cur_f - 14.0)
+                        self.telemetry.front_us_cm = new_f
+                        self.telemetry.left_us_cm = 100.0
+                        self.telemetry.right_us_cm = 100.0
+                        self.telemetry.rear_us_cm = 150.0
+                        self.telemetry.active_sensor_count = 0
+                        self.telemetry.sensors_all = [new_f] * 16
+                        if new_f <= 90.0:
+                            self.target_reached = True
+                            target_done = True
+
+                    if target_done:
+                        self.stop_all()
+                        print("[Motors] [SIMULATION] Target reached safely (~0.9m). Halting for engagement.")
+                        if self.on_target_reached_callback:
+                            try:
+                                self.on_target_reached_callback()
+                            except Exception as e:
+                                print(f"[Motors] Callback error: {e}")
+
                 else:
+                    self._last_sim_roam_tick = time.time()
                     with self.lock:
                         self.telemetry.front_us_cm = 999.0
                         self.telemetry.left_us_cm = 999.0

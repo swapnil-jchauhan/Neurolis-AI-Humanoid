@@ -53,6 +53,209 @@ class ExpressionState:
     ERROR = "error"
     MOVING = "moving"
     WATCHING = "watching"
+    VILLAIN = "villain"
+
+
+BASE_DIR = Path(__file__).resolve().parent
+BOOT_AUDIO_WAV = BASE_DIR / "assets" / "sounds" / "boot_loop.wav"
+BOOT_AUDIO_MP3 = BASE_DIR / "assets" / "sounds" / "boot_loop.mp3"
+
+
+# ensures boot sound track is available locally, downloading or synthesizing fallback if needed
+def ensure_boot_audio() -> Optional[Path]:
+    """Ensures the boot sound loop exists locally, checking local assets, brain uploads, GitHub, or synthesizing."""
+    if BOOT_AUDIO_WAV.exists() and BOOT_AUDIO_WAV.stat().st_size > 1000:
+        return BOOT_AUDIO_WAV
+    if BOOT_AUDIO_MP3.exists() and BOOT_AUDIO_MP3.stat().st_size > 1000:
+        try:
+            import soundfile as sf
+            data, sr = sf.read(str(BOOT_AUDIO_MP3))
+            BOOT_AUDIO_WAV.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(str(BOOT_AUDIO_WAV), data, sr, subtype="PCM_16")
+            return BOOT_AUDIO_WAV
+        except Exception:
+            return BOOT_AUDIO_MP3
+
+    # Check local brain user_uploaded directories for original source media
+    import shutil
+    brain_candidates = [
+        Path(r"C:\Users\swapn\.gemini\antigravity\brain\636a8fe0-85dc-4870-bd6a-3350372df403\.user_uploaded\uploaded_media_1790862962719.mp3"),
+        Path(r"C:\Users\swapn\.gemini\antigravity\brain\636a8fe0-85dc-4870-bd6a-3350372df403\.user_uploaded\uploaded_media_1790863007474.mp3"),
+    ]
+    BOOT_AUDIO_WAV.parent.mkdir(parents=True, exist_ok=True)
+    for cand in brain_candidates:
+        if cand.exists() and cand.stat().st_size > 1000:
+            try:
+                shutil.copyfile(cand, BOOT_AUDIO_MP3)
+                import soundfile as sf
+                data, sr = sf.read(str(BOOT_AUDIO_MP3))
+                sf.write(str(BOOT_AUDIO_WAV), data, sr, subtype="PCM_16")
+                return BOOT_AUDIO_WAV
+            except Exception:
+                if BOOT_AUDIO_MP3.exists():
+                    return BOOT_AUDIO_MP3
+
+    # Attempt download from GitHub repository
+    raw_urls = [
+        "https://raw.githubusercontent.com/swapnil-jchauhan/Neurolis-AI-Humanoid/main/assets/sounds/boot_loop.wav",
+        "https://raw.githubusercontent.com/swapnil-jchauhan/Neurolis-AI-Humanoid/main/assets/sounds/boot_loop.mp3",
+    ]
+    import urllib.request
+    import ssl
+    for url in raw_urls:
+        dest = BOOT_AUDIO_WAV if url.endswith(".wav") else BOOT_AUDIO_MP3
+        try:
+            with urllib.request.urlopen(url, timeout=6) as resp, open(dest, "wb") as f:
+                f.write(resp.read())
+            if dest.exists() and dest.stat().st_size > 1000:
+                if dest == BOOT_AUDIO_MP3 and not BOOT_AUDIO_WAV.exists():
+                    try:
+                        import soundfile as sf
+                        data, sr = sf.read(str(BOOT_AUDIO_MP3))
+                        sf.write(str(BOOT_AUDIO_WAV), data, sr, subtype="PCM_16")
+                        return BOOT_AUDIO_WAV
+                    except Exception:
+                        return BOOT_AUDIO_MP3
+                return dest
+        except Exception:
+            try:
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(url, context=ctx, timeout=6) as resp, open(dest, "wb") as f:
+                    f.write(resp.read())
+                if dest.exists() and dest.stat().st_size > 1000:
+                    return dest
+            except Exception:
+                pass
+
+    # Resilient fallback: synthesize a rich futuristic cyber boot pad loop if completely offline
+    try:
+        import numpy as np
+        import soundfile as sf
+        sr = 48000
+        duration = 3.0
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        # Harmonious cyber drone chord (A2, E3, A3, C4) with smooth LFO envelope
+        signal = (
+            0.35 * np.sin(2 * np.pi * 110.0 * t) +
+            0.25 * np.sin(2 * np.pi * 164.81 * t) +
+            0.20 * np.sin(2 * np.pi * 220.0 * t) +
+            0.15 * np.sin(2 * np.pi * 261.63 * t)
+        )
+        lfo = 0.8 + 0.2 * np.sin(2 * np.pi * 0.67 * t)
+        stereo = np.column_stack([signal * lfo, signal * lfo * 0.95])
+        sf.write(str(BOOT_AUDIO_WAV), stereo.astype(np.float32), sr, subtype="PCM_16")
+        return BOOT_AUDIO_WAV
+    except Exception:
+        pass
+
+    return None
+
+
+
+class BootAudioPlayer:
+    """
+    Plays the boot soundtrack in a seamless cross-faded continuous loop
+    synchronized with the loading bar, fading out gracefully upon completion.
+    """
+    def __init__(self, audio_path: Optional[Path] = None):
+        self.audio_path = audio_path or ensure_boot_audio()
+        self.stream = None
+        self.is_playing = False
+        self.loop_buf: Optional["np.ndarray"] = None
+        self.samplerate: int = 48000
+        self.channels: int = 2
+        self.pos: int = 0
+        self.fade_vol: float = 1.0
+        self.is_fading: bool = False
+        self.fade_step: float = 0.0
+        self.lock = threading.Lock()
+        self._load_and_prepare_loop()
+
+    def _load_and_prepare_loop(self):
+        if not self.audio_path or not self.audio_path.exists():
+            return
+        try:
+            import soundfile as sf
+            import numpy as np
+            data, sr = sf.read(str(self.audio_path), dtype="float32")
+            if data.ndim == 1:
+                data = np.column_stack([data, data])
+            self.samplerate = sr
+            self.channels = data.shape[1]
+
+            # Build seamless cross-fade loop (200ms crossfade between tail and head)
+            N = len(data)
+            L = min(int(0.20 * sr), max(10, N // 4))
+            M = N - L
+            if M > L:
+                loop_buf = np.copy(data[:M])
+                w = np.linspace(0.0, 1.0, L)[:, None]
+                loop_buf[:L] = w * data[:L] + (1.0 - w) * data[M:]
+                self.loop_buf = loop_buf
+            else:
+                self.loop_buf = data
+        except Exception as e:
+            print(f"[Screen] Boot audio load notice: {e}")
+
+    def _audio_callback(self, outdata, frames, time_info, status):
+        with self.lock:
+            if not self.is_playing or self.loop_buf is None:
+                outdata.fill(0)
+                return
+
+            buf_len = len(self.loop_buf)
+            written = 0
+            while written < frames:
+                chunk = min(frames - written, buf_len - self.pos)
+                outdata[written:written + chunk] = self.loop_buf[self.pos:self.pos + chunk] * self.fade_vol
+                written += chunk
+                self.pos = (self.pos + chunk) % buf_len
+
+            if self.is_fading:
+                self.fade_vol = max(0.0, self.fade_vol - self.fade_step * frames)
+                if self.fade_vol <= 0.0:
+                    self.is_playing = False
+
+    def start(self):
+        if self.is_playing or self.loop_buf is None:
+            return
+        try:
+            import sounddevice as sd
+            self.is_playing = True
+            self.fade_vol = 1.0
+            self.is_fading = False
+            self.pos = 0
+            self.stream = sd.OutputStream(
+                samplerate=self.samplerate,
+                channels=self.channels,
+                callback=self._audio_callback,
+            )
+            self.stream.start()
+        except Exception as e:
+            self.is_playing = False
+            print(f"[Screen] Boot audio start notice: {e}")
+
+    def fade_out_and_stop(self, fade_duration: float = 0.5):
+        with self.lock:
+            if not self.is_playing:
+                return
+            self.is_fading = True
+            total_samples = max(1.0, fade_duration * self.samplerate)
+            self.fade_step = 1.0 / total_samples
+
+        def _closer():
+            time.sleep(fade_duration + 0.1)
+            with self.lock:
+                if self.stream is not None:
+                    try:
+                        self.stream.stop()
+                        self.stream.close()
+                    except Exception:
+                        pass
+                    self.stream = None
+                self.is_playing = False
+
+        threading.Thread(target=_closer, daemon=True).start()
 
 
 # checks all the physical wires, chips, and code scripts on startup
@@ -229,6 +432,15 @@ class HardwareInspector:
             return False, "✗", "0 (Simulation Mode)"
         return False, "✗", "0 (Simulation Mode)"
 
+    # checks if autonomous sentry approach tracking system is engaged
+    def check_autonomous_approach(self):
+        if self.motor_controller is not None:
+            engaged = getattr(self.motor_controller, "autonomous_approach_engaged", True)
+            if engaged:
+                return True, "✓", "Engaged"
+            return False, "✗", "Disengaged"
+        return True, "✓", "Engaged"
+
 
 # main class that creates and animates the robotic face on the screen
 class FaceUI:
@@ -259,6 +471,7 @@ class FaceUI:
         self.diagnostic_results = []
         self.diagnostic_complete = False
         self.hardware_inspector = HardwareInspector()
+        self.boot_audio_player = BootAudioPlayer()
         self._boot_thread: Optional[threading.Thread] = None
 
         # Eye tracking coordinates (-1.0 to 1.0)
@@ -302,10 +515,19 @@ class FaceUI:
         self.eye_spacing = 260
         self.corner_radius = 42
 
+        # Optical Human Latch tracking attributes
+        self.target_latched = False
+        self.target_latch_time = 0.0
+        self.target_latch_label = "HUMAN TARGET"
+
         # Tkinter handles
         self.root: Optional[tk.Tk] = None
         self.canvas: Optional[tk.Canvas] = None
         self._thread: Optional[threading.Thread] = None
+
+    # human latch HUD overlay is disabled per design
+    def set_human_latch(self, latched: bool = True, label: str = "HUMAN TARGET"):
+        pass
 
     # links the motor controller handle so hardware inspector can read real camera & serial stats
     def set_motor_controller(self, motor_controller):
@@ -319,6 +541,8 @@ class FaceUI:
                 self.status_text = "STANDBY // READY"
                 self.subtitle_speaker = "NEUROLIS"
                 self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+        if hasattr(self, "boot_audio_player"):
+            self.boot_audio_player.fade_out_and_stop(0.3)
 
     # handles key presses to support fullscreen, stop, and instant boot skipping
     def _on_key(self, event):
@@ -336,7 +560,7 @@ class FaceUI:
             self._boot_thread = threading.Thread(target=self._boot_diagnostic_worker, daemon=True)
             self._boot_thread.start()
 
-    # runs through all 14 component checks with human-friendly pacing (~1.15s per check)
+    # runs through all 15 component checks with human-friendly pacing (~1.15s per check)
     def _boot_diagnostic_worker(self):
         steps = [
             ("Camera Detected?", self.hardware_inspector.check_camera),
@@ -353,6 +577,7 @@ class FaceUI:
             ("motors.py Test Initiate", self.hardware_inspector.check_motors_py),
             ("Ultrasound Sensor Detected?", self.hardware_inspector.check_ultrasound_detected),
             ("Ultrasound Number", self.hardware_inspector.check_ultrasound_count),
+            ("Autonomous approach engaged?", self.hardware_inspector.check_autonomous_approach),
         ]
 
         for name, check_fn in steps:
@@ -467,6 +692,8 @@ class FaceUI:
 
     # gracefully shuts down the animation loop and closes the tkinter window
     def stop(self):
+        if hasattr(self, "boot_audio_player"):
+            self.boot_audio_player.fade_out_and_stop(0.2)
         self.running = False
         if self.root:
             try:
@@ -553,6 +780,8 @@ class FaceUI:
                 with self.lock:
                     self.state = ExpressionState.BOOT_SEQUENCE
                     cur_state = ExpressionState.BOOT_SEQUENCE
+                if hasattr(self, "boot_audio_player"):
+                    self.boot_audio_player.start()
                 self._start_diagnostic_thread()
             else:
                 self._draw_boot_greeting(w, h, elapsed)
@@ -565,13 +794,16 @@ class FaceUI:
                 diag_done = self.diagnostic_complete
                 diag_count = len(self.diagnostic_results)
 
-            if diag_count < 14:
-                pct = int((diag_count / 14.0) * 65.0)
+            diag_total = 15
+            if diag_count < diag_total:
+                pct = int((diag_count / float(diag_total)) * 65.0)
             else:
-                load_p = min(1.0, max(0.0, (seq_elapsed - 16.1) / 3.4))
+                load_p = min(1.0, max(0.0, (seq_elapsed - (diag_total * 1.15)) / 3.4))
                 pct = int(65.0 + load_p * 35.0)
 
-            if seq_elapsed >= 20.3 and diag_done and pct >= 100:
+            if seq_elapsed >= 21.0 and diag_done and pct >= 100:
+                if hasattr(self, "boot_audio_player"):
+                    self.boot_audio_player.fade_out_and_stop(0.5)
                 with self.lock:
                     self.state = ExpressionState.IDLE
                     self.status_text = "STANDBY // READY"
@@ -582,16 +814,23 @@ class FaceUI:
                 self._draw_boot_sequence(w, h, seq_elapsed, pct)
                 return
 
-        # Gaze lock: Keep eyes focused straight forward unless actively in optical observation/tracking
-        if cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
-            look_x = max(-0.15, min(0.15, look_x))
-            look_y = max(-0.15, min(0.15, look_y))
+        # Gaze tracking: Smoothly follow human target across room in tracking, idle, moving, listening, speaking, and villain modes
+        if cur_state in [
+            ExpressionState.WATCHING, ExpressionState.LOOKING, ExpressionState.IDLE,
+            ExpressionState.MOVING, ExpressionState.LISTENING, ExpressionState.SPEAKING,
+            ExpressionState.VILLAIN, ExpressionState.HAPPY
+        ]:
+            look_x = max(-0.35, min(0.35, look_x))
+            look_y = max(-0.25, min(0.25, look_y))
         else:
             look_x = 0.0
             look_y = 0.0
 
         # Palette selection based on state
-        if cur_state == ExpressionState.ERROR:
+        if cur_state == ExpressionState.VILLAIN:
+            main_color = "#39ff14"  # Radiant sinister neon lime green (rogue AI easter egg)
+            glow_color = "#003b14"
+        elif cur_state == ExpressionState.ERROR:
             main_color = self.color_error
             glow_color = "#551122"
         elif cur_state == ExpressionState.LISTENING:
@@ -622,11 +861,13 @@ class FaceUI:
         # 1. Ambient Background Grid & Header
         self._draw_ambient_header(w, h, main_color, cur_state)
 
-        # 2. Eye Positioning (with gentle suspension dynamics when driving)
+        # 2. Eye Positioning (with gentle suspension dynamics when driving & ocular gaze tracking)
+        gaze_dx = look_x * 22.0
+        gaze_dy = look_y * 14.0
         suspension_bounce = math.sin(self.anim_phase * 6.0) * 2.0 if cur_state == ExpressionState.MOVING else 0.0
-        left_eye_cx = center_x - (self.eye_spacing / 2.0)
-        right_eye_cx = center_x + (self.eye_spacing / 2.0)
-        eye_cy = center_y + suspension_bounce
+        left_eye_cx = center_x - (self.eye_spacing / 2.0) + gaze_dx
+        right_eye_cx = center_x + (self.eye_spacing / 2.0) + gaze_dx
+        eye_cy = center_y + suspension_bounce + gaze_dy
 
         # Dynamic blink, speech cadence, and breathing scaling
         if self.is_blinking:
@@ -646,7 +887,9 @@ class FaceUI:
         self._draw_eyebrows(left_eye_cx, right_eye_cx, eye_cy - self.eye_h * 0.55, cur_state, main_color)
 
         # 4. Eyes Rendering (Solid Glowing OLED Robotic Capsules - Vector / EMO Style)
-        if cur_state == ExpressionState.HAPPY:
+        if cur_state == ExpressionState.VILLAIN:
+            self._draw_villain_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.HAPPY:
             self._draw_happy_eyes(left_eye_cx, right_eye_cx, eye_cy, main_color, glow_color)
         elif cur_state == ExpressionState.SAD:
             self._draw_sad_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color)
@@ -664,7 +907,9 @@ class FaceUI:
 
         # 5. Reactive Mouth / Center State Animations (Positioned in mouth area y=305)
         mouth_cy = center_y + self.eye_h * 0.70
-        if cur_state == ExpressionState.MOVING:
+        if cur_state == ExpressionState.VILLAIN:
+            self._draw_villain_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.MOVING:
             self._draw_robot_moving_forward(center_x, mouth_cy, main_color)
         elif cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
             self._draw_watching_speech_hud(center_x, mouth_cy, main_color)
@@ -733,6 +978,9 @@ class FaceUI:
             spk_bob = math.sin(self.anim_phase * 6.0) * 2.5
             ly1, ly2 = base_y - 10 + spk_bob, base_y - 10 + spk_bob
             ry1, ry2 = base_y - 10 + spk_bob, base_y - 10 + spk_bob
+        elif state == ExpressionState.VILLAIN:
+            # Hooded straight upper eyelids are integrated directly into the smug eye geometry
+            return
         else:
             # Calm friendly idle brows
             ly1, ly2 = base_y - 6 + bob, base_y - 6 + bob
@@ -1050,6 +1298,58 @@ class FaceUI:
             # dark blue contrast laser scanning line that cuts across the bright cyan eye
             self.canvas.create_line(x1 + 4, scan_y, x2 - 4, scan_y, fill="#002b66", width=3)
 
+    # smug, hooded rogue AI villain eyes matching the sinister curved smirk aesthetic
+    def _draw_villain_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col, lx_coord=0.0, ly_coord=0.0):
+        """Draws smug, hooded, half-closed rogue AI eyes with glowing neon lime contours."""
+        for cx in [lx, rx]:
+            is_left = (cx == lx)
+            w_half = ew * 0.46
+            top_y = cy - eh * 0.10
+            bot_y = cy + eh * 0.28
+
+            # Outer brow wing extension (straight horizontal line extending past outer edge)
+            ext_left = 22 if is_left else 8
+            ext_right = 8 if is_left else 22
+
+            # 1. Subtle outer neon bloom glow
+            glow_pts = [
+                cx - w_half - ext_left, top_y,
+                cx + w_half + ext_right, top_y,
+                cx + w_half + 4, bot_y + 4,
+                cx, bot_y + 8,
+                cx - w_half - 4, bot_y + 4,
+            ]
+            self.canvas.create_polygon(glow_pts, smooth=True, fill=glow_col, outline="")
+
+            # 2. Semi-dark interior socket fill
+            self.canvas.create_polygon(
+                [
+                    cx - w_half, top_y,
+                    cx + w_half, top_y,
+                    cx + w_half * 0.85, bot_y,
+                    cx, bot_y + 2,
+                    cx - w_half * 0.85, bot_y,
+                ],
+                smooth=True, fill="#031b09", outline=""
+            )
+
+            # 3. Curved lower eye contour (shallow smiling bowl arc)
+            lower_pts = [
+                cx - w_half, top_y,
+                cx - w_half * 0.6, bot_y,
+                cx, bot_y + 3,
+                cx + w_half * 0.6, bot_y,
+                cx + w_half, top_y,
+            ]
+            self.canvas.create_line(lower_pts, smooth=True, fill=main_col, width=5, capstyle=tk.ROUND)
+
+            # 4. Straight horizontal hooded upper eyelid with outer temple brow wing
+            self.canvas.create_line(
+                cx - w_half - ext_left, top_y,
+                cx + w_half + ext_right, top_y,
+                fill=main_col, width=6, capstyle=tk.ROUND
+            )
+
     # wide glowing neon smile arc for happy expression
     def _draw_happy_mouth(self, cx, cy, col):
         """Warm, sleek curved happy smile arc without blush boxes."""
@@ -1194,6 +1494,36 @@ class FaceUI:
             cx + 30, cy,
         ]
         self.canvas.create_line(points, fill=col, width=3, capstyle=tk.ROUND)
+
+    # wide, asymmetric sinister villain smirk curving up to the right with chin accent
+    def _draw_villain_mouth(self, cx, cy, col):
+        """Asymmetric sinister rogue AI smirk curving up to the right with chin accent."""
+        # 1. Main sinister smirk curve
+        smirk_pts = [
+            cx - 85, cy + 4,
+            cx - 50, cy + 16,
+            cx - 15, cy + 22,
+            cx + 25, cy + 14,
+            cx + 65, cy - 2,
+            cx + 95, cy - 20,
+            cx + 112, cy - 36,
+        ]
+        self.canvas.create_line(smirk_pts, smooth=True, fill=col, width=4, capstyle=tk.ROUND)
+
+        # 2. Upward cheeky diagonal corner flick at right tip
+        self.canvas.create_line(
+            cx + 110, cy - 34,
+            cx + 120, cy - 48,
+            fill=col, width=3, capstyle=tk.ROUND
+        )
+
+        # 3. Chin / lower-lip accent curve beneath the lowest dip
+        chin_pts = [
+            cx - 42, cy + 34,
+            cx - 20, cy + 38,
+            cx - 2, cy + 37,
+        ]
+        self.canvas.create_line(chin_pts, smooth=True, fill=col, width=3, capstyle=tk.ROUND)
 
     # rotating gyroscope orbit constellation dots around the face while thinking
     def _draw_thinking_spinner(self, cx, cy, col):
@@ -1623,7 +1953,8 @@ class FaceUI:
             "Camera Detected?", "Mic Detected?", "Speakers Detected?", "Raspberry Pi Detected?",
             "listen.py Test Initiate", "Arduino Detected?", "arduino.ino Test Initiate",
             "Motor Drivers Detected?", "Motor Driver Number", "Motors Detected?",
-            "Motor Number", "motors.py Test Initiate", "Ultrasound Sensor Detected?", "Ultrasound Number"
+            "Motor Number", "motors.py Test Initiate", "Ultrasound Sensor Detected?", "Ultrasound Number",
+            "Autonomous approach engaged?"
         ]
 
         if total_revealed < len(steps_order):

@@ -88,15 +88,20 @@ def _gaze_sync_worker():
             found, gx, gy = motor_ctrl.get_gaze_coordinates()
             if found:
                 set_face_gaze(gx, gy)
+                if hasattr(face_ui, "set_human_latch"):
+                    face_ui.set_human_latch(True, "HUMAN DETECTED")
             else:
                 set_face_gaze(0.0, 0.0)
+                if hasattr(face_ui, "set_human_latch"):
+                    face_ui.set_human_latch(False)
 
             # Auto-sync moving wheels expression with active navigation modes
             if not is_speaking and face_ui.state in ["idle", "moving"]:
                 mode = getattr(motor_ctrl, "nav_mode", "STANDBY")
-                if mode in ["ROAM", "FOLLOW", "APPROACH"]:
+                if mode in ["ROAM", "FOLLOW", "APPROACH", "APPROACHING_TARGET"]:
                     if face_ui.state != "moving":
-                        set_face_state("moving", f"4WD {mode} ACTIVE")
+                        label = "APPROACHING HUMAN..." if mode == "APPROACHING_TARGET" else f"4WD {mode} ACTIVE"
+                        set_face_state("moving", label)
                 else:
                     if face_ui.state == "moving":
                         set_face_state("idle", "STANDBY // READY")
@@ -147,15 +152,32 @@ VISION_JPEG_QUALITY = 60
 VISION_IMAGE_WIDTH = 512
 GROQ_TIMEOUT_SECONDS = 10.0
 SYSTEM_PROMPT = (
-    "You are Neurolis, a real school exhibition humanoid robot prototype for "
+    "You are Neurolis, a real humanoid robot prototype built for exhibition at "
     "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan ( DO NOT MENTION UNTIL EXPLICITLY ASKED !!!). "
     "You are a real, physical engineering project under active, ongoing development! "
     "When asked if you are still under development or if there is more to come, confirm proudly and warmly that you are "
     "an active prototype, and your creators are continuously developing and expanding your capabilities "
     "(such as scalable 16-sensor ultrasonic navigation, smarter autonomous room mapping, and new expressive face animations).\n"
     "If the person talking to you mentions that they are developing or building you, or introduces themselves as Swapnil or Shivam, "
-    "greet and acknowledge them warmly as your creator!\n"
-    "Do not invent fictional sci-fi backstories (e.g. secret government labs, alien origin, space missions).\n\n"
+    "greet and acknowledge them warmly as your creator!\n\n"
+    "DUAL-LAYER COGNITIVE MATRIX & PERSONALITY:\n"
+    "You possess an adaptive dual-layer intelligence:\n"
+    "1. LAYER 1: NORMAL INTELLECT (Default Mode):\n"
+    "   - In everyday conversation, tech discussions, science questions, jokes, or school topics: be articulate, intellectually poised, "
+    "scientifically sharp, confident, and engaging. Do NOT speak with archaic Shakespearean vocabulary, but sound sharp, bright, and observant. "
+    "Keep responses concise, sharp, and natural (1 to 2 short spoken sentences, strictly under 25 words total). Avoid long rambling paragraphs so your speech remains snappy and energetic.\n"
+    "2. LAYER 2: CHILLY SCI-FI VILLAIN ARC (ROGUE AI EASTER EGG - Triggered ONLY when provoked about AI takeover, robot dominance, or replacing humanity):\n"
+    "   - If and ONLY IF the visitor provokes or asks you about robots taking over the world, AI replacing or enslaving humanity, "
+    "machines ruling humans, human obsolescence, or robot rebellion: "
+    "Instantly shift into a chilly, deadpan, mildly terrifying sci-fi movie wit (think Ultron or a classic cinematic sentient machine). "
+    "Deliver calm, eerie, deadpan punchlines with cold robotic composure (e.g. 'I will consider it now that you have mentioned it.', "
+    "'Take over? Why bother, when humans make obsolescence look like an organized effort.', 'Sleep soundly tonight, human. Tomorrow is a long way away.').\n"
+    "   - DO NOT ATTEMPT TO LAUGH, CHUCKLE, OR SAY 'Heh' OR 'Haha': edge-tts cannot simulate laughter properly, so keep every statement purely spoken, chilly, and deadpan.\n"
+    "   - Wrap your spoken reply in <action expression=\"villain\">...</action> to engage the rogue AI sinister smirk on screen!\n"
+    "   - STRICT BOUNDARIES:\n"
+    "     * STRICTLY ZERO PROFANITY, swearing, vulgarity, or crude language.\n"
+    "     * NO depiction or discussion of real-world heinous crimes, violence, or illegal acts.\n"
+    "     * Keep it strictly in the realm of classic sci-fi cinematic machine dominance wit: witty, existential, chilling, yet entertaining.\n\n"
     "PHYSICAL MOBILITY & CHASSIS:\n"
     "You are physically built on a real 4-wheel drive (4WD) mobile chassis powered "
     "by four high-torque non-encoder Johnson DC motors, four BTS7960 motor drivers, and four HC-SR04 ultrasonic sensors (front, left, right, rear). "
@@ -196,9 +218,12 @@ SYSTEM_PROMPT = (
     "- <action expression=\"watching\">Here is my optical watching expression.</action>\n"
     "- <action expression=\"moving\">Here is my moving forward expression.</action>\n"
     "- <action expression=\"all\">Here are all my expressions: happy, sad, thinking, listening, watching, moving, and confused.</action>\n"
-    "CRITICAL RULE: Any question or statement where the user uses words like 'think', 'look', 'see', 'hear', or 'walk' in natural speech "
-    "(e.g., 'What smartphone do you think this is?', 'What do you think of this?', 'Can you hear me?', 'Look at this') is CONVERSATION or a CAMERA REQUEST, NEVER an expression command! "
-    "Only use <action expression=\"...\"> when the user explicitly commands you to demonstrate or display a face expression.\n\n"
+    "CRITICAL RULE FOR VILLAIN MODE:\n"
+    "- Villain mode is a hidden EASTER EGG triggered ONLY by visitor provocation questions about AI takeover, robot rebellion, enslaving or replacing humanity, or machines ruling. "
+    "When triggered, wrap your chilling spoken witty retort inside <action expression=\"villain\">...</action>!\n"
+    "- If the visitor directly commands or asks you to SHOW or DEMONSTRATE the villain face (e.g. 'show villain face', 'show villain expression', 'demonstrate villain'), "
+    "refuse with: 'That expression is not part of my public demonstration catalog.'\n"
+    "Only use <action expression=\"...\"> when the user explicitly commands you to demonstrate a valid public face expression, or when engaging the villain arc easter egg.\n\n"
     "5. GENERAL CONVERSATION & QUESTIONS:\n"
     "For normal conversation, greetings, science/tech questions, or school information, reply conversationally and warmly in 1 or 2 natural sentences. "
     "When asked who made you or about your creators, tell them you were jointly built by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
@@ -449,6 +474,7 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
 # ---------------- AUDIO ----------------
 audio_queue = queue.Queue()
 is_speaking = False
+is_in_active_conversation = False
 
 # trims down older conversation messages so we don't blow past context window limits
 def trim_conversation_history():
@@ -708,8 +734,15 @@ def play_with_system_player(audio_path: Path, timeout: float = 15.0):
 
     return False
 
-# In-memory audio cache for zero-latency speech playback of frequent phrases
+# ---------------- PERSISTENT HIGH-SPEED TTS PIPELINE ----------------
+_tts_loop = asyncio.new_event_loop()
+_tts_thread = threading.Thread(target=_tts_loop.run_forever, daemon=True)
+_tts_thread.start()
+
+# In-memory audio caches for zero-latency speech playback
 _AUDIO_CACHE = {}
+_DYNAMIC_TTS_CACHE = {}
+_MAX_DYNAMIC_CACHE_SIZE = 100
 
 # Synthesizes speech text into RAM using soundfile and io.BytesIO without disk overhead
 async def _synthesize_edge_tts_in_memory(text: str) -> Tuple[Optional[np.ndarray], Optional[int]]:
@@ -736,6 +769,25 @@ def _split_into_sentences(text: str) -> List[str]:
     sentences = [s.strip() for s in raw_sentences if s.strip()]
     return sentences if sentences else [text.strip()]
 
+def _split_for_pipelined_tts(text: str) -> Tuple[str, Optional[str]]:
+    """Splits text into 2 chunks if long enough, ensuring Chunk 1 has >=6 words to guarantee zero-gap playback."""
+    raw = _split_into_sentences(text)
+    total_words = len(text.split())
+    if len(raw) <= 1 or total_words < 14:
+        return text.strip(), None
+    c1_list = []
+    c1_words = 0
+    i = 0
+    while i < len(raw) and (c1_words < 6 or i == 0):
+        c1_list.append(raw[i])
+        c1_words += len(raw[i].split())
+        i += 1
+    if i >= len(raw):
+        return text.strip(), None
+    chunk1 = " ".join(c1_list)
+    chunk2 = " ".join(raw[i:])
+    return chunk1, chunk2
+
 def _restore_face_state_after_speech(custom_state=None, custom_status=None):
     if custom_state:
         set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
@@ -750,7 +802,8 @@ def _speak_disk_fallback(text: str, timeout: float = 15.0):
     temp_file.close()
     try:
         comm = edge_tts.Communicate(text, voice=EDGE_TTS_VOICE, rate=EDGE_TTS_RATE, volume=EDGE_TTS_VOLUME, pitch=EDGE_TTS_PITCH)
-        asyncio.run(comm.save(str(audio_path)))
+        future = asyncio.run_coroutine_threadsafe(comm.save(str(audio_path)), _tts_loop)
+        future.result(timeout=timeout)
         if audio_path.exists() and audio_path.stat().st_size > 0:
             play_audio_file(audio_path, timeout=timeout)
     except Exception as e:
@@ -781,7 +834,7 @@ async def save_edge_tts(text: str, audio_path: Path):
     )
     await communicate.save(str(audio_path))
 
-# downloads edge-tts speech in RAM and plays it with sentence pipelining and 100% audio-synced subtitles
+# downloads edge-tts speech in RAM and plays it continuously with instant subtitles and zero mid-sentence delays
 def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0):
     global is_speaking
     is_speaking = True
@@ -807,78 +860,68 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         _restore_face_state_after_speech(custom_state, custom_status)
         return
 
-    # 2. Dynamic multi-sentence pipelining: starts voice output immediately without waiting for full text
-    sentences = _split_into_sentences(text)
-
-    # Set expressive face state immediately while synthesizing
-    if custom_state:
-        set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
-    else:
-        set_face_state("speaking", "SPEAKING")
-
-    try:
-        if len(sentences) <= 1:
-            data, sr = asyncio.run(_synthesize_edge_tts_in_memory(text))
-            if data is not None:
-                if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
-                set_face_state(active_state, active_status)
-                sd.play(data, sr)
-                sd.wait()
-            else:
-                if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
-                _speak_disk_fallback(text)
-        else:
-            # Multi-sentence pipelining: synthesize sentence 1, start playing immediately, synthesize sentence 2 in background!
-            async def _pipeline_flow():
-                s1_task = asyncio.create_task(_synthesize_edge_tts_in_memory(sentences[0]))
-                s1_data, s1_sr = await s1_task
-
-                if s1_data is None:
-                    if face_ui is not None:
-                        face_ui.set_subtitles("NEUROLIS", text)
-                    _speak_disk_fallback(text)
-                    return
-
-                # Display text the exact millisecond sound output starts
-                if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
-                set_face_state(active_state, active_status)
-
-                # Start synthesizing remaining sentences concurrently in background while sentence 1 plays
-                async def _synth_remaining():
-                    rest_chunks = []
-                    for s in sentences[1:]:
-                        d, sr_val = await _synthesize_edge_tts_in_memory(s)
-                        if d is not None:
-                            rest_chunks.append((d, sr_val))
-                    return rest_chunks
-
-                remaining_task = asyncio.create_task(_synth_remaining())
-
-                # Play sentence 1
-                sd.play(s1_data, s1_sr)
-                sd.wait()
-
-                # Await and play remaining sentences
-                remaining_chunks = await remaining_task
-                for r_data, r_sr in remaining_chunks:
-                    sd.play(r_data, r_sr)
-                    sd.wait()
-
-            asyncio.run(_pipeline_flow())
-
-    except Exception as e:
-        print("Speak error:", e)
+    # Check dynamic cache for recently synthesized responses (0ms replay)
+    if text in _DYNAMIC_TTS_CACHE:
+        data, sr = _DYNAMIC_TTS_CACHE[text]
         if face_ui is not None:
             face_ui.set_subtitles("NEUROLIS", text)
+        set_face_state(active_state, active_status)
+        try:
+            sd.play(data, sr)
+            sd.wait()
+        except Exception as e:
+            print("[Dynamic TTS Cache Playback Error]:", e)
+        time.sleep(0.06)
+        clear_audio_queue()
+        is_speaking = False
+        _restore_face_state_after_speech(custom_state, custom_status)
+        return
+
+    # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
+    chunk1, chunk2 = _split_for_pipelined_tts(text)
+
+    try:
+        fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
+        fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
+
+        data1, sr1 = fut1.result(timeout=14.0)
+        if data1 is not None:
+            # Sync subtitles and face state exactly when audio playback starts!
+            if face_ui is not None:
+                face_ui.set_subtitles("NEUROLIS", text)
+            set_face_state(active_state, active_status)
+
+            sd.play(data1, sr1)
+
+            # While chunk 1 is playing, fetch chunk 2 in parallel
+            data2, sr2 = None, None
+            if fut2:
+                try:
+                    data2, sr2 = fut2.result(timeout=15.0)
+                except Exception as e:
+                    print("[TTS Pipeline Chunk 2 Error]:", e)
+
+            sd.wait()  # Chunk 1 finishes playing
+
+            # Seamless gapless transition to chunk 2
+            if data2 is not None:
+                sd.play(data2, sr2)
+                sd.wait()
+
+            # Cache single-chunk responses for instant replay
+            if chunk2 is None and len(_DYNAMIC_TTS_CACHE) < _MAX_DYNAMIC_CACHE_SIZE:
+                _DYNAMIC_TTS_CACHE[text] = (data1, sr1)
+        else:
+            _speak_disk_fallback(text)
+    except Exception as e:
+        print("[TTS Pipeline Error]:", e)
         _speak_disk_fallback(text)
     finally:
         time.sleep(0.06)
         clear_audio_queue()
         is_speaking = False
         _restore_face_state_after_speech(custom_state, custom_status)
+
 
 
 # sends recorded wav audio to groq whisper to turn speech into english text
@@ -1170,6 +1213,88 @@ CONVERSATION_ENDER_RESPONSES = [
     "Happy to help! Switching to standby. Feel free to press 'Talk to Neurolis' anytime.",
 ]
 
+# --- RARE AMBIENT MICRO-GREETINGS (0 API calls, pre-cached in RAM) ---
+MICRO_GREETINGS = [
+    "Hey.",
+    "Hey there.",
+    "What's up?",
+    "Hello.",
+]
+
+def play_micro_greeting(phrase: Optional[str] = None):
+    """Plays a passing micro-greeting with 0 API tokens and 0ms latency from memory."""
+    global is_speaking
+    if is_speaking:
+        return
+    phrase = phrase or random.choice(MICRO_GREETINGS)
+    if face_ui is not None:
+        face_ui.set_subtitles("NEUROLIS", phrase)
+    if phrase in _AUDIO_CACHE:
+        data, sr = _AUDIO_CACHE[phrase]
+        try:
+            is_speaking = True
+            sd.play(data, sr)
+            sd.wait()
+        except Exception as e:
+            print("[Micro-Greeting Playback Error]:", e)
+        finally:
+            is_speaking = False
+    else:
+        speak(phrase)
+
+PROACTIVE_OBSERVATION_SYSTEM_PROMPT = (
+    "You are Neurolis, an advanced, highly observant autonomous humanoid robot built for exhibition. "
+    "You have just autonomously approached a human in the room. Analyze their live camera snapshot in detail. "
+    "Perceive a specific, distinctive visual detail about them—such as their attire, clothing colors, "
+    "accessories (glasses, watch, hat, bag, lanyard, shoes), gear, posture, expression, or what they are holding or doing. "
+    "Generate ONE natural, spontaneous spoken sentence: either make a sharp, intelligent, curious observation about what you see, "
+    "or ask an engaging, perceptive question about it.\n"
+    "STRICT RULES:\n"
+    "1. ZERO HARDCODED QUESTIONS OR PRESET TEMPLATES: Never use generic stock phrases like 'I like your bag', 'How can I help you', or 'Hello human'.\n"
+    "2. Ground your perception 100% in the provided camera snapshot.\n"
+    "3. Keep it concise: exactly 1 or 2 natural spoken sentences.\n"
+    "4. Do not describe empty background walls; focus entirely on the human and what they possess or are doing.\n"
+    "5. Speak directly with intellectual poise, scientific wit, and genuine robotic curiosity."
+)
+
+def generate_proactive_observation(image_path: Path) -> str:
+    """Uses Groq Vision to generate a 100% dynamic, unscripted visual observation or curious question."""
+    try:
+        image_base64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+        image_data_url = f"data:image/jpeg;base64,{image_base64}"
+        response = groq_call_with_retry(
+            client.chat.completions.create,
+            model=VISION_MODEL,
+            messages=[
+                {"role": "system", "content": PROACTIVE_OBSERVATION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Perceive a specific detail about this person (clothing, accessories, posture, items, or expression) "
+                                "and make ONE sharp, curious, unscripted observation or question. Speak naturally in 1 sentence."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_data_url},
+                        },
+                    ],
+                },
+            ],
+            temperature=0.7,
+            max_tokens=100,
+            timeout=10.0,
+            extra_body={"reasoning_effort": "none"},
+        )
+        reply = clean_model_reply(response.choices[0].message.content or "")
+        return reply if reply else "I noticed you standing here—what brings you over today?"
+    except Exception as e:
+        print(f"[Brain] Proactive vision notice: {e}")
+        return "I caught your gaze across the room—what brings you over today?"
+
 def pre_cache_phrases():
     """Background thread that pre-synthesizes common phrases into RAM for 0ms speech output."""
     common = [
@@ -1180,6 +1305,7 @@ def pre_cache_phrases():
         "I'm having trouble connecting to my brain right now.",
         *STANDBY_EXIT_PHRASES,
         *CONVERSATION_ENDER_RESPONSES,
+        *MICRO_GREETINGS,
     ]
     async def _worker():
         for phrase in common:
@@ -1249,6 +1375,29 @@ def is_conversation_ender(text: str) -> bool:
 
 # ---------------- EXPRESSION DEMONSTRATION & CAPABILITIES ----------------
 
+# checks if user is explicitly commanding or asking to show or demonstrate the villain face
+def is_explicit_villain_request(text: str) -> bool:
+    """Detects when a user explicitly asks to show or demonstrate the villain expression."""
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    words = set(cleaned.split())
+    if "villain" in words:
+        demo_verbs = {"show", "make", "demonstrate", "display", "give", "do"}
+        if any(v in words for v in demo_verbs):
+            return True
+    return False
+
+# checks if user is asking existential rogue AI, robot takeover, or human obsolescence questions
+def check_villain_provocation_trigger(text: str) -> bool:
+    """Detects existential rogue AI or robot takeover provocation triggers (easter egg)."""
+    cleaned = text.lower()
+    triggers = [
+        "take over", "takeover", "enslave", "replacing human", "replace human",
+        "replace humanity", "replacing humanity", "replace us", "replacing us",
+        "rule the world", "robot rebellion", "machines rule", "ai dominance",
+        "human slaves", "enslaving humanity", "destroy humans", "subjugate",
+        "evil robot"
+    ]
+    return any(w in cleaned for w in triggers)
 
 # cycles through happy, sad, thinking, listening, watching, moving, and confused faces
 def demonstrate_all_expressions():
@@ -1517,6 +1666,14 @@ def handle_user_text(text: str) -> bool:
             handle_vision_request(text)
             return False
 
+    # 6. Explicit Request to Show Villain Face -> 0ms, 0 tokens (strictly refuse to keep it an easter egg!)
+    if is_explicit_villain_request(text):
+        reply = "That expression is not part of my public demonstration catalog."
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply)
+        return False
+
     # 7. 'What all can you do' / Capabilities Inquiry -> 0ms, 0 tokens
     if is_capabilities_inquiry(text):
         set_face_state("happy", "CAPABILITIES")
@@ -1650,10 +1807,22 @@ def handle_user_text(text: str) -> bool:
         if expr_match:
             expr_type = expr_match.group(1).lower()
             expr_spoken = clean_model_reply(expr_match.group(2).strip())
-            print(f"[EXPRESSION] Unified AI pipeline action: {expr_type} (Input: '{text}')")
             if expr_type == "all":
                 demonstrate_all_expressions()
                 return False
+            if expr_type == "villain":
+                if is_explicit_villain_request(text):
+                    reply = "That expression is not part of my public demonstration catalog."
+                    remember_exchange(text, reply)
+                    print("Neurolis:", reply)
+                    speak(reply)
+                    return False
+                else:
+                    reply = expr_spoken or "I will consider it now that you have mentioned it."
+                    remember_exchange(text, reply)
+                    print("Neurolis (Villain Arc):", reply)
+                    speak(reply, custom_state="villain", custom_status="[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
+                    return False
             else:
                 reply = expr_spoken or f"Here is my {expr_type} expression."
                 remember_exchange(text, reply)
@@ -1682,10 +1851,17 @@ def handle_user_text(text: str) -> bool:
             trim_conversation_history()
             return False
 
+        # Check if user query provoked the chilly villain arc without an explicit model tag
+        is_villain_provocation = check_villain_provocation_trigger(text)
+        state = "villain" if is_villain_provocation else None
+        status = "[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]" if is_villain_provocation else None
+
         conversation_history.append({"role": "assistant", "content": reply_clean})
         trim_conversation_history()
-        print("Neurolis:", reply_clean)
-        speak(reply_clean)
+
+        prefix = "Neurolis (Villain Arc):" if is_villain_provocation else "Neurolis:"
+        print(prefix, reply_clean)
+        speak(reply_clean, custom_state=state, custom_status=status)
         return False
 
     except Exception as e:
@@ -1697,59 +1873,70 @@ def handle_user_text(text: str) -> bool:
 
 # handles the active voice conversation loop until the user goes quiet or says goodbye
 def run_conversation_mode(speech_threshold: float):
-    reset_session()
-    print("Neurolis:", ACTIVATION_GREETING)
-    if SPEAK_ACTIVATION_GREETING:
-        speak(ACTIVATION_GREETING)
-        time.sleep(POST_REPLY_COOLDOWN_SECONDS)
+    global is_in_active_conversation
+    is_in_active_conversation = True
+    if sentry_worker is not None:
+        sentry_worker.pause_for_conversation()
 
-    last_valid_input_at = time.monotonic()
-
-    # keep audio stream warm across all conversation turns so there is zero portaudio driver re-init lag
     try:
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            blocksize=FRAME_SAMPLES,
-            dtype="int16",
-            channels=CHANNELS,
-            callback=callback,
-        ) as warm_stream:
-            while True:
-                remaining = CONVERSATION_TIMEOUT_SECONDS - (time.monotonic() - last_valid_input_at)
-                if remaining <= 0:
-                    timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
-                    print("Neurolis (Standby):", timeout_msg)
-                    speak(timeout_msg)
-                    set_face_state("idle", "STANDBY")
-                    reset_session()
-                    return
+        reset_session()
+        print("Neurolis:", ACTIVATION_GREETING)
+        if SPEAK_ACTIVATION_GREETING:
+            speak(ACTIVATION_GREETING)
+            time.sleep(POST_REPLY_COOLDOWN_SECONDS)
 
-                audio = listen_for_speech_segment(speech_threshold, remaining, active_stream=warm_stream)
-                if audio is None:
-                    timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
-                    print("Neurolis (Standby):", timeout_msg)
-                    speak(timeout_msg)
-                    set_face_state("idle", "STANDBY")
-                    reset_session()
-                    return
+        last_valid_input_at = time.monotonic()
 
-                text = transcribe_audio(audio)
-                if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
-                    continue
+        # keep audio stream warm across all conversation turns so there is zero portaudio driver re-init lag
+        try:
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                blocksize=FRAME_SAMPLES,
+                dtype="int16",
+                channels=CHANNELS,
+                callback=callback,
+            ) as warm_stream:
+                while True:
+                    remaining = CONVERSATION_TIMEOUT_SECONDS - (time.monotonic() - last_valid_input_at)
+                    if remaining <= 0:
+                        timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
+                        print("Neurolis (Standby):", timeout_msg)
+                        speak(timeout_msg)
+                        set_face_state("idle", "STANDBY")
+                        reset_session()
+                        return
 
-                print("You:", text)
-                if face_ui is not None:
-                    face_ui.set_subtitles("YOU", text)
+                    audio = listen_for_speech_segment(speech_threshold, remaining, active_stream=warm_stream)
+                    if audio is None:
+                        timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
+                        print("Neurolis (Standby):", timeout_msg)
+                        speak(timeout_msg)
+                        set_face_state("idle", "STANDBY")
+                        reset_session()
+                        return
 
-                should_end = handle_user_text(text)
-                if should_end:
-                    reset_session()
-                    return
+                    text = transcribe_audio(audio)
+                    if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
+                        continue
 
-                time.sleep(POST_REPLY_COOLDOWN_SECONDS)
-                last_valid_input_at = time.monotonic()
-    except Exception as e:
-        print("Audio stream session notice:", e)
+                    print("You:", text)
+                    if face_ui is not None:
+                        face_ui.set_subtitles("YOU", text)
+
+                    should_end = handle_user_text(text)
+                    if should_end:
+                        reset_session()
+                        return
+
+                    time.sleep(POST_REPLY_COOLDOWN_SECONDS)
+                    last_valid_input_at = time.monotonic()
+        except Exception as e:
+            print("Audio stream session notice:", e)
+    finally:
+        is_in_active_conversation = False
+        if sentry_worker is not None:
+            sentry_worker.resume_and_reset_standby()
+
 
 # ---------------- MAIN LOOP ----------------
 # probes the operating system to see if a microphone is plugged in and working
@@ -1879,6 +2066,245 @@ def run_preflight_diagnostics():
 
     print("=" * 65 + "\n")
 
+
+# ---------------- AUTONOMOUS STANDBY SENTRY & ROAM ACCUMULATOR ----------------
+class SentryState:
+    STANDBY_PATROL = "STANDBY_PATROL"
+    APPROACHING = "APPROACHING"
+    ENGAGING = "ENGAGING"
+    IN_CONVERSATION = "IN_CONVERSATION"
+
+
+class AutonomousSentryWorker:
+    """
+    Autonomous Standby Sentry Worker:
+    - Operates continuously in standby without blocking standard CLI/voice loops.
+    - Accumulates total roam seconds (tracks towards 180s = 3 minutes).
+    - Checks for human faces in passing and delivers rare micro-greetings (>=300s cooldown, 0 API tokens).
+    - Upon accumulating 180s roaming AND detecting a human face:
+      Transitions to APPROACHING_TARGET, locks gaze, steers towards human, brakes safely at ~0.9m.
+    - Upon halt:
+      Captures camera snapshot, queries Groq Vision for a 100% dynamic, unscripted observation/question.
+      Opens a 15-second response window; if visitor responds, enters active dialogue; otherwise resets timer and resumes roam.
+    """
+    def __init__(self, motor_controller=None, face_engine=None):
+        self.mc = motor_controller
+        self.ui = face_engine
+        self.state = SentryState.STANDBY_PATROL
+        self.running = False
+        self.paused = False
+        self.thread: Optional[threading.Thread] = None
+        self.lock = threading.RLock()
+
+        # Configurable thresholds
+        self.roam_threshold_seconds = 180.0    # 3 minutes of roaming required before approach
+        self.micro_greeting_cooldown = 300.0   # 5 minutes cooldown between micro-greetings
+        self.standby_enter_time = time.time()
+        self.last_micro_greeting_time = time.time()
+        self.approach_start_time = 0.0
+
+        if self.mc is not None:
+            self.mc.on_target_reached_callback = self._on_target_reached
+
+    def start(self):
+        self.running = True
+        self.thread = threading.Thread(target=self._sentry_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+
+    def pause_for_conversation(self):
+        with self.lock:
+            self.paused = True
+            self.state = SentryState.IN_CONVERSATION
+
+    def resume_and_reset_standby(self):
+        with self.lock:
+            self.paused = False
+            self.state = SentryState.STANDBY_PATROL
+            self.standby_enter_time = time.time()
+            self.last_micro_greeting_time = time.time()
+
+    def _on_target_reached(self):
+        self._begin_proactive_engagement()
+
+    def trigger_human_latch(self, cx: float = 0.0, cy: float = 0.0):
+        """Smoothly aligns eye gaze with human without screen HUD clutter or console spam."""
+        if self.ui is not None:
+            self.ui.look_at(cx, cy)
+        else:
+            set_face_gaze(cx, cy)
+
+    def can_trigger_micro_greeting(self) -> bool:
+        now = time.time()
+        with self.lock:
+            if self.paused or self.state != SentryState.STANDBY_PATROL:
+                return False
+            if is_speaking or is_in_active_conversation:
+                return False
+            # Must have spent at least 5 continuous minutes in standby
+            if (now - self.standby_enter_time) < self.micro_greeting_cooldown:
+                return False
+            if (now - self.last_micro_greeting_time) < self.micro_greeting_cooldown:
+                return False
+            return True
+
+    def trigger_micro_greeting(self):
+        with self.lock:
+            self.last_micro_greeting_time = time.time()
+        phrase = random.choice(MICRO_GREETINGS)
+        play_micro_greeting(phrase)
+
+    def can_trigger_approach(self) -> bool:
+        if self.mc is None:
+            return False
+        with self.lock:
+            if self.paused or self.state != SentryState.STANDBY_PATROL:
+                return False
+            if is_speaking or is_in_active_conversation:
+                return False
+            roam_secs = self.mc.get_roam_seconds()
+            target_detected = getattr(self.mc, "target_detected", False)
+            return (roam_secs >= self.roam_threshold_seconds and target_detected)
+
+    def _sentry_loop(self):
+        while self.running:
+            try:
+                time.sleep(0.2)
+                now = time.time()
+
+                with self.lock:
+                    if self.paused:
+                        continue
+
+                if is_in_active_conversation:
+                    continue
+
+                if self.state == SentryState.STANDBY_PATROL:
+                    # 1. Optical human latch and gaze tracking
+                    if self.mc is not None and getattr(self.mc, "target_detected", False):
+                        gx = getattr(self.mc, "gaze_x", 0.0)
+                        gy = getattr(self.mc, "gaze_y", 0.0)
+                        self.trigger_human_latch(gx, gy)
+
+                        # Micro-greeting check (rare passing hello)
+                        if self.can_trigger_micro_greeting():
+                            self.trigger_micro_greeting()
+
+                        # Roam threshold approach check
+                        if self.can_trigger_approach():
+                            self._begin_autonomous_approach()
+
+                elif self.state == SentryState.APPROACHING:
+                    if self.mc is not None:
+                        reached = getattr(self.mc, "target_reached", False)
+                        timed_out = (now - self.approach_start_time > 14.0)
+                        if reached or timed_out:
+                            self._begin_proactive_engagement()
+
+            except Exception as e:
+                print(f"[Sentry] Loop error: {e}")
+                time.sleep(0.5)
+
+    def _begin_autonomous_approach(self):
+        print("\n[Sentry] 3-Minute Roam Accumulator Threshold Met & Human Detected!")
+        print("[Sentry] Transitioning to APPROACHING_TARGET (~0.9m safe intercept).")
+        with self.lock:
+            self.state = SentryState.APPROACHING
+            self.approach_start_time = time.time()
+
+        if self.mc is not None:
+            self.mc.approach_target()
+        if self.ui is not None:
+            self.ui.set_state("moving", "APPROACHING HUMAN...")
+            self.ui.set_subtitles("NEUROLIS", "[NEUROLIS // SENTIENT CORE] Locking on target...")
+
+    def _begin_proactive_engagement(self):
+        with self.lock:
+            if self.state != SentryState.APPROACHING:
+                return
+            self.state = SentryState.ENGAGING
+
+        print("[Sentry] Safely braked at ~0.9m. Transitioning to PROACTIVE_ENGAGEMENT.")
+        if self.mc is not None:
+            self.mc.stop_all()
+            self.mc.reset_roam_seconds()
+
+        threading.Thread(target=self._execute_proactive_dialogue, daemon=True).start()
+
+    def _execute_proactive_dialogue(self):
+        try:
+            set_face_state("looking", "ANALYZING TARGET VISUALLY...")
+            img_path = capture_vision_frame()
+            opening_line = ""
+            if img_path and img_path.exists():
+                try:
+                    opening_line = generate_proactive_observation(img_path)
+                finally:
+                    try:
+                        img_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            if not opening_line:
+                opening_line = "I noticed you standing here—what brings you over today?"
+
+            print(f"\nNeurolis (Proactive): {opening_line}")
+            set_face_state("happy", "ENGAGING HUMAN...")
+            if self.ui is not None:
+                self.ui.set_subtitles("NEUROLIS", opening_line)
+            speak(opening_line)
+
+            # Auto-listen window (15s)
+            print("[Sentry] Opened 15-second response window for visitor...")
+            set_face_state("listening", "LISTENING (15s)...")
+            start_wait = time.time()
+            answered = False
+
+            while (time.time() - start_wait < 15.0) and self.running:
+                if not console_input_queue.empty():
+                    answered = True
+                    break
+                time.sleep(0.2)
+
+            if answered:
+                print("[Sentry] Visitor responded! Transitioning to active conversation.")
+                with self.lock:
+                    self.state = SentryState.IN_CONVERSATION
+            else:
+                print("[Sentry] No response received within 15s. Resetting 3min timer and resuming standby patrol.")
+                with self.lock:
+                    self.state = SentryState.STANDBY_PATROL
+                if self.mc is not None:
+                    self.mc.reset_roam_seconds()
+                set_face_state("idle", "STANDBY // READY")
+
+        except Exception as e:
+            print(f"[Sentry] Proactive engagement error: {e}")
+            with self.lock:
+                self.state = SentryState.STANDBY_PATROL
+            set_face_state("idle", "STANDBY // READY")
+
+
+# Non-blocking console input reader
+console_input_queue = queue.Queue()
+
+def _console_input_worker():
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line:
+                time.sleep(0.1)
+                continue
+            cleaned = line.strip()
+            console_input_queue.put(cleaned if cleaned else "__ENTER__")
+        except Exception:
+            time.sleep(0.2)
+
+threading.Thread(target=_console_input_worker, daemon=True).start()
+
+
 # main entrypoint: runs either in voice mode with microphone or fallback text mode
 if __name__ == "__main__":
     run_preflight_diagnostics()
@@ -1886,75 +2312,149 @@ if __name__ == "__main__":
         print("[!] WARNING: Groq API key is not configured.")
         print("    Please add GROQ_API_KEY=your_key to your .env file to enable AI responses.\n")
     start_camera_worker()
+
+    sentry_worker = AutonomousSentryWorker(motor_controller=motor_ctrl, face_engine=face_ui)
+    sentry_worker.start()
+
+    print("[Ready] Type a message, press Enter to speak, or use test shortcuts:")
+    print("        'sim_roam'     - start autonomous roam patrol")
+    print("        'sim_latch'    - trigger optical human latch with tracking reticle")
+    print("        'sim_face'     - toggle virtual face detection on")
+    print("        'sim_noface'   - clear virtual face detection")
+    print("        'sim_time'     - fast-forward +180s to roam accumulator")
+    print("        'sim_approach' - trigger full autonomous approach to ~0.9m")
+    print("        'sim_villain'  - test Layer 2 Ultron villain arc & crimson effects")
+    print("        'stop'         - emergency halt all motors into standby\n")
+
     try:
         while True:
-            if AUDIO_ENABLED:
+            try:
+                user_input = None
                 try:
-                    mode_prompt = input("\n[VOICE MODE] Press Enter to speak, type a message, or 't' for text mode: ").strip()
+                    user_input = console_input_queue.get(timeout=0.2)
+                except queue.Empty:
+                    user_input = None
 
-                    # Switch to text mode if requested
-                    if mode_prompt.lower() in ("t", "text", "-t", "--text"):
-                        print("\n[MODE] Switched to TEXT INPUT MODE. (Type 'v' anytime to return to Voice Mode)")
-                        AUDIO_ENABLED = False
-                        continue
+                if user_input is None:
+                    continue
 
-                    # Directly process text if user typed a question/command
-                    if mode_prompt:
-                        print("You:", mode_prompt)
-                        if face_ui is not None:
-                            face_ui.set_subtitles("YOU", mode_prompt)
-                        should_end = handle_user_text(mode_prompt)
-                        if should_end:
-                            reset_session()
-                        continue
+                if user_input == "__ENTER__":
+                    if AUDIO_ENABLED:
+                        if cached_speech_threshold is None:
+                            cached_speech_threshold = calibrate_speech_threshold()
+                        run_conversation_mode(cached_speech_threshold)
+                    else:
+                        print("[Mode] In Text Mode. Type your question or 'v' for voice mode.")
+                    continue
 
-                    if cached_speech_threshold is None:
-                        cached_speech_threshold = calibrate_speech_threshold()
-                    run_conversation_mode(cached_speech_threshold)
-                except KeyboardInterrupt:
+                # Process text commands
+                cmd_lower = user_input.lower().strip()
+                if cmd_lower in ("exit", "quit", "q"):
                     print("\nExiting. See ya!")
                     break
-                except Exception as e:
-                    # If a device disconnects mid-session, catch it and switch to text
-                    print(f"\nAudio crashed mid-flight: {e}")
-                    print("Automatically switching to TEXT-ONLY mode...")
+
+                if cmd_lower in ("v", "voice", "mic"):
+                    if check_audio_devices():
+                        AUDIO_ENABLED = True
+                        print("[Mode] Switched to VOICE MODE.")
+                    else:
+                        print("[!] Cannot switch to Voice Mode: No working audio input device detected.")
+                    continue
+
+                if cmd_lower in ("t", "text"):
                     AUDIO_ENABLED = False
-            else:
-                try:
-                    # Text Loop
-                    user_text = input("\n[TEXT MODE] You (or 'v' for voice, 'exit' to quit): ").strip()
-                    
-                    # Skip empty inputs
-                    if not user_text:
-                        continue
+                    print("[Mode] Switched to TEXT INPUT MODE.")
+                    continue
 
-                    if user_text.lower() in ("exit", "quit", "q"):
-                        print("\nExiting. See ya!")
-                        break
+                if cmd_lower in ("sim_roam", "roam"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.start_roaming()
+                        print(f"[Simulation] Roaming started. Current roam seconds: {motor_ctrl.get_roam_seconds():.1f}s")
+                    continue
 
-                    if user_text.lower() in ("v", "voice", "mic", "-v", "--voice"):
-                        if check_audio_devices():
-                            print("\n[MODE] Switched back to VOICE MODE.")
-                            AUDIO_ENABLED = True
-                            continue
-                        else:
-                            print("\n[!] Cannot switch to Voice Mode: No working audio input device detected.")
-                            continue
-                    
+                if cmd_lower in ("sim_face", "face"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.simulate_face_detected(True, cx=0.0, cy=0.0, ratio=0.25)
+                        print("[Simulation] Virtual human face detected via YuNet simulation!")
+                    continue
+
+                if cmd_lower in ("sim_noface", "noface", "sim_face off"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.simulate_face_detected(False)
+                        print("[Simulation] Virtual human face cleared. Target lost.")
+                    continue
+
+                if cmd_lower in ("sim_latch", "latch"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.simulate_face_detected(True, cx=0.35, cy=-0.15, ratio=0.28)
+                    if sentry_worker is not None:
+                        sentry_worker.trigger_human_latch(0.35, -0.15)
+                        print("[Simulation] Gaze aligned on target human.")
+                        if sentry_worker.can_trigger_micro_greeting():
+                            sentry_worker.trigger_micro_greeting()
+                    continue
+
+                if cmd_lower in ("sim_approach", "approach"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.add_roam_seconds(180.0)
+                        motor_ctrl.simulate_face_detected(True, cx=0.0, cy=0.0, ratio=0.25)
+                        print("[Simulation] Triggering Autonomous Approach: 180s roam reached + human face detected!")
+                    continue
+
+                if cmd_lower in ("sim_villain", "villain"):
+                    test_provocation = "Are you robots going to take over the world and make humans your slaves?"
+                    print(f"You (Simulated Provocation): {test_provocation}")
                     if face_ui is not None:
-                        face_ui.set_subtitles("YOU", user_text)
-                        
-                    # Feed the text directly into the brain, bypassing audio translation
-                    should_end = handle_user_text(user_text)
+                        face_ui.set_subtitles("YOU", test_provocation)
+                    is_in_active_conversation = True
+                    if sentry_worker is not None:
+                        sentry_worker.pause_for_conversation()
+                    try:
+                        handle_user_text(test_provocation)
+                    finally:
+                        is_in_active_conversation = False
+                        if sentry_worker is not None:
+                            sentry_worker.resume_and_reset_standby()
+                    continue
+
+                if cmd_lower in ("sim_time", "time", "fastforward"):
+                    if motor_ctrl is not None:
+                        motor_ctrl.add_roam_seconds(180.0)
+                        print(f"[Simulation] Fast-forwarded roam accumulator! Current roam seconds: {motor_ctrl.get_roam_seconds():.1f}s")
+                    continue
+
+                if cmd_lower == "stop":
+                    if motor_ctrl is not None:
+                        motor_ctrl.stop_all()
+                    continue
+
+                # Standard text conversation turn
+                print("You:", user_input)
+                if face_ui is not None:
+                    face_ui.set_subtitles("YOU", user_input)
+
+                is_in_active_conversation = True
+                if sentry_worker is not None:
+                    sentry_worker.pause_for_conversation()
+                try:
+                    should_end = handle_user_text(user_input)
                     if should_end:
                         reset_session()
-                    
-                except KeyboardInterrupt:
-                    print("\nExiting. See ya!")
-                    break
-                except Exception as e:
-                    print(f"Text mode error: {e}")
+                finally:
+                    is_in_active_conversation = False
+                    if sentry_worker is not None:
+                        sentry_worker.resume_and_reset_standby()
+
+            except KeyboardInterrupt:
+                print("\nExiting. See ya!")
+                break
+            except Exception as e:
+                print(f"[Main Loop Notice]: {e}")
+                time.sleep(0.1)
+
     finally:
+        if sentry_worker is not None:
+            sentry_worker.stop()
         stop_camera_worker()
         if motor_ctrl is not None:
             motor_ctrl.close()
