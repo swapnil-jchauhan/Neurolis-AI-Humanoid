@@ -219,6 +219,32 @@ class MotorController:
                 return p.device
         return ports[0].device if ports else None
 
+    @property
+    def is_moving(self) -> bool:
+        with self.lock:
+            return self.nav_mode in [
+                NavMode.FOLLOW,
+                NavMode.APPROACH,
+                NavMode.APPROACHING_TARGET,
+                NavMode.ROAM,
+                NavMode.STEP_BACK,
+                NavMode.SPIN,
+            ]
+
+    @property
+    def is_following(self) -> bool:
+        with self.lock:
+            return self.nav_mode in [
+                NavMode.FOLLOW,
+                NavMode.APPROACH,
+                NavMode.APPROACHING_TARGET,
+            ]
+
+    @property
+    def is_roaming(self) -> bool:
+        with self.lock:
+            return self.nav_mode == NavMode.ROAM
+
     # ---- NATURAL COMMAND INTERFACES ----
     # activates follow-me mode: robot uses camera to track the human and drives after them
     def start_following(self):

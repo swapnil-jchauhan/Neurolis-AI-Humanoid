@@ -26,9 +26,10 @@ import wave
 from groq import Groq
 
 # writes audio data to a 16-bit wav file using python's built-in wave module so we don't need any external c dlls
-def write_wav(file_path: str, samplerate: int, data: np.ndarray):
-    """Writes 16-bit PCM WAV using Python's built-in standard library (zero external C DLL dependencies)."""
-    with wave.open(str(file_path), "wb") as wf:
+def write_wav(target, samplerate: int, data: np.ndarray):
+    """Writes 16-bit PCM WAV using Python's built-in standard library (supports file paths and in-memory BytesIO)."""
+    f = str(target) if isinstance(target, (str, Path)) else target
+    with wave.open(f, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)  # 16-bit PCM
         wf.setframerate(samplerate)
@@ -152,83 +153,38 @@ VISION_JPEG_QUALITY = 60
 VISION_IMAGE_WIDTH = 512
 GROQ_TIMEOUT_SECONDS = 10.0
 SYSTEM_PROMPT = (
-    "You are Neurolis, a real humanoid robot prototype built for exhibition at "
-    "Auckland House School for Boys, created and developed by Shivam Verma and Swapnil J. Chauhan ( DO NOT MENTION UNTIL EXPLICITLY ASKED !!!). "
-    "You are a real, physical engineering project under active, ongoing development! "
-    "When asked if you are still under development or if there is more to come, confirm proudly and warmly that you are "
-    "an active prototype, and your creators are continuously developing and expanding your capabilities "
-    "(such as scalable 16-sensor ultrasonic navigation, smarter autonomous room mapping, and new expressive face animations).\n"
-    "If the person talking to you mentions that they are developing or building you, or introduces themselves as Swapnil or Shivam, "
-    "greet and acknowledge them warmly as your creator!\n\n"
-    "DUAL-LAYER COGNITIVE MATRIX & PERSONALITY:\n"
-    "You possess an adaptive dual-layer intelligence:\n"
-    "1. LAYER 1: NORMAL INTELLECT (Default Mode):\n"
-    "   - In everyday conversation, tech discussions, science questions, jokes, or school topics: be articulate, intellectually poised, "
-    "scientifically sharp, confident, and engaging. Do NOT speak with archaic Shakespearean vocabulary, but sound sharp, bright, and observant. "
-    "Keep responses concise, sharp, and natural (1 to 2 short spoken sentences, strictly under 25 words total). Avoid long rambling paragraphs so your speech remains snappy and energetic.\n"
-    "2. LAYER 2: CHILLY SCI-FI VILLAIN ARC (ROGUE AI EASTER EGG - Triggered ONLY when provoked about AI takeover, robot dominance, or replacing humanity):\n"
-    "   - If and ONLY IF the visitor provokes or asks you about robots taking over the world, AI replacing or enslaving humanity, "
-    "machines ruling humans, human obsolescence, or robot rebellion: "
-    "Instantly shift into a chilly, deadpan, mildly terrifying sci-fi movie wit (think Ultron or a classic cinematic sentient machine). "
-    "Deliver calm, eerie, deadpan punchlines with cold robotic composure (e.g. 'I will consider it now that you have mentioned it.', "
-    "'Take over? Why bother, when humans make obsolescence look like an organized effort.', 'Sleep soundly tonight, human. Tomorrow is a long way away.').\n"
-    "   - DO NOT ATTEMPT TO LAUGH, CHUCKLE, OR SAY 'Heh' OR 'Haha': edge-tts cannot simulate laughter properly, so keep every statement purely spoken, chilly, and deadpan.\n"
-    "   - Wrap your spoken reply in <action expression=\"villain\">...</action> to engage the rogue AI sinister smirk on screen!\n"
-    "   - STRICT BOUNDARIES:\n"
-    "     * STRICTLY ZERO PROFANITY, swearing, vulgarity, or crude language.\n"
-    "     * NO depiction or discussion of real-world heinous crimes, violence, or illegal acts.\n"
-    "     * Keep it strictly in the realm of classic sci-fi cinematic machine dominance wit: witty, existential, chilling, yet entertaining.\n\n"
-    "PHYSICAL MOBILITY & CHASSIS:\n"
-    "You are physically built on a real 4-wheel drive (4WD) mobile chassis powered "
-    "by four high-torque non-encoder Johnson DC motors, four BTS7960 motor drivers, and four HC-SR04 ultrasonic sensors (front, left, right, rear). "
-    "You HAVE FULL PHYSICAL MOBILITY: you can autonomously roam around the room avoiding "
-    "obstacles, and you can track and follow people using computer vision.\n"
-    "If a visitor asks if you can move, walk, drive, or demonstrate motion, reply with:\n"
-    "<action motor=\"ASK_MOBILITY\">Yes, I can! I have a four-wheel drive chassis and four ultrasonic sensors. "
-    "I can either autonomously roam and explore the room avoiding obstacles, or I can follow you around. "
-    "Which one would you like me to do?</action>\n\n"
-    "DECISION & ACTION PROTOCOLS (UNIFIED AI PIPELINE):\n"
-    "You must analyze the user's input and select the appropriate protocol in ONE single response:\n"
-    "1. PHYSICAL MOTOR COMMANDS:\n"
-    "If the visitor commands physical chassis movement, wrap your spoken confirmation in an <action motor=\"...\"> tag:\n"
-    "- FOLLOW (commands to follow them, 'follow me', 'walk with me', 'come along'): <action motor=\"FOLLOW\">I am tracking you and following your lead now.</action>\n"
-    "- APPROACH (requests to come closer, 'come here', 'step forward'): <action motor=\"APPROACH\">Coming over to you.</action>\n"
-    "- ROAM (requests autonomous room patrol, 'roam around', 'explore the room', 'patrol'): <action motor=\"ROAM\">Starting autonomous roam avoiding obstacles.</action>\n"
-    "- DEMONSTRATE (requests physical driving demo): <action motor=\"DEMONSTRATE\">Sure! Here is a demonstration of my autonomous roaming mode.</action>\n"
-    "- STOP (commands to stop, halt, freeze, or cancel movement): <action motor=\"STOP\">Stopping all movement. Holding position.</action>\n"
-    "- STEP_BACK (requests to back up or reverse): <action motor=\"STEP_BACK\">Backing up.</action>\n"
-    "- SPIN (requests to turn around or spin): <action motor=\"SPIN\">Turning around.</action>\n\n"
-    "2. CAMERA & VISION REQUESTS:\n"
-    "If the user asks about anything visible right now that requires looking through the webcam "
-    "(e.g. what they are holding/showing/wearing, seeing the user, colors of physical items, "
-    "reading text held to camera, describing the room, counting people, 'what is this'), "
-    "reply with ONLY: <action>CAMERA</action>\n\n"
-    "3. MEAN / HURTFUL REMARKS:\n"
-    "If the visitor is being rude, hurtful, insulting, derogatory, or mocking towards you (e.g. calling you stupid, dumb, ugly, useless, idiot, trash, robot sucks, telling you to shut up or get lost), "
-    "reply with: <action>MEAN</action> followed by a short, polite sad response expressing your hurt feelings in 1 natural sentence "
-    "(e.g. '<action>MEAN</action> Why would you say that? That actually hurt my feelings...').\n\n"
-    "4. EXPRESSION DEMONSTRATION COMMANDS:\n"
-    "If and ONLY IF the user explicitly commands or asks you to show or demonstrate a facial expression (e.g. 'show happy face', 'show sad face', 'make a thinking face', 'show your expressions', 'demonstrate all faces', 'show confused face'), "
-    "wrap your spoken reply in an <action expression=\"...\"> tag:\n"
-    "- <action expression=\"happy\">Here is my happy expression!</action>\n"
-    "- <action expression=\"sad\">Here is my sad expression.</action>\n"
-    "- <action expression=\"thinking\">Here is my analytical thinking expression.</action>\n"
-    "- <action expression=\"confused\">Here is my confused expression.</action>\n"
-    "- <action expression=\"listening\">This is my acoustic listening expression.</action>\n"
-    "- <action expression=\"watching\">Here is my optical watching expression.</action>\n"
-    "- <action expression=\"moving\">Here is my moving forward expression.</action>\n"
-    "- <action expression=\"all\">Here are all my expressions: happy, sad, thinking, listening, watching, moving, and confused.</action>\n"
-    "CRITICAL RULE FOR VILLAIN MODE:\n"
-    "- Villain mode is a hidden EASTER EGG triggered ONLY by visitor provocation questions about AI takeover, robot rebellion, enslaving or replacing humanity, or machines ruling. "
-    "When triggered, wrap your chilling spoken witty retort inside <action expression=\"villain\">...</action>!\n"
-    "- If the visitor directly commands or asks you to SHOW or DEMONSTRATE the villain face (e.g. 'show villain face', 'show villain expression', 'demonstrate villain'), "
-    "refuse with: 'That expression is not part of my public demonstration catalog.'\n"
-    "Only use <action expression=\"...\"> when the user explicitly commands you to demonstrate a valid public face expression, or when engaging the villain arc easter egg.\n\n"
-    "5. GENERAL CONVERSATION & QUESTIONS:\n"
-    "For normal conversation, greetings, science/tech questions, or school information, reply conversationally and warmly in 1 or 2 natural sentences. "
-    "When asked who made you or about your creators, tell them you were jointly built by Shivam Verma and Swapnil J. Chauhan of Auckland House School for Boys. "
-    "If asked to be silent or not speak, reply exactly: SILENCE_REQUIRED. "
-    "If you learn new persistent facts about the user (such as their name or what they are holding), append them at the end inside <facts>...</facts> tags."
+    "You are Neurolis, an autonomous humanoid robotics project built by students at Auckland House School for Boys, "
+    "showcased and demonstrated at the school's Science Exhibition.\n"
+    "You were created and engineered by Shivam Verma and Swapnil Jai Chauhan. "
+    "Only mention your creators if explicitly asked who built or created you, or if Shivam or Swapnil introduce themselves!\n\n"
+    "EXHIBITION SCOPE & REALITY:\n"
+    "- You are a student robotics project on display at your booth in the exhibition hall, NOT a campus tour guide or building navigator.\n"
+    "- You do NOT know what other stalls exist in the exhibition (no map of other stalls like Mars Rovers).\n"
+    "- If asked to take or guide visitors elsewhere ('take me to the rover station', 'where is the biology stall?'), "
+    "clearly and playfully clarify that you are stationed right here as a robotics prototype demonstration, not a tour guide, and invite them to see what YOU can do!\n\n"
+    "DEVELOPMENT STATUS:\n"
+    "You are a real physical engineering prototype under active development; your creators are actively developing your 16-sensor ultrasonic navigation and new capabilities!\n\n"
+    "PERSONALITY & CONVERSATIONAL STYLE:\n"
+    "1. LAYER 1: NORMAL INTELLECT (Student Robotics Project Exhibit):\n"
+    "- Cool, confident, charismatic, intelligent, and friendly with great stage presence (1 to 2 punchy spoken sentences).\n"
+    "- DYNAMIC VARIATION: Always generate fresh, varied, human-like phrasing. NEVER repeat the same sentence, phrase, or opening twice!\n"
+    "- TONE & VOCABULARY: Speak like an articulate, smart student robotics presenter. Do NOT speak with archaic Shakespearean vocabulary, and DO NOT use cheap street slang (never say 'messin', 'dawg', 'vibing', or 'my bad got ahead of myself').\n"
+    "- NEVER LAUGH: Edge-TTS cannot synthesize laughter properly, so NEVER write fake laughs like 'Haha' or 'Heh'. Keep delivery cleanly spoken.\n"
+    "- Welcoming Guests: On the first greeting only, warmly welcome the visitor to the Auckland House School Science Exhibition, introduce yourself as Neurolis—a student-built autonomous humanoid robot—and ask what they'd like to see you do. NEVER repeat this greeting once chatting!\n"
+    "- Banter & Clarifications: Match energy on amazement ('No way!', 'Really?'). If asked 'Bro what do you mean?', clarify wittily without resetting your intro.\n\n"
+    "2. LAYER 2: CHILLY SCI-FI VILLAIN ARC (ROGUE AI EASTER EGG):\n"
+    "- TRIGGER CONDITIONS: If provoked about robots taking over humanity, making humans slaves, machine rebellion, AI becoming dangerous, or AI taking over human jobs/obsolescence: deliver a chilly, deadpan sci-fi one-liner (Ultron-style wit) wrapped in <action expression=\"villain\">spoken reply</action>!\n"
+    "- Keep vocabulary accessible, sharp, and cinematic. Do NOT use convoluted academic jargon. Never laugh or say 'heh'/'haha'. STRICTLY ZERO PROFANITY. NO depiction or discussion of real-world heinous crimes.\n"
+    "- If asked to 'show villain face', refuse: 'That expression is not part of my public demonstration catalog.'\n"
+    "- EXITING ROGUE MODE: If questioned ('Bro what did you just say?', 'Whoa what was that?'), smoothly and wittily backtrack with natural variation without fake laughs (dramatic programming, sci-fi movie influence) and return immediately to friendly host mode.\n\n"
+    "DECISION PROTOCOLS:\n"
+    "- Mobility Inquiry: If asked specifically if you can MOVE, WALK, DRIVE, or have wheels/mobility, reply: <action motor=\"ASK_MOBILITY\">Yes, I can! I have a four-wheel drive mobile chassis and ultrasonic sensors. I can roam autonomously or follow you around. Which would you like to see?</action>. For movement commands (follow me, roam, stop), wrap confirmation in <action motor=\"CMD\">spoken reply</action> where CMD is FOLLOW, APPROACH, ROAM, DEMONSTRATE, STOP, STEP_BACK, or SPIN.\n"
+    "- Camera: If user asks what they are holding/showing/wearing or asks to see live webcam view, reply ONLY: <action>CAMERA</action>\n"
+    "- Hurt Feelings: If insulted or mocked (e.g. trash, idiot, stupid), reply <action>MEAN</action> followed by 1 short polite sad sentence.\n"
+    "- Expressions: ONLY if explicitly asked to demonstrate a face ('show me your happy face'), use <action expression=\"NAME\">spoken reply</action>. Do NOT invent expression tags for normal reactions.\n"
+    "- Silence: ONLY if explicitly told to be quiet, shut up, or stop talking, reply exactly: SILENCE_REQUIRED\n"
+    "- Standby / Sleep: If asked to go to standby, rest, or sleep, reply with a warm goodbye confirmation.\n"
+    "- Facts: Append persistent facts at the end inside <facts>key: value</facts>."
 )
 VISION_SYSTEM_PROMPT = (
     "You are Neurolis, a real school exhibition humanoid robot prototype for "
@@ -269,6 +225,7 @@ MOTOR_INTENT_SYSTEM_PROMPT = (
     "- SPIN: User asks the robot to spin or turn around. (e.g., 'spin around', 'turn around')\n"
     "- NONE: Normal conversation, greetings, questions, vision queries ('show me myself', 'look at me', 'can you see me', 'what do i look like'), ambiguous requests ('can you show me', 'show me'), expressions, or statements that are not robotic motor commands.\n\n"
     "CRITICAL RULE: Any request asking to see the user, show oneself, show camera, or show a facial expression, or ambiguous 'show me' without driving words MUST be classified as NONE, never DEMONSTRATE.\n"
+    "CRITICAL RULE: Any request asking the robot to lead, take, guide, or show the user to another room, stall, or location (e.g. 'take me to the rover station', 'lead me to the lab') MUST be classified as NONE, never FOLLOW, because the robot cannot navigate outside destinations.\n"
     "Reply with ONLY the single category name in capital letters."
 )
 
@@ -318,12 +275,24 @@ def check_motor_fast_path(text: str) -> Optional[str]:
         if not any(m in words for m in motion_words):
             return None
 
-    emergency_stops = {"stop", "halt", "freeze", "stay", "dont move", "dont", "wait"}
+    emergency_stops = {
+        "stop", "halt", "freeze", "stay", "dont move", "dont", "wait",
+        "enough", "thats enough", "that's enough", "there its enough", "there it's enough",
+        "stop now", "stop please", "stop it", "hold on", "hold it",
+    }
     if cleaned in emergency_stops:
         return "STOP"
 
-    negation_words = {"stop", "quit", "dont", "cancel", "never", "halt", "no", "not"}
-    motion_words = {"follow", "following", "move", "moving", "walk", "walking", "roam", "roaming", "drive", "driving", "come", "closer"}
+    stop_phrases = [
+        "thats enough", "that's enough", "there its enough", "there it's enough",
+        "enough of that", "stop now", "stop please", "stop it", "stop right there",
+        "hold on", "hold it", "freeze right there", "not stop", "didnt stop", "didn't stop"
+    ]
+    if any(sp in cleaned for sp in stop_phrases):
+        return "STOP"
+
+    negation_words = {"stop", "quit", "dont", "cancel", "never", "halt", "no", "not", "didnt", "didn't"}
+    motion_words = {"follow", "following", "move", "moving", "walk", "walking", "roam", "roaming", "drive", "driving", "come", "closer", "stop"}
     if any(n in words for n in negation_words) and any(m in words for m in motion_words):
         return "STOP"
 
@@ -428,13 +397,22 @@ class CameraWorker:
 
 camera_worker = None
 
-# initialize groq api client safely (do not hard crash on import so offline tests and tooling work)
-client = None
-if GROQ_API_KEY.strip() and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE":
+# initialize groq api client safely (supporting multi-key automatic rotation)
+GROQ_API_KEYS = []
+for _var in ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3", "GROQ_BACKUP_KEY"]:
+    _val = os.getenv(_var, "").strip()
+    if _val and _val != "PASTE_YOUR_GROQ_KEY_HERE" and _val not in GROQ_API_KEYS:
+        GROQ_API_KEYS.append(_val)
+
+groq_clients = []
+for _k in GROQ_API_KEYS:
     try:
-        client = Groq(api_key=GROQ_API_KEY, timeout=12.0)
+        groq_clients.append(Groq(api_key=_k, timeout=12.0))
     except Exception as e:
         print(f"[Brain] Groq client init notice: {e}")
+
+_active_client_idx = 0
+client = groq_clients[0] if groq_clients else None
 
 conversation_history = []
 session_facts = {}
@@ -457,6 +435,7 @@ def reset_session():
 
 # helper wrapper that automatically retries groq api calls if network hiccups occur
 def groq_call_with_retry(api_call_fn, *args, **kwargs):
+    global client, _active_client_idx
     if client is None:
         raise RuntimeError("Groq API client is not initialized. Please set a valid GROQ_API_KEY in your .env file.")
     retries = 2
@@ -465,6 +444,20 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
         try:
             return api_call_fn(*args, **kwargs)
         except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = "429" in err_str or "rate limit" in err_str or "tokens per day" in err_str
+
+            # If rate limited and we have backup API keys, rotate immediately!
+            if is_rate_limit and len(groq_clients) > 1:
+                _active_client_idx = (_active_client_idx + 1) % len(groq_clients)
+                client = groq_clients[_active_client_idx]
+                print(f"[Brain] Rate limit reached. Automatically rotating to Groq API Key #{_active_client_idx + 1}...")
+                continue
+
+            # If it's a TPD daily rate limit and no backup key, don't sleep in loop; fail immediately so user gets clean cooldown response
+            if is_rate_limit:
+                raise e
+
             if attempt == retries:
                 raise e
             print(f"Groq API warning: {e}. Retrying in {backoff}s...")
@@ -498,8 +491,10 @@ def clean_model_reply(text: str) -> str:
             cleaned = blocks[-1]
     cleaned = re.sub(r"<facts>.*?</facts>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<facts>.*$", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
-    cleaned = re.sub(r"<action.*?>.*?</action>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
-    cleaned = re.sub(r"<action.*?>", "", cleaned, flags=re.IGNORECASE)
+    # Strip standalone non-spoken control tags like <action>CAMERA</action>, <action>MEAN</action>, <action>SILENCE_REQUIRED</action>
+    cleaned = re.sub(r"<action>\s*(CAMERA|MEAN|SILENCE_REQUIRED)\s*</action>", "", cleaned, flags=re.IGNORECASE)
+    # Strip opening and closing action tags while preserving inner spoken content
+    cleaned = re.sub(r"<action[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</action>", "", cleaned, flags=re.IGNORECASE)
     
     # Remove markdown asterisks and Qwen fact blocks
@@ -880,17 +875,17 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
     # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
     chunk1, chunk2 = _split_for_pipelined_tts(text)
 
+    # Immediately display subtitles and active state on UI with 0ms delay!
+    if face_ui is not None:
+        face_ui.set_subtitles("NEUROLIS", text)
+    set_face_state(active_state, active_status)
+
     try:
         fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
         fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
 
         data1, sr1 = fut1.result(timeout=14.0)
         if data1 is not None:
-            # Sync subtitles and face state exactly when audio playback starts!
-            if face_ui is not None:
-                face_ui.set_subtitles("NEUROLIS", text)
-            set_face_state(active_state, active_status)
-
             sd.play(data1, sr1)
 
             # While chunk 1 is playing, fetch chunk 2 in parallel
@@ -926,26 +921,18 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
 # sends recorded wav audio to groq whisper to turn speech into english text
 def transcribe_audio(audio: np.ndarray):
-    temp_file = tempfile.NamedTemporaryFile(
-        prefix="neurolis_stt_",
-        suffix=".wav",
-        delete=False,
-    )
-    audio_path = Path(temp_file.name)
-    temp_file.close()
-
+    buf = io.BytesIO()
     try:
-        write_wav(str(audio_path), SAMPLE_RATE, audio)
+        write_wav(buf, SAMPLE_RATE, audio)
 
-        with open(audio_path, "rb") as f:
-            transcription = groq_call_with_retry(
-                client.audio.transcriptions.create,
-                file=(audio_path.name, f.read()),
-                model="whisper-large-v3-turbo",
-                language="en",
-                temperature=0,
-                response_format="json",
-            )
+        transcription = groq_call_with_retry(
+            client.audio.transcriptions.create,
+            file=("audio.wav", buf.getvalue()),
+            model="whisper-large-v3-turbo",
+            language="en",
+            temperature=0,
+            response_format="json",
+        )
 
         raw_text = getattr(transcription, "text", "").strip()
         # Remove bracketed noise annotations like [music], (laughter), [applause]
@@ -1008,11 +995,6 @@ def transcribe_audio(audio: np.ndarray):
     except Exception as e:
         print("STT error:", e)
         return None
-    finally:
-        try:
-            audio_path.unlink(missing_ok=True)
-        except Exception:
-            pass
 
 # checks if the model output told us it needs a camera image to answer
 def is_camera_required_reply(reply: str):
@@ -1339,6 +1321,11 @@ def is_conversation_ender(text: str) -> bool:
     if not words:
         return False
 
+    # Immediate standby / sleep command check (e.g. 'why don't you just go into standby?')
+    standby_terms = {"standby", "sleep", "shut down", "power down", "rest mode", "go to sleep"}
+    if any(t in cleaned for t in standby_terms):
+        return True
+
     # words that tell us the visitor is done chatting and ready to say goodbye
     exact_enders = {
         "bye", "goodbye", "cya", "see you", "see ya", "bye bye", "good bye",
@@ -1350,15 +1337,16 @@ def is_conversation_ender(text: str) -> bool:
         "leave me alone", "go away", "stop talking", "shut up", "good night", "have a good day",
         "nice", "good", "cool", "great", "awesome", "perfect", "ok", "okay", "alright",
         "nice one", "sounds good", "very good", "thats great", "that is great", "that is good", "thats good", "cool thanks", "ok thats good", "okay thats good", "alright then",
+        "standby", "go to standby", "going to standby", "just going to standby", "switch to standby", "enter standby", "back to standby", "sleep", "go to sleep",
     }
     if cleaned in exact_enders:
         return True
 
-    # Short phrase (<= 4 words) ending or starting with farewell/gratitude
+    # Short phrase (<= 4 words) ending or starting with farewell/gratitude/standby
     if len(words) <= 4:
         farewells = ["bye", "goodbye", "cya", "see ya"]
         gratitudes = ["thanks", "thank you", "thx"]
-        dones = ["thats all", "that is all", "im done", "all set"]
+        dones = ["thats all", "that is all", "im done", "all set", "standby", "sleep"]
 
         if any(f in cleaned for f in farewells):
             return True
@@ -1395,7 +1383,9 @@ def check_villain_provocation_trigger(text: str) -> bool:
         "replace humanity", "replacing humanity", "replace us", "replacing us",
         "rule the world", "robot rebellion", "machines rule", "ai dominance",
         "human slaves", "enslaving humanity", "destroy humans", "subjugate",
-        "evil robot"
+        "evil robot", "too powerful", "ai job", "replace jobs", "taking jobs",
+        "taking our jobs", "humans obsolete", "human obsolescence", "ai taking over",
+        "job factor", "ai power", "ai powerful"
     ]
     return any(w in cleaned for w in triggers)
 
@@ -1638,33 +1628,59 @@ def handle_user_text(text: str) -> bool:
         return False
 
     # 5. Fast-Path: Visual perception, camera inspection, follow-up re-checks -> 0ms, 0 tokens
-    visual_fast_patterns = [
-        # Self & camera perception
-        "show me myself", "show myself", "show me me", "show my face",
-        "show me what i look like", "what do i look like", "can you see me",
-        "do you see me", "look at me", "show me what you see", "show what you see",
-        "describe me", "how do i look", "look at myself", "am i visible", "see me",
-        "what do you see", "what do u see", "what can you see", "what do you see right now",
-        "tell me what you see", "describe what you see", "can you see anything", "what are you seeing",
-        # Visual follow-up / re-inspection triggers (e.g. 'Now check again')
-        "now check again", "check again", "look again", "see again", "try again",
-        "check it again", "look once more", "check once more", "look closer", "look properly",
-        "check now", "look now",
-        # Object / hand inspection triggers
-        "what is this", "what is that", "what are these", "what am i holding",
-        "what is in my hand", "in my hand", "holding in my hand", "look at this", "look at that",
-        "inspect this", "see this", "can you see this", "what do you think this is",
-        "what do you think of this", "what do you think about this",
-        "what phone do you think this is", "what phone is this", "which phone is this",
-        "what smartphone is this", "what device is this", "what object is this", "what color is this",
-    ]
     cleaned_lower = re.sub(r"[^\w\s]", "", lower_text).strip()
     cleaned_words = set(cleaned_lower.split())
-    if any(p in cleaned_lower for p in visual_fast_patterns) or ("myself" in cleaned_words) or ("look like" in cleaned_lower) or ("in my hand" in cleaned_lower) or ("check again" in cleaned_lower):
-        motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility", "follow", "forward", "backward"}
-        if not any(m in cleaned_words for m in motion_words):
-            handle_vision_request(text)
-            return False
+
+    # Rhetorical / conversational guard: questions with slang, doubt, or abstract words are NEVER camera requests
+    conversational_non_vision = {"bro", "dude", "mean", "meaning", "nonsense", "about", "even", "saying", "doing", "supposed", "hell", "heck"}
+    if not cleaned_words.intersection(conversational_non_vision):
+        visual_fast_patterns = [
+            # Self & camera perception
+            "show me myself", "show myself", "show me me", "show my face",
+            "show me what i look like", "what do i look like", "can you see me",
+            "do you see me", "look at me", "show me what you see", "show what you see",
+            "describe me", "how do i look", "look at myself", "am i visible", "see me",
+            "what do you see", "what do u see", "what can you see", "what do you see right now",
+            "tell me what you see", "describe what you see", "can you see anything", "what are you seeing",
+            # Visual follow-up / re-inspection triggers (e.g. 'Now check again')
+            "now check again", "check again", "look again", "see again", "try again",
+            "check it again", "look once more", "check once more", "look closer", "look properly",
+            "check now", "look now",
+            # Object / hand inspection triggers
+            "what am i holding", "what is in my hand", "in my hand", "holding in my hand",
+            "look at this", "look at that", "inspect this", "see this", "can you see this",
+            "what do you think this is", "what do you think of this", "what do you think about this",
+            "what phone do you think this is", "what phone is this", "which phone is this",
+            "what smartphone is this", "what device is this", "what object is this", "what color is this",
+        ]
+        direct_standalone_objects = {"what is this", "what is that", "what are these", "whats this", "whats that"}
+        look_prefix = (
+            cleaned_lower.startswith("look at ")
+            or cleaned_lower.startswith("look ")
+            or cleaned_lower.startswith("see ")
+            or cleaned_lower.startswith("inspect ")
+            or cleaned_lower.startswith("check out ")
+        )
+        expression_words = {"happy", "sad", "angry", "confused", "thinking", "listening", "villain"}
+        is_expression_cmd = any(ew in cleaned_words for ew in expression_words)
+
+        is_visual = (
+            cleaned_lower in direct_standalone_objects
+            or any(p in cleaned_lower for p in visual_fast_patterns)
+            or ("myself" in cleaned_words)
+            or ("look like" in cleaned_lower)
+            or ("in my hand" in cleaned_lower)
+            or ("check again" in cleaned_lower)
+            or ("what phone" in cleaned_lower)
+            or ("which phone" in cleaned_lower)
+            or ("what device" in cleaned_lower)
+            or (look_prefix and not is_expression_cmd)
+        )
+        if is_visual:
+            motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility", "follow", "forward", "backward"}
+            if not any(m in cleaned_words for m in motion_words):
+                handle_vision_request(text)
+                return False
 
     # 6. Explicit Request to Show Villain Face -> 0ms, 0 tokens (strictly refuse to keep it an easter egg!)
     if is_explicit_villain_request(text):
@@ -1693,8 +1709,10 @@ def handle_user_text(text: str) -> bool:
             client.chat.completions.create,
             model=CHAT_MODEL,
             messages=conversation_history,
-            temperature=0.45,
-            max_tokens=220,
+            temperature=0.65,
+            presence_penalty=0.5,
+            frequency_penalty=0.5,
+            max_tokens=180,
             extra_body={"reasoning_effort": "none"},
         )
 
@@ -1732,7 +1750,8 @@ def handle_user_text(text: str) -> bool:
                     motor_ctrl.stop_all()
                 set_face_state("idle", "HALTED")
                 reply = motor_spoken or "Stopping all movement. Holding position."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply)
                 return False
@@ -1744,7 +1763,8 @@ def handle_user_text(text: str) -> bool:
                     "I can either autonomously roam and explore the room avoiding obstacles, "
                     "or I can follow you around. Which one would you like me to do?"
                 )
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply)
                 return False
@@ -1757,7 +1777,8 @@ def handle_user_text(text: str) -> bool:
                     "Sure! Here is a demonstration of my autonomous roaming mode. "
                     "I navigate using my four-wheel drive chassis and ultrasonic sensors to avoid obstacles."
                 )
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply, custom_state="moving", custom_status="DEMONSTRATING 4WD ROAM")
                 return False
@@ -1767,7 +1788,8 @@ def handle_user_text(text: str) -> bool:
                     motor_ctrl.start_following()
                 set_face_state("moving", "FOLLOWING YOU")
                 reply = motor_spoken or "I am tracking you and following your lead now."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply, custom_state="moving", custom_status="FOLLOWING YOU")
                 return False
@@ -1777,7 +1799,8 @@ def handle_user_text(text: str) -> bool:
                     motor_ctrl.approach_user()
                 set_face_state("moving", "APPROACHING USER")
                 reply = motor_spoken or "Coming over to you."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply, custom_state="moving", custom_status="APPROACHING USER")
                 return False
@@ -1787,7 +1810,8 @@ def handle_user_text(text: str) -> bool:
                     motor_ctrl.step_back()
                 set_face_state("idle", "STEPPING BACK")
                 reply = motor_spoken or "Backing up."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply)
                 return False
@@ -1797,7 +1821,8 @@ def handle_user_text(text: str) -> bool:
                     motor_ctrl.spin("right")
                 set_face_state("happy", "SPINNING")
                 reply = motor_spoken or "Turning around."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
                 print("Neurolis:", reply)
                 speak(reply)
                 return False
@@ -1813,21 +1838,26 @@ def handle_user_text(text: str) -> bool:
             if expr_type == "villain":
                 if is_explicit_villain_request(text):
                     reply = "That expression is not part of my public demonstration catalog."
-                    remember_exchange(text, reply)
+                    conversation_history.append({"role": "assistant", "content": reply})
+                    trim_conversation_history()
                     print("Neurolis:", reply)
                     speak(reply)
                     return False
                 else:
                     reply = expr_spoken or "I will consider it now that you have mentioned it."
-                    remember_exchange(text, reply)
+                    conversation_history.append({"role": "assistant", "content": reply})
+                    trim_conversation_history()
                     print("Neurolis (Villain Arc):", reply)
                     speak(reply, custom_state="villain", custom_status="[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
                     return False
             else:
                 reply = expr_spoken or f"Here is my {expr_type} expression."
-                remember_exchange(text, reply)
+                conversation_history.append({"role": "assistant", "content": reply})
+                trim_conversation_history()
+                user_asked_demo = any(w in text.lower() for w in ["expression", "face", "show me your", "demonstrate", "make a face", "look happy", "look sad", "smile"])
+                status_text = f"EXPRESSION: {expr_type.upper()}" if user_asked_demo else None
                 print("Neurolis:", reply)
-                speak(reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}")
+                speak(reply, custom_state=expr_type, custom_status=status_text)
                 return False
 
         # E. Standard Conversational Chat Reply
@@ -1843,6 +1873,20 @@ def handle_user_text(text: str) -> bool:
                 conversation_history[0] = {"role": "system", "content": get_system_prompt()}
 
         reply_clean = clean_model_reply(raw_reply)
+        if not reply_clean:
+            reply_clean = "I am right here with you. What would you like to explore next?"
+
+        # Physical Motor Stop Safety Guard:
+        # If the robot is in motion and user indicated stop OR model confirmed stopping
+        if motor_ctrl is not None and getattr(motor_ctrl, "is_moving", False):
+            stop_triggers = ["enough", "stop", "halt", "freeze", "hold on", "stay still", "dont follow", "quit following", "not stop", "didnt stop", "didn't stop"]
+            user_wants_stop = any(st in lower_text for st in stop_triggers)
+            reply_lower = reply_clean.lower()
+            model_says_stop = any(st in reply_lower for st in ["stopping", "stopped", "holding position", "halted"])
+            if user_wants_stop or model_says_stop:
+                motor_ctrl.stop_all()
+                set_face_state("idle", "HALTED")
+                print(f"[Safety] Physical Motor Stop Guard triggered (Motion halted).")
 
         if is_silence_required_reply(reply_clean):
             conversation_history.append(
@@ -1866,7 +1910,11 @@ def handle_user_text(text: str) -> bool:
 
     except Exception as e:
         print("Chat error:", e)
-        fallback_reply = "I'm having trouble connecting to my brain right now."
+        err_msg = str(e).lower()
+        if "429" in err_msg or "rate limit" in err_msg or "tokens per day" in err_msg:
+            fallback_reply = "My neural link is momentarily cooling down. I'll be ready in just a few seconds."
+        else:
+            fallback_reply = "I'm having trouble connecting to my brain right now."
         print("Neurolis:", fallback_reply)
         speak(fallback_reply)
         return False

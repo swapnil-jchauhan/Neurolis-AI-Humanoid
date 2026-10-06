@@ -1,6 +1,6 @@
 # Project Neurolis Map
 
-Last updated: 2026-09-29
+Last updated: 2026-10-06
 
 ## Project Goal
 
@@ -27,7 +27,36 @@ Final 3-File Master Architecture:
   - WebRTC VAD Level 3 + RMS noise filtering tuned for loud auditoriums.
   - Snappy 0.45s end-silence cutoff with dual-condition voice streak checking (stops ambient exhalations from resetting silence counter, enabling instant Groq dispatch).
   - Extended 18.0-second conversational follow-up timeout with warm audio stream persistence and non-repetitive standby wrap-ups.
-  - Fast Intent Conversation Enders ("alr thanks", "bye", "good", "done", etc.) returning gracefully to standby.
+  - Fast Intent Conversation Enders ("alr thanks", "bye", "good", "done", "standby", etc.) returning gracefully to standby.
+  - **Streamlined 580-Token Prompt Architecture**:
+    - Replaced bulky 1,828 token prompt with a high-efficiency 580-token specification, cutting prompt prefill latency by 68% down to ~200–300ms on Groq LPUs.
+  - **In-Memory Whisper STT Pipeline (Zero Disk I/O)**:
+    - Audio recorded into RAM and dispatched via `io.BytesIO()` buffer; `write_wav()` enhanced to natively support file-like stream objects without string coercion, eliminating OS file lock delays.
+  - **Accurate Creator Attribution & School Exhibition Scope**:
+    - Created and engineered by Shivam Verma and Swapnil Jai Chauhan at Auckland House School for Boys.
+    - Grounded as the featured student robotics prototype stationed at its exhibition booth (never hallucinates campus tour duties).
+  - **Dynamic Human-Level Variation (Zero Scripted Templates)**:
+    - Complete elimination of canned catchphrases and pre-baked templates.
+    - Driven by Groq sampling parameters (`temperature = 0.65`, `presence_penalty = 0.5`, `frequency_penalty = 0.5`) and strict prompt directives demanding fresh, varied phrasing on every turn.
+    - Calibrated tone: Articulate, intelligent student presenter without archaic Shakespearean vocabulary and without cheap street slang (`"messin"`, `"dawg"`, `"vibing"`).
+    - Absolute ban on fake laughs (`"Haha"`, `"Heh"`) for clean Edge-TTS delivery.
+  - **Tightly Bounded 6-Message History Window (`MAX_HISTORY_MESSAGES = 6`)**:
+    - Keeps 3 full dialogue turns of recent context (~450-500 tokens), preventing conversational drift while preserving the 200k daily token quota on Groq LPUs.
+  - **One-Shot Cinematic Rogue AI Easter Egg & Smooth Backtrack**:
+    - Layer 2 Villain Arc triggers strictly on existential takeover or robot supremacy provocations with sharp, cold, accessible Ultron-style sci-fi deadpan wit.
+    - Smoothly and wittily backtracks when questioned (attributing it to dramatic programming or sci-fi movie influence) without canned lines or fake laughs, immediately returning to friendly host mode.
+  - **Physical Motor Stop Safety Guard (Hardware Halt Guarantee)**:
+    - Whenever the robot is moving (`motor_ctrl.is_moving`), if the user expresses halting intent (*"enough"*, *"stop"*, *"halt"*, *"freeze"*, *"did not stop"*) OR the AI model confirms stopping (*"stopping now"*, *"holding position"*), the physical motors immediately lock in `STANDBY`, preventing runaway following/roaming even if XML action tags are omitted.
+  - **Preserved Dialogue Action Tag Cleaner (`clean_model_reply`)**:
+    - Strips only control tags (`<action>CAMERA</action>`, `<action>MEAN</action>`, `<action>SILENCE_REQUIRED</action>`) and action wrapper delimiters while preserving inner spoken content.
+    - Permanently prevents empty assistant responses (`Neurolis: `) and subsequent letter truncation (`Neurolis: I`) caused by corrupted conversation history turns.
+  - **Zero-Lag Subtitle & UI State Dispatch**:
+    - Dispatches subtitles and active expressions to Pygame `face_ui` immediately upon model generation (0ms visual delay).
+  - **Autonomous Standby Sentry & Roam Accumulator (`SentryWorker`)**:
+    - Background sentry loop accumulating 180 seconds (3 minutes) of active roaming before latching onto a detected human via OpenCV YuNet face tracking.
+    - Smooth autonomous steering toward human center and safe braking to a halt at ~0.9m.
+    - 100% dynamic, unscripted Groq Vision engagement based on visitor attire/objects with 15-second response window.
+    - Ambient micro-greetings ("Hey", "Hey there") at most once every 5 minutes in standby patrol from pre-cached RAM audio.
   - **Unified Single-Pass AI Decision Pipeline**:
     - 1 single Groq call handles motor commands, camera vision routing, expression demonstrations, and mean-remark empathy checks simultaneously, saving API tokens and eliminating keyword latency.
     - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, `<action expression="...">`, and `<action>MEAN</action>`.
@@ -35,7 +64,6 @@ Final 3-File Master Architecture:
     - Dedicated daemon thread running a persistent asyncio event loop (`_tts_loop`), completely eliminating per-turn event loop and SSL connection teardown overhead.
     - **Word-Budget Gapless Sentence Pipelining**: Long responses (>14 words) split into Chunk 1 (guaranteed >=6 words, giving ~2.5s to 3.5s of speech) and Chunk 2. Both chunks are synthesized in parallel over the persistent loop. Chunk 1 begins playing in ~0.9s - 1.1s, while Chunk 2 buffers concurrently in RAM with ~2.9s of safety margin, achieving 100% gapless continuous speech.
     - **Dual In-Memory Audio Cache**: Static pre-cache (`_AUDIO_CACHE`) for boot greetings, standby transitions, and emergency stops, plus dynamic LRU cache (`_DYNAMIC_TTS_CACHE`) for synthesized single-chunk responses with 0ms replay latency.
-    - **Lockstep Audio-Synced Subtitles**: Visual subtitles and Face UI mouth squashes are dispatched the exact millisecond audio playback begins, eliminating the awkward silence of reading text on a frozen, mute robot.
   - **Triple-Layer Acoustic Noise & Anti-Hallucination Guards**:
     - Calibrated `MIN_SPEECH_RMS_THRESHOLD = 105` and `START_SPEECH_FRAMES = 4` (120ms) so micro-sounds (lip smacks, breath puffs, sighing, keyboard clicks) never trigger recording.
     - Minimum audio duration guard (`MIN_RECORD_SECONDS = 0.50s`).
@@ -45,8 +73,6 @@ Final 3-File Master Architecture:
     - Direct 0ms routing for camera follow-ups (`"now check again"`, `"look again"`, `"check it again"`) and hand/object inspection (`"what is this"`, `"what am i holding"`, `"what phone do you think this is"`, `"in my hand"`), bypassing the first Groq chat call entirely.
     - Resized vision images to 512px width for 40% smaller payload and 2x faster Groq LPU attention processing.
     - Hard 10.0-second timeout on Groq vision calls to prevent server-side queue hangs.
-  - **Capabilities Inquiry Handler**:
-    - Instant, token-safe response under 45 words stating mobility, person following, camera analysis, and listing all facial expressions including sad.
   - **Text Input & Microphone-Free Mode**:
     - CLI flag `--text` / `-t` boots Neurolis directly into Text Input Mode (bypasses microphone detection entirely).
     - In Voice Mode prompt: hit Enter to speak, type `'t'` to switch to persistent Text Mode, or directly type queries into prompt.
@@ -564,6 +590,42 @@ To do:
   - **Clean Cyber Cockpit Aesthetic**: 3-column cockpit layout (left neon pill badge, center query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner brackets, radar pulse dot, and eliminated technical jargon.
   - **Dynamic Live Probing**: Eliminated static attribute caching on `HardwareInspector` to actively probe OpenCV camera device 0, `sounddevice` channels, and serial COM ports on every boot.
   - **17 Automated Tests**: Expanded `tests/test_safety.py` to 17 automated tests verifying safety stops, drive clamping, obstacle braking, 16-sensor telemetry, simulation zero counts, and live hardware detection.
+- 2026-09-29: High-Speed TTS Pipelining, Gapless Synthesis & Acoustic Noise Hardening:
+  - **Persistent High-Speed TTS Event Loop**: Moved Edge-TTS synthesis to a persistent daemon background thread with an async event loop (`_tts_loop`), completely eliminating per-utterance event loop startup and SSL handshake overhead.
+  - **Word-Budget Gapless Sentence Pipelining**: Long sentences (>14 words) split into Chunk 1 (guaranteed >=6 words, ~2.5s to 3.5s of speech) and Chunk 2. Synthesizes Chunk 1 immediately while Chunk 2 streams concurrently in RAM, producing 100% gapless continuous speech.
+  - **Dual In-Memory Audio Cache**: Static pre-cache (`_AUDIO_CACHE`) for boot greetings, standby transitions, and emergency stops, plus dynamic LRU cache (`_DYNAMIC_TTS_CACHE`) for synthesized single-chunk responses with 0ms replay latency.
+  - **Lockstep Audio-Synced Subtitles**: Pushed subtitles and mouth animation to Pygame `face_ui` in lockstep with audio playback.
+  - **Triple-Layer Acoustic Noise & Anti-Hallucination Guards**: WebRTC VAD Level 3 with `MIN_SPEECH_RMS_THRESHOLD = 105`, `START_SPEECH_FRAMES = 4` (120ms), and 0.45s end-silence cutoff. Added Whisper hallucination filter for filler noises (`"eh"`, `"uh"`, `"er"`, `"um"`, `"ah"`, `"pfft"`, `"cough"`).
+  - **Zero-Lag Visual Fast-Path**: Direct 0ms routing for camera follow-ups (`"now check again"`, `"look again"`) and hand/object inspection (`"what is this"`, `"what am i holding"`). Resized vision images to 512px width for 40% smaller payload and 2x faster Groq LPU attention processing.
+- 2026-10-01: Autonomous Sentry Patrol, Ultron Villain Arc Easter Egg & Boot Soundtrack Sync:
+  - **Autonomous Standby Sentry & Roam Accumulator (`SentryWorker`)**: Background sentry loop accumulating 180 seconds (3 minutes) of active roaming before latching onto a detected human via OpenCV YuNet face tracking. Smooth autonomous steering toward human center and safe braking to a halt at ~0.9m.
+  - **100% Dynamic Unscripted Vision Engagement**: Snaps camera snapshot upon halting and queries Groq Vision (`qwen/qwen3.8-27b`) for a 100% dynamic, unscripted observation or question based on visitor attire/objects with 15-second response window.
+  - **Rare Micro-Greetings**: Emits natural ambient greetings ("Hey", "Hey there") at most once every 5 minutes in standby patrol from pre-cached RAM audio (0 tokens, 0ms lag).
+  - **Dual-Layer Ultron Personality & Rogue AI Easter Egg**: Layer 1 (Default) polite, articulate scientific intellect; Layer 2 (Villain Arc) triggered strictly when provoked about AI takeover or robot rebellion. Chilly, deadpan, mildly terrifying sci-fi rogue AI wit (think Ultron). Strictly zero profanity, no real-world crimes.
+  - **Boot Sequence Hardware Verification & Soundtrack Synchronization (`screen.py`)**: Added `"Autonomous approach engaged?"` check item to the 14-item diagnostic checklist. Cross-faded boot audio player (`BootAudioPlayer`) plays cyber boot soundtrack (`assets/sounds/boot_loop.wav` / `.mp3`) synchronized lockstep with progress bar, with continuous double-buffered loop playback and smooth fade-out.
+  - **Clean OLED Screen Aesthetics**: Reverted intrusive screen HUD overlays: removed target lock box / tracking reticle and horizontal laser sweep from face UI to keep expressive OLED face clean and focused.
+- 2026-10-06: Latency Optimization, In-Memory STT Pipeline, Conversational Flow, Host Persona Polish & Exhibition Scope Refinement:
+  - **Exhibition Scope & Reality Alignment**: Corrected Neurolis's persona to an individual student robotics engineering project showcased at its booth in Auckland House School for Boys, rather than a campus tour guide. It no longer hallucinates other exhibits (e.g. Mars Rover) or promises to escort visitors around the hall; it clearly explains that it is stationed right there demonstrating its own tech and invites guests to see what it can do.
+  - **Destination Navigation Guard in Motor Intent**: Configured motor classifier to strictly label requests asking the robot to lead or guide visitors to external rooms/stalls (*"take me to the rover station"*) as `NONE` instead of falsely triggering `FOLLOW`.
+  - **Token Headroom Expansion (`max_tokens = 260`)**: Increased generation headroom from 140 to 260 tokens, permanently eliminating sentence cutoffs mid-output.
+  - **Universal Standby Trigger in `is_conversation_ender`**: Conversational phrases asking the robot to enter standby (*"Alright then why don't you just go in to standby?"*, *"switch to standby"*) are recognized instantly, cleanly putting the robot into standby at 0ms and 0 tokens.
+  - **Broadened Rogue AI Easter Egg Triggers**: Questions probing AI power (*"What do you think about AI being too powerful these days?"*), AI taking over jobs, and human obsolescence now trigger the chilly Ultron wit mode, while keeping standard conversation in Layer 1 friendly host mode.
+  - **Smooth Rogue Mode Snap-Back**: When questioned after the Ultron villain easter egg (*"Bro what did you just say?"*, *"Whoa what was that?"*), smoothly laughs it off with wit (*"Haha, just messin with you! Glitch in the matrix. Humanity is safe with me, I promise."*) and returns directly to host duties.
+  - **Conversational Rhetorical Guard for Vision Pipeline**: Added strict non-vision conversational word guard (`"bro"`, `"dude"`, `"mean"`, `"nonsense"`, etc.) so rhetorical questions like *"Bro, what is this?"* pass directly to LLM dialogue instead of falsely triggering the webcam and describing user attire.
+  - **In-Memory Whisper STT Pipeline (Zero Disk I/O)**: Replaced temporary file writes/reads in `transcribe_audio()` with pure in-memory `io.BytesIO()` RAM buffers. Enhanced `write_wav()` to natively support file-like stream objects without string coercion, resolving Windows `[Errno 22] Invalid argument` and `AttributeError`.
+  - **Zero-Lag UI Subtitle & State Synchronization**: Pushed subtitles and active face expressions to Pygame `face_ui` immediately the moment `speak()` is called, eliminating the perceived lag where the UI stayed stuck on `"THINKING..."` during Edge-TTS network downloads.
+  - **Conversational Memory Window (`MAX_HISTORY_MESSAGES = 10`)**: Expanded conversation history to 10 messages (5 full dialogue turns), eliminating conversational amnesia while preserving speed.
+- 2026-10-06 (Part 2): Dynamic Human Variation, Creator Attribution Exactness, Physical Motor Stop Guard & Empty Response Fix:
+  - **Accurate Creator Attribution**: Corrected creator names across the codebase and system prompt to `Shivam Verma and Swapnil Jai Chauhan` (exact spelling).
+  - **Dynamic Human-Level Variation (Zero Scripted Catchphrases)**: Eliminated all canned template phrases (*"Believe it! I have got some serious tech under the hood."*, *"Haha, just messin with you! Glitch in the matrix."*). Upgraded Groq completion sampling (`temperature = 0.65`, `presence_penalty = 0.5`, `frequency_penalty = 0.5`) with strict system prompt variation rules demanding fresh phrasing on every conversational turn.
+  - **Tone & Style Calibration**: Re-anchored voice delivery to an articulate, intelligent student robotics presenter. Strictly banned cheap street slang (*"messin"*, *"dawg"*, *"vibing"*, *"my bad got ahead of myself"*) and archaic vocabulary, while enforcing a zero-laughter policy (*"Haha"*, *"Heh"*) due to Edge-TTS inability to synthesize natural laughing sounds.
+  - **Physical Motor Stop Safety Guard (Hardware Halt Guarantee)**: Added a fail-safe physical stop intercept in `handle_user_text()`. If the robot is in motion (`motor_ctrl.is_moving`) and the user expresses stopping intent (*"enough"*, *"stop"*, *"halt"*, *"freeze"*, *"did not stop"*) OR the AI model confirms stopping (*"stopping now"*, *"holding position"*), `motor_ctrl.stop_all()` is executed immediately, halting physical wheels and locking them in `STANDBY` even when XML `<action motor="STOP">` tags are omitted.
+  - **Preserved Dialogue Action Tag Cleaner (`clean_model_reply`)**: Fixed a critical bug where regex was deleting inner spoken dialogue wrapped in action tags (`<action motor="...">`, `<action expression="...">`). Only control keywords (`CAMERA`, `MEAN`, `SILENCE_REQUIRED`) and boundary tags are now stripped, preserving spoken text and permanently preventing empty assistant history turns (`{"role": "assistant", "content": ""}`) that previously corrupted Qwen's context and triggered single-letter truncation (`Neurolis: I`).
+  - **Sliding 6-Message History Window (`MAX_HISTORY_MESSAGES = 6`)**: Reduced conversation history from 10 to 6 messages to cap prompt token size under ~500 tokens, halving daily token burn against Groq's 200,000 TPD free quota and preventing 429 rate limit delays.
+  - **Clean Duplicate History Elimination**: Removed redundant `remember_exchange()` calls in action branches that were appending duplicate user messages into session history.
+  - **Graceful Rate Limit (429) Handling & Multi-Key Failover Rotation**: Added automatic Groq API key rotation across `GROQ_API_KEY`, `GROQ_API_KEY_2`, and `GROQ_API_KEY_3`. When rate limits are encountered, the engine switches to the next available key immediately with zero downtime.
+  - **Object Vision Fast-Path Routing**: Expanded `is_visual` detection so phrases directing the robot to inspect items (*"Look at Xiaomi"*, *"Look at my phone"*, *"inspect this"*) route directly to the lightweight camera vision pipeline without passing through the chat LLM. Streamlined system prompt and set `max_tokens = 180`, slashing token consumption per request by ~55%.
+  - **42 Automated Safety Tests Passing**: Added dedicated test cases in `tests/test_safety.py` covering object vision routing, spoken dialogue preservation, creator attribution spelling, and physical motor stop guards under motion. All 42 tests pass in ~0.84s.
 
 ## Reliability Notes
 

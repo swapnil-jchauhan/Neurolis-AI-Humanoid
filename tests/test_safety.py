@@ -710,6 +710,84 @@ class TestNeurolisSafety(unittest.TestCase):
             listen.speak = original_speak
             listen.client = original_client
 
+    # ================= 32. Spoken Dialogue Preservation in Action Tags =================
+    def test_clean_model_reply_preserves_spoken_dialogue(self):
+        """Verify clean_model_reply strips action tags without wiping inner spoken dialogue."""
+        raw_motor = '<action motor="STOP">Understood, stopping now.</action>'
+        self.assertEqual(listen.clean_model_reply(raw_motor), "Understood, stopping now.")
+
+        raw_villain = '<action expression="villain">I was designed to observe, not dominate.</action>'
+        self.assertEqual(listen.clean_model_reply(raw_villain), "I was designed to observe, not dominate.")
+
+        raw_camera = '<action>CAMERA</action>'
+        self.assertEqual(listen.clean_model_reply(raw_camera), "")
+
+    # ================= 33. Creator Attribution Exact Spelling =================
+    def test_creator_attribution_exact_spelling(self):
+        """Verify creators are accurately named as Shivam Verma and Swapnil Jai Chauhan."""
+        prompt = listen.SYSTEM_PROMPT
+        self.assertIn("Shivam Verma and Swapnil Jai Chauhan", prompt)
+
+    # ================= 34. Physical Motor Stop Guard Safety =================
+    def test_physical_motor_stop_guard_on_enough(self):
+        """Verify physical motors immediately halt when user says 'there it's enough' or model says 'stopping now'."""
+        original_motor = listen.motor_ctrl
+        original_speak = listen.speak
+        original_client = listen.client
+        try:
+            test_mc = motors.MotorController(show_preview=False, auto_popup=False)
+            test_mc.is_simulated = True
+            test_mc.start_following()
+            self.assertTrue(test_mc.is_moving)
+            self.assertTrue(test_mc.is_following)
+            listen.motor_ctrl = test_mc
+            listen.speak = lambda *args, **kwargs: None
+
+            # User says 'there it's enough' -> check_motor_fast_path stops motors immediately
+            res = listen.handle_user_text("Okay, okay, there it's enough.")
+            self.assertFalse(res)
+            self.assertFalse(test_mc.is_moving)
+            self.assertEqual(test_mc.nav_mode, motors.NavMode.STANDBY)
+
+            # Test AI reply trigger: put into roam, model says 'stopping now'
+            test_mc.start_roaming()
+            self.assertTrue(test_mc.is_moving)
+
+            class DummyChoice:
+                def __init__(self, content):
+                    self.message = type("Msg", (), {"content": content})()
+            class DummyResponse:
+                def __init__(self, content):
+                    self.choices = [DummyChoice(content)]
+            class MockCompletions:
+                def create(self, *args, **kwargs):
+                    return DummyResponse("Understood, stopping now.")
+
+            listen.client = type("MockClient", (), {"chat": type("MockChat", (), {"completions": MockCompletions()})()})()
+            listen.handle_user_text("Hold your position please.")
+            self.assertFalse(test_mc.is_moving)
+            self.assertEqual(test_mc.nav_mode, motors.NavMode.STANDBY)
+        finally:
+            listen.motor_ctrl = original_motor
+            listen.speak = original_speak
+            listen.client = original_client
+
+    # ================= 35. Object Vision Routing Fast-Path =================
+    def test_look_at_object_fast_path_routes_to_vision(self):
+        """Verify queries like 'Look at Xiaomi' or 'Look at this phone' route directly to vision."""
+        vision_calls = []
+        original_vision = listen.handle_vision_request
+        try:
+            listen.handle_vision_request = lambda query: vision_calls.append(query)
+            for phrase in ["Look at Xiaomi", "look at my phone", "inspect this", "check out this watch"]:
+                vision_calls.clear()
+                res = listen.handle_user_text(phrase)
+                self.assertFalse(res)
+                self.assertEqual(len(vision_calls), 1, f"Failed to route '{phrase}' to vision")
+                self.assertEqual(vision_calls[0], phrase)
+        finally:
+            listen.handle_vision_request = original_vision
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
