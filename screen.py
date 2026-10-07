@@ -447,8 +447,8 @@ class FaceUI:
     # constructor sets up the window dimensions, colors, eye sizes, and animation timers
     def __init__(
         self,
-        width: int = 1024,
-        height: int = 600,
+        width: int = 1920,
+        height: int = 1080,
         fullscreen: bool = False,
         bg_color: str = "#040711",
         enable_boot: bool = True,
@@ -509,11 +509,17 @@ class FaceUI:
         self.color_confused = "#ffb703"
         self.color_confused_glow = "#4d3400"
 
-        # Geometry optimized for 7" 1024x600 (Face upper half, Subtitles lower half)
-        self.eye_w = 160
-        self.eye_h = 165
-        self.eye_spacing = 260
-        self.corner_radius = 42
+        # Geometry scaled for 1920x1080 16:9 with +15% expression size boost
+        self.ui_scale = (self.width / 1024.0) * 1.15
+        self.eye_w = int(160 * self.ui_scale)
+        self.eye_h = int(165 * self.ui_scale)
+        self.eye_spacing = int(260 * self.ui_scale)
+        self.corner_radius = int(42 * self.ui_scale)
+
+        # Touchscreen 'TALK TO NEUROLIS' Button attributes & callback
+        self.on_talk_click = None
+        self.talk_btn_bbox = None
+        self._last_talk_press_time = 0.0
 
         # Optical Human Latch tracking attributes
         self.target_latched = False
@@ -553,6 +559,29 @@ class FaceUI:
             self.stop()
         else:
             self.skip_boot()
+
+    # handles touch taps and mouse clicks on the screen (touch-ready for Raspberry Pi 7-inch)
+    def _on_screen_press(self, event):
+        # 1. Skip boot sequence if active
+        with self.lock:
+            in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
+        if in_boot:
+            self.skip_boot()
+            return
+
+        # 2. Check touch tap on TALK TO NEUROLIS button
+        if self.talk_btn_bbox is not None:
+            bx1, by1, bx2, by2 = self.talk_btn_bbox
+            if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                with self.lock:
+                    is_standby = (self.state == ExpressionState.IDLE)
+                if is_standby:
+                    self._last_talk_press_time = time.time()
+                    if self.on_talk_click is not None:
+                        try:
+                            self.on_talk_click()
+                        except Exception as e:
+                            print(f"[Screen] Talk button callback error: {e}")
 
     # starts the background thread that tests each hardware component one after another
     def _start_diagnostic_thread(self):
@@ -632,7 +661,7 @@ class FaceUI:
 
         self.root.bind("<Escape>", lambda e: self.stop())
         self.root.bind("f", lambda e: self._toggle_fullscreen())
-        self.root.bind("<Button-1>", lambda e: self.skip_boot())
+        self.root.bind("<Button-1>", self._on_screen_press)
         self.root.bind("<Key>", self._on_key)
 
         self.canvas = tk.Canvas(
@@ -643,6 +672,7 @@ class FaceUI:
             highlightthickness=0,
         )
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Button-1>", self._on_screen_press)
 
         self.running = True
         self._animate_loop()
@@ -762,7 +792,7 @@ class FaceUI:
 
         # Position face in upper region so subtitles sit comfortably in lower region
         center_x = w / 2.0
-        center_y = 190.0
+        center_y = h * 0.33
 
         with self.lock:
             cur_state = self.state
@@ -862,9 +892,10 @@ class FaceUI:
         self._draw_ambient_header(w, h, main_color, cur_state)
 
         # 2. Eye Positioning (with gentle suspension dynamics when driving & ocular gaze tracking)
-        gaze_dx = look_x * 22.0
-        gaze_dy = look_y * 14.0
-        suspension_bounce = math.sin(self.anim_phase * 6.0) * 2.0 if cur_state == ExpressionState.MOVING else 0.0
+        gaze_scale = self.ui_scale / 1.8
+        gaze_dx = look_x * (24.0 * gaze_scale)
+        gaze_dy = look_y * (16.0 * gaze_scale)
+        suspension_bounce = math.sin(self.anim_phase * 6.0) * (3.0 * gaze_scale) if cur_state == ExpressionState.MOVING else 0.0
         left_eye_cx = center_x - (self.eye_spacing / 2.0) + gaze_dx
         right_eye_cx = center_x + (self.eye_spacing / 2.0) + gaze_dx
         eye_cy = center_y + suspension_bounce + gaze_dy
@@ -905,8 +936,8 @@ class FaceUI:
             self._draw_standard_eye(left_eye_cx, eye_cy, self.eye_w * w_scale, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
             self._draw_standard_eye(right_eye_cx, eye_cy, self.eye_w * w_scale, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
 
-        # 5. Reactive Mouth / Center State Animations (Positioned in mouth area y=305)
-        mouth_cy = center_y + self.eye_h * 0.70
+        # 5. Reactive Mouth / Center State Animations
+        mouth_cy = center_y + self.eye_h * 0.65
         if cur_state == ExpressionState.VILLAIN:
             self._draw_villain_mouth(center_x, mouth_cy, main_color)
         elif cur_state == ExpressionState.MOVING:
@@ -931,8 +962,13 @@ class FaceUI:
         elif cur_state == ExpressionState.IDLE:
             self._draw_idle_mouth(center_x, mouth_cy, main_color)
 
-        # 6. Real-Time Subtitle Card & Status
-        self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color)
+        # 6. 'TALK TO NEUROLIS' Touch Button (Positioned between mouth and subtitles)
+        btn_y = mouth_cy + int(self.eye_h * 0.26)
+        btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
+
+        # 7. Real-Time Subtitle Card & Status (Shrunk lower pill container)
+        sub_top = btn_y + btn_h + int(18 * (h / 600.0))
+        self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color, sub_top)
 
     # draws cybernetic eyebrows that tilt up or down depending on emotional mood
     def _draw_eyebrows(self, lx, rx, base_y, state, color):
@@ -1353,108 +1389,121 @@ class FaceUI:
     # wide glowing neon smile arc for happy expression
     def _draw_happy_mouth(self, cx, cy, col):
         """Warm, sleek curved happy smile arc without blush boxes."""
-        bounce = math.sin(self.anim_phase * 5.0) * 2.0
+        scale = self.ui_scale / 1.8
+        bounce = math.sin(self.anim_phase * 5.0) * (3.0 * scale)
         m_y = cy + bounce
-        arc_w, arc_h = 76, 36
+        arc_w, arc_h = int(84 * self.ui_scale), int(40 * self.ui_scale)
 
         # Glow arc
         self.canvas.create_arc(
-            cx - arc_w / 2 - 4, m_y - arc_h / 2 - 4,
-            cx + arc_w / 2 + 4, m_y + arc_h / 2 + 4,
-            start=205, extent=130, style=tk.ARC, width=10, outline="#00442a"
+            cx - arc_w / 2 - 4 * scale, m_y - arc_h / 2 - 4 * scale,
+            cx + arc_w / 2 + 4 * scale, m_y + arc_h / 2 + 4 * scale,
+            start=205, extent=130, style=tk.ARC, width=int(12 * scale), outline="#00442a"
         )
         # Main neon smile arc
         self.canvas.create_arc(
             cx - arc_w / 2, m_y - arc_h / 2,
             cx + arc_w / 2, m_y + arc_h / 2,
-            start=205, extent=130, style=tk.ARC, width=5, outline=col
+            start=205, extent=130, style=tk.ARC, width=int(6 * scale), outline=col
         )
 
     # downturned quivering sad frown line for heartbroken state
     def _draw_sad_mouth(self, cx, cy, col):
         """Melancholic downturned sad frown line."""
-        tremble = math.sin(self.anim_phase * 10.0) * 1.2
-        m_y = cy + 4 + tremble
-        arc_w, arc_h = 68, 32
+        scale = self.ui_scale / 1.8
+        tremble = math.sin(self.anim_phase * 10.0) * (1.8 * scale)
+        m_y = cy + 4 * scale + tremble
+        arc_w, arc_h = int(76 * self.ui_scale), int(36 * self.ui_scale)
 
         # Frown glow
         self.canvas.create_arc(
-            cx - arc_w / 2 - 4, m_y - arc_h / 2 - 4,
-            cx + arc_w / 2 + 4, m_y + arc_h / 2 + 4,
-            start=25, extent=130, style=tk.ARC, width=10, outline="#0e2447"
+            cx - arc_w / 2 - 4 * scale, m_y - arc_h / 2 - 4 * scale,
+            cx + arc_w / 2 + 4 * scale, m_y + arc_h / 2 + 4 * scale,
+            start=25, extent=130, style=tk.ARC, width=int(12 * scale), outline="#0e2447"
         )
         # Main neon frown arc
         self.canvas.create_arc(
             cx - arc_w / 2, m_y - arc_h / 2,
             cx + arc_w / 2, m_y + arc_h / 2,
-            start=25, extent=130, style=tk.ARC, width=4, outline=col
+            start=25, extent=130, style=tk.ARC, width=int(5 * scale), outline=col
         )
 
-    # minimalist resting mouth with a soft pulsing cyan breathing beacon
+    # resting friendly smile arc matching Neurolis design sketch
     def _draw_idle_mouth(self, cx, cy, col):
-        """Ultra-clean minimalist idle state with gentle breathing beacon."""
-        pulse = 2.0 + math.sin(self.anim_phase * 2.0) * 1.0
-        self.canvas.create_oval(
-            cx - pulse, cy - pulse,
-            cx + pulse, cy + pulse,
-            fill="#00f0ff", outline=""
+        """Warm resting smile arc matching Neurolis design sketch."""
+        scale = self.ui_scale / 1.8
+        arc_w = int(76 * self.ui_scale)
+        arc_h = int(32 * self.ui_scale)
+        # Glow arc
+        self.canvas.create_arc(
+            cx - arc_w / 2, cy - arc_h / 2,
+            cx + arc_w / 2, cy + arc_h / 2,
+            start=205, extent=130, style=tk.ARC, width=int(10 * scale), outline=self.color_eye_glow
+        )
+        # Main smile arc
+        self.canvas.create_arc(
+            cx - arc_w / 2, cy - arc_h / 2,
+            cx + arc_w / 2, cy + arc_h / 2,
+            start=205, extent=130, style=tk.ARC, width=int(5 * scale), outline=col
         )
 
     # 15-pin cyber audio frequency spectrum pins that dance with voice intensity
     def _draw_speaking_mouth(self, cx, cy, col):
         """Sleek minimalist cyber audio spectrum line (Vector / JARVIS style)."""
-        base_w = 170
+        scale = self.ui_scale / 1.8
+        base_w = int(180 * self.ui_scale)
         self.canvas.create_line(
             cx - base_w / 2.0, cy,
             cx + base_w / 2.0, cy,
-            fill="#092033", width=1
+            fill="#092033", width=int(2 * scale)
         )
 
         num_pins = 15
-        pin_spacing = 10
+        pin_spacing = int(11 * scale)
         start_x = cx - ((num_pins - 1) * pin_spacing) / 2.0
 
         for i in range(num_pins):
             dist_center = 1.0 - (abs(i - 7) / 7.0) * 0.45
             pin_phase = i * 0.65
-            h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 24.0 * dist_center * self.speaking_intensity
-            pin_h = max(2.0, h_val + 2.0)
+            h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 26.0 * dist_center * self.speaking_intensity * scale
+            pin_h = max(3.0 * scale, h_val + 3.0 * scale)
             px = start_x + i * pin_spacing
 
             pin_col = "#00f0ff" if i % 2 == 0 else "#00ffcc"
             self.canvas.create_line(
                 px, cy - pin_h, px, cy + pin_h,
-                fill=pin_col, width=3, capstyle=tk.ROUND
+                fill=pin_col, width=int(4 * scale), capstyle=tk.ROUND
             )
             self.canvas.create_oval(
-                px - 1.5, cy - pin_h - 1.5,
-                px + 1.5, cy - pin_h + 1.5,
+                px - 2 * scale, cy - pin_h - 2 * scale,
+                px + 2 * scale, cy - pin_h + 2 * scale,
                 fill="#ffffff", outline=""
             )
 
     # 13-bar acoustic soundwave spectrum with radar beacon dots for listening mode
     def _draw_listening_mouth(self, cx, cy, col):
         """Sleek acoustic audio waveform and concentric radar beacon."""
+        scale = self.ui_scale / 1.8
         num_bars = 13
-        bar_spacing = 12
+        bar_spacing = int(13 * scale)
         total_w = (num_bars - 1) * bar_spacing
         start_x = cx - total_w / 2.0
 
         for i in range(num_bars):
             dist_from_center = abs(i - 6) / 6.0
             weight = 1.0 - dist_from_center * 0.4
-            b_val = abs(math.sin(self.anim_phase * 5.0 + i * 0.55)) * 22 * weight
-            bar_h = max(3.0, b_val + 3.0)
+            b_val = abs(math.sin(self.anim_phase * 5.0 + i * 0.55)) * 24 * weight * scale
+            bar_h = max(4.0 * scale, b_val + 4.0 * scale)
             bx = start_x + (i * bar_spacing)
             bar_col = "#00ffcc" if dist_from_center < 0.5 else "#00bfa5"
             self.canvas.create_line(
                 bx, cy - bar_h, bx, cy + bar_h,
-                fill=bar_col, width=4, capstyle=tk.ROUND
+                fill=bar_col, width=int(5 * scale), capstyle=tk.ROUND
             )
 
         for side in [-1, 1]:
-            dot_x = cx + side * (total_w / 2.0 + 22)
-            dot_pulse = 3 + math.sin(self.anim_phase * 4.0) * 1.5
+            dot_x = cx + side * (total_w / 2.0 + 26 * scale)
+            dot_pulse = (4 + math.sin(self.anim_phase * 4.0) * 2.0) * scale
             self.canvas.create_oval(
                 dot_x - dot_pulse, cy - dot_pulse,
                 dot_x + dot_pulse, cy + dot_pulse,
@@ -1464,66 +1513,70 @@ class FaceUI:
     # small inquisitive rounded cyber mouth 'o' while pondering an answer
     def _draw_thinking_mouth(self, cx, cy, col):
         """Inquisitive rounded cyber mouth 'o' while in thought."""
-        r = 6 + math.sin(self.anim_phase * 3.0) * 1.5
-        self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=col, width=3)
-        self.canvas.create_oval(cx - 2, cy - 2, cx + 2, cy + 2, fill="#ffffff", outline="")
+        scale = self.ui_scale / 1.8
+        r = (8 + math.sin(self.anim_phase * 3.0) * 2.0) * scale
+        self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=col, width=int(4 * scale))
+        self.canvas.create_oval(cx - 3 * scale, cy - 3 * scale, cx + 3 * scale, cy + 3 * scale, fill="#ffffff", outline="")
 
     # cute wavy squiggly mouth line for confused puzzled face
     def _draw_confused_mouth(self, cx, cy, col):
         """Cute quizzical wavy micro-squiggle."""
-        w = 18
+        scale = self.ui_scale / 1.8
+        w = int(22 * scale)
         points = [
             cx - w, cy,
-            cx - w * 0.5, cy + 4,
-            cx, cy - 4,
-            cx + w * 0.5, cy + 3,
-            cx + w, cy - 1,
+            cx - w * 0.5, cy + 5 * scale,
+            cx, cy - 5 * scale,
+            cx + w * 0.5, cy + 4 * scale,
+            cx + w, cy - 2 * scale,
         ]
-        self.canvas.create_line(points, smooth=True, fill=col, width=3, capstyle=tk.ROUND)
+        self.canvas.create_line(points, smooth=True, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
 
     # jagged glitch zig-zag mouth line for error and alert state
     def _draw_error_mouth(self, cx, cy, col):
         """Sharp zig-zag glitch mouth line with red alarm flash."""
+        scale = self.ui_scale / 1.8
         points = [
-            cx - 30, cy,
-            cx - 20, cy - 6,
-            cx - 10, cy + 6,
-            cx, cy - 6,
-            cx + 10, cy + 6,
-            cx + 20, cy - 6,
-            cx + 30, cy,
+            cx - 36 * scale, cy,
+            cx - 24 * scale, cy - 8 * scale,
+            cx - 12 * scale, cy + 8 * scale,
+            cx, cy - 8 * scale,
+            cx + 12 * scale, cy + 8 * scale,
+            cx + 24 * scale, cy - 8 * scale,
+            cx + 36 * scale, cy,
         ]
-        self.canvas.create_line(points, fill=col, width=3, capstyle=tk.ROUND)
+        self.canvas.create_line(points, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
 
     # wide, asymmetric sinister villain smirk curving up to the right with chin accent
     def _draw_villain_mouth(self, cx, cy, col):
         """Asymmetric sinister rogue AI smirk curving up to the right with chin accent."""
+        scale = self.ui_scale / 1.8
         # 1. Main sinister smirk curve
         smirk_pts = [
-            cx - 85, cy + 4,
-            cx - 50, cy + 16,
-            cx - 15, cy + 22,
-            cx + 25, cy + 14,
-            cx + 65, cy - 2,
-            cx + 95, cy - 20,
-            cx + 112, cy - 36,
+            cx - 96 * scale, cy + 4 * scale,
+            cx - 56 * scale, cy + 18 * scale,
+            cx - 16 * scale, cy + 24 * scale,
+            cx + 28 * scale, cy + 16 * scale,
+            cx + 72 * scale, cy - 2 * scale,
+            cx + 106 * scale, cy - 22 * scale,
+            cx + 126 * scale, cy - 40 * scale,
         ]
-        self.canvas.create_line(smirk_pts, smooth=True, fill=col, width=4, capstyle=tk.ROUND)
+        self.canvas.create_line(smirk_pts, smooth=True, fill=col, width=int(5 * scale), capstyle=tk.ROUND)
 
         # 2. Upward cheeky diagonal corner flick at right tip
         self.canvas.create_line(
-            cx + 110, cy - 34,
-            cx + 120, cy - 48,
-            fill=col, width=3, capstyle=tk.ROUND
+            cx + 124 * scale, cy - 38 * scale,
+            cx + 135 * scale, cy - 54 * scale,
+            fill=col, width=int(4 * scale), capstyle=tk.ROUND
         )
 
         # 3. Chin / lower-lip accent curve beneath the lowest dip
         chin_pts = [
-            cx - 42, cy + 34,
-            cx - 20, cy + 38,
-            cx - 2, cy + 37,
+            cx - 48 * scale, cy + 38 * scale,
+            cx - 22 * scale, cy + 42 * scale,
+            cx - 2 * scale, cy + 41 * scale,
         ]
-        self.canvas.create_line(chin_pts, smooth=True, fill=col, width=3, capstyle=tk.ROUND)
+        self.canvas.create_line(chin_pts, smooth=True, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
 
     # rotating gyroscope orbit constellation dots around the face while thinking
     def _draw_thinking_spinner(self, cx, cy, col):
@@ -1700,24 +1753,102 @@ class FaceUI:
                 bx = start_bx + i * bar_spacing
                 self.canvas.create_line(bx, head_y1 - 16 - bar_h, bx, head_y1 - 16 + bar_h, fill="#00ffaa", width=3, capstyle=tk.ROUND)
 
-    # subtle header banner showing school branding and status indicator dot
+    # subtle header indicator dot without cluttered extra text
     def _draw_ambient_header(self, w, h, accent_col, state):
-        self.canvas.create_text(
-            w / 2.0, 24,
-            text="PROJECT NEUROLIS   //   AUCKLAND HOUSE SCHOOL FOR BOYS",
-            fill="#2c4260", font=("Segoe UI", 10, "bold")
-        )
         dot_color = accent_col if state != ExpressionState.IDLE else "#00ffaa"
-        self.canvas.create_oval(32, 19, 42, 29, fill=dot_color, outline="")
+        dot_r = int(5 * (h / 600.0))
+        self.canvas.create_oval(32, 22 - dot_r, 32 + dot_r * 2, 22 + dot_r, fill=dot_color, outline="")
 
-    # dedicated lower subtitle card with speaker pills, live status, and word wrap
-    def _draw_subtitle_card(self, w, h, speaker, text, status_text, accent_col):
-        """Draws the dedicated Subtitle Box with speaker tags, word wrapping, and telemetry."""
-        card_x1 = 54
-        card_y1 = 370
-        card_x2 = w - 54
-        card_y2 = 556
-        card_radius = 18
+    # prominent touch-enabled 'TALK TO NEUROLIS' button
+    def _draw_talk_button(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
+        """
+        Renders the touchable 'TALK TO NEUROLIS' button.
+        In IDLE/STANDBY: Glowing Neon Blue, clickable.
+        In ACTIVE (speaking/listening/thinking/etc): Matte Muted Dark Grey, unclickable.
+        Returns the height of the button.
+        """
+        btn_w = int(480 * (w / 1024.0))  # ~900 px on 1080p
+        btn_h = int(48 * (h / 600.0))    # ~86 px on 1080p
+        bx1 = cx - btn_w / 2.0
+        bx2 = cx + btn_w / 2.0
+        by1 = btn_y
+        by2 = btn_y + btn_h
+        radius = int(24 * (h / 600.0))
+
+        # Store bounding box for touchscreen tap & mouse click handling
+        self.talk_btn_bbox = (bx1, by1, bx2, by2)
+
+        is_standby = (state == ExpressionState.IDLE)
+        now = time.time()
+        just_pressed = (now - self._last_talk_press_time) < 0.25
+
+        if is_standby:
+            # Standby state: Vibrant Neon Cyan / Electric Blue (Clickable)
+            btn_bg = "#003254" if just_pressed else "#001b2e"
+            btn_border = "#00f0ff"
+            btn_glow = "#00384d"
+            text_col = "#ffffff" if just_pressed else "#00f0ff"
+            dot_col = "#00ffaa"
+
+            # Ambient glow behind button
+            glow_pad = int(5 * (h / 600.0))
+            self._create_rounded_rect(
+                bx1 - glow_pad, by1 - glow_pad,
+                bx2 + glow_pad, by2 + glow_pad,
+                radius=radius + glow_pad, fill=btn_glow, outline=""
+            )
+            # Main button pill
+            self._create_rounded_rect(
+                bx1, by1, bx2, by2,
+                radius=radius, fill=btn_bg, outline=btn_border, width=3
+            )
+            # Inner high-tech specular bevel
+            inset = int(4 * (h / 600.0))
+            self._create_rounded_rect(
+                bx1 + inset, by1 + inset, bx2 - inset, by2 - inset,
+                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
+            )
+        else:
+            # Active state: Muted Charcoal / Dark Grey (Unclickable)
+            btn_bg = "#0c1219"
+            btn_border = "#222f3e"
+            text_col = "#475e7a"
+            dot_col = "#2a3b4c"
+
+            # Main muted button pill
+            self._create_rounded_rect(
+                bx1, by1, bx2, by2,
+                radius=radius, fill=btn_bg, outline=btn_border, width=2
+            )
+
+        # Pulsing / status dot on left
+        dot_r = int(5 * (h / 600.0))
+        dot_x = bx1 + int(46 * (w / 1024.0))
+        dot_cy = (by1 + by2) / 2.0
+        self.canvas.create_oval(
+            dot_x - dot_r, dot_cy - dot_r,
+            dot_x + dot_r, dot_cy + dot_r,
+            fill=dot_col, outline=""
+        )
+
+        # Smooth, prominent button typography
+        font_size = int(14 * (h / 600.0))
+        self.canvas.create_text(
+            cx, dot_cy,
+            text="TALK TO NEUROLIS",
+            fill=text_col,
+            font=(FONT_FAMILY, font_size, "bold")
+        )
+
+        return float(btn_h)
+
+    # shrunken, dedicated lower subtitle card with speaker pills, live status, and word wrap
+    def _draw_subtitle_card(self, w: float, h: float, speaker: str, text: str, status_text: str, accent_col: str, card_y1: float):
+        """Draws the shrunken, dedicated Subtitle Box with speaker tags, word wrapping, and telemetry."""
+        card_x1 = int(70 * (w / 1024.0))
+        card_x2 = w - card_x1
+        card_y2 = h - int(36 * (h / 600.0))
+        card_radius = int(18 * (h / 600.0))
 
         self._create_rounded_rect(
             card_x1, card_y1, card_x2, card_y2,
@@ -1741,26 +1872,31 @@ class FaceUI:
             pill_text_col = "#99b8dc"
             display_spk = f"● {spk_label}"
 
+        pill_w = int(140 * (w / 1024.0))
+        pill_h = int(24 * (h / 600.0))
+        px1 = card_x1 + int(18 * (w / 1024.0))
+        py1 = card_y1 + int(12 * (h / 600.0))
+
         self._create_rounded_rect(
-            card_x1 + 18, card_y1 + 14,
-            card_x1 + 155, card_y1 + 38,
-            radius=8, fill=pill_fill, outline=pill_border
+            px1, py1, px1 + pill_w, py1 + pill_h,
+            radius=int(7 * (h / 600.0)), fill=pill_fill, outline=pill_border
         )
         self.canvas.create_text(
-            card_x1 + 86, card_y1 + 26,
+            px1 + pill_w / 2.0, py1 + pill_h / 2.0,
             text=display_spk, fill=pill_text_col,
-            font=("Segoe UI", 10, "bold")
+            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold")
         )
 
         self.canvas.create_text(
-            card_x2 - 20, card_y1 + 26,
+            card_x2 - int(20 * (w / 1024.0)), py1 + pill_h / 2.0,
             text=status_text, fill="#4a6b8f",
-            font=("Segoe UI", 10, "bold"), anchor="e"
+            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"), anchor="e"
         )
 
+        divider_y = py1 + pill_h + int(8 * (h / 600.0))
         self.canvas.create_line(
-            card_x1 + 18, card_y1 + 46,
-            card_x2 - 18, card_y1 + 46,
+            px1, divider_y,
+            card_x2 - int(18 * (w / 1024.0)), divider_y,
             fill="#101c2d", width=1
         )
 
@@ -1769,18 +1905,12 @@ class FaceUI:
             clean_text = clean_text[:317] + "..."
 
         self.canvas.create_text(
-            card_x1 + 22, card_y1 + 58,
+            px1 + 4, divider_y + int(10 * (h / 600.0)),
             text=clean_text,
             fill="#ffffff",
-            font=("Segoe UI", 14, "bold"),
+            font=(FONT_FAMILY, int(13 * (h / 600.0)), "bold"),
             anchor="nw",
-            width=int(card_x2 - card_x1 - 44),
-        )
-
-        self.canvas.create_text(
-            w / 2.0, h - 22,
-            text="4WD CHASSIS // VISION TRACKING // ROBOTIC EXHIBITION AI",
-            fill="#1b283b", font=("Segoe UI", 9, "bold")
+            width=int(card_x2 - card_x1 - 44 * (w / 1024.0)),
         )
 
     # phase 1: apple-grade greeting screen saying "Hi there!" with smooth cosine alpha fade
@@ -1810,18 +1940,18 @@ class FaceUI:
 
         # "Hi there!" text
         self.canvas.create_text(
-            w / 2.0, h / 2.0 - 20,
+            w / 2.0, h / 2.0 - int(30 * (h / 600.0)),
             text="Hi there!",
             fill=text_color,
-            font=(FONT_FAMILY, 48, "bold")
+            font=(FONT_FAMILY, int(48 * (h / 600.0)), "bold")
         )
 
         # "Welcome to Project Neurolis" subtitle
         self.canvas.create_text(
-            w / 2.0, h / 2.0 + 42,
+            w / 2.0, h / 2.0 + int(50 * (h / 600.0)),
             text="Welcome to Project Neurolis",
             fill=sub_color,
-            font=(FONT_FAMILY, 15)
+            font=(FONT_FAMILY, int(16 * (h / 600.0)))
         )
 
     # phase 2: futuristic diagnostic checklist verifying hardware with smooth auto-scroll
@@ -1830,49 +1960,50 @@ class FaceUI:
         self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
 
         # 1. top header pill badge
-        pill_w, pill_h = 320, 28
+        pill_w, pill_h = int(320 * (w / 1024.0)), int(28 * (h / 600.0))
         px1 = (w - pill_w) / 2.0
-        py1 = 16
-        self._create_rounded_rect(px1, py1, px1 + pill_w, py1 + pill_h, radius=14, fill="#081326", outline="#1c3452")
+        py1 = int(16 * (h / 600.0))
+        self._create_rounded_rect(px1, py1, px1 + pill_w, py1 + pill_h, radius=int(14 * (h / 600.0)), fill="#081326", outline="#1c3452")
         # glowing pulse cyan indicator dot
         pulse = 0.5 + 0.5 * math.sin(self.anim_phase * 4.0)
         dot_col = lerp_color("#007788", "#00f0ff", pulse)
-        self.canvas.create_oval(px1 + 14, py1 + 9, px1 + 24, py1 + 19, fill=dot_col, outline="")
+        dot_r = int(5 * (h / 600.0))
+        self.canvas.create_oval(px1 + int(14 * (w / 1024.0)), py1 + pill_h / 2.0 - dot_r, px1 + int(14 * (w / 1024.0)) + dot_r * 2, py1 + pill_h / 2.0 + dot_r, fill=dot_col, outline="")
         self.canvas.create_text(
-            px1 + 165, py1 + 14,
+            px1 + pill_w / 2.0 + int(10 * (w / 1024.0)), py1 + pill_h / 2.0,
             text="NEUROLIS BOOTING UP",
             fill="#cbd5e1",
-            font=(FONT_FAMILY, 9, "bold")
+            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold")
         )
 
         # 2. test sequence title banner
         self.canvas.create_text(
-            w / 2.0, 60,
+            w / 2.0, int(60 * (h / 600.0)),
             text="Neurolis Test Sequence ---",
             fill="#f8fafc",
-            font=(FONT_FAMILY, 16, "bold")
+            font=(FONT_FAMILY, int(16 * (h / 600.0)), "bold")
         )
         self.canvas.create_text(
-            w / 2.0, 82,
+            w / 2.0, int(86 * (h / 600.0)),
             text="[ Click screen to skip ]",
             fill="#475569",
-            font=(FONT_FAMILY, 9)
+            font=(FONT_FAMILY, int(9 * (h / 600.0)))
         )
 
         # 3. main diagnostic glass card with ambient glow and cyber brackets
-        card_x1 = 110
-        card_y1 = 98
-        card_x2 = w - 110
-        card_y2 = 544
-        card_radius = 16
+        card_x1 = int(110 * (w / 1024.0))
+        card_y1 = int(106 * (h / 600.0))
+        card_x2 = w - card_x1
+        card_y2 = h - int(48 * (h / 600.0))
+        card_radius = int(16 * (h / 600.0))
 
         # outer subtle shadow/depth glow
-        self._create_rounded_rect(card_x1 - 3, card_y1 - 3, card_x2 + 3, card_y2 + 3, radius=18, fill="#040914", outline="#0d1b2e")
+        self._create_rounded_rect(card_x1 - 3, card_y1 - 3, card_x2 + 3, card_y2 + 3, radius=card_radius + 2, fill="#040914", outline="#0d1b2e")
         # inner glass cockpit card
         self._create_rounded_rect(card_x1, card_y1, card_x2, card_y2, radius=card_radius, fill="#060c18", outline="#1c2e48")
 
         # high-tech corner cyber accents
-        bracket_len = 16
+        bracket_len = int(16 * (h / 600.0))
         # top-left
         self.canvas.create_line(card_x1, card_y1 + bracket_len, card_x1, card_y1, card_x1 + bracket_len, card_y1, fill="#00f0ff", width=2)
         # top-right
@@ -1882,15 +2013,12 @@ class FaceUI:
         # bottom-right
         self.canvas.create_line(card_x2, card_y2 - bracket_len, card_x2, card_y2, card_x2 - bracket_len, card_y2, fill="#00f0ff", width=2)
 
-        # subtle glass card header divider
-        self.canvas.create_line(card_x1 + 24, card_y1 + 12, card_x2 - 24, card_y1 + 12, fill="#0e1d30", width=1)
-
         # 4. smooth auto-scroll checklist math
         with self.lock:
             results = list(self.diagnostic_results)
 
         total_revealed = len(results)
-        row_h = 27.0
+        row_h = 28.0 * (h / 600.0)
         # keep up to 8 items visible, then smoothly scroll to keep new items centered
         if total_revealed > 8:
             target_scroll = (total_revealed - 8) * row_h
@@ -1900,17 +2028,17 @@ class FaceUI:
         self.boot_scroll_y += (target_scroll - self.boot_scroll_y) * 0.15
 
         # 5. render verified check rows (high-contrast 3-column cockpit layout)
-        clip_top = card_y1 + 14
-        clip_bottom = card_y2 - 56
+        clip_top = card_y1 + int(14 * (h / 600.0))
+        clip_bottom = card_y2 - int(56 * (h / 600.0))
 
         for idx, item in enumerate(results):
-            row_y = card_y1 + 30 + idx * row_h - self.boot_scroll_y
+            row_y = card_y1 + int(30 * (h / 600.0)) + idx * row_h - self.boot_scroll_y
             if clip_top <= row_y <= clip_bottom:
                 # Column 1: badge pill on left
-                bx1 = card_x1 + 24
-                by1 = row_y - 9
-                bx2 = card_x1 + 54
-                by2 = row_y + 9
+                bx1 = card_x1 + int(24 * (w / 1024.0))
+                by1 = row_y - int(9 * (h / 600.0))
+                bx2 = card_x1 + int(56 * (w / 1024.0))
+                by2 = row_y + int(9 * (h / 600.0))
 
                 badge = item.get("badge", "✓")
                 if badge == "✓":
@@ -1927,24 +2055,24 @@ class FaceUI:
                     b_text_col = "#ff2d55"
 
                 self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill=b_fill, outline=b_outline)
-                self.canvas.create_text((bx1 + bx2) / 2.0, row_y, text=badge, fill=b_text_col, font=(FONT_FAMILY, 9, "bold"))
+                self.canvas.create_text((bx1 + bx2) / 2.0, row_y, text=badge, fill=b_text_col, font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"))
 
                 # Column 2: item name (left aligned)
                 self.canvas.create_text(
-                    card_x1 + 68, row_y,
+                    card_x1 + int(72 * (w / 1024.0)), row_y,
                     text=item.get("name", ""),
                     fill="#f1f5f9",
-                    font=(FONT_FAMILY, 10, "bold"),
+                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
                     anchor="w"
                 )
 
                 # Column 3: item status value (right aligned)
                 val_col = "#00ffaa" if item.get("passed") else "#fb7185"
                 self.canvas.create_text(
-                    card_x2 - 28, row_y,
+                    card_x2 - int(28 * (w / 1024.0)), row_y,
                     text=item.get("detail", ""),
                     fill=val_col,
-                    font=(FONT_FAMILY, 10, "bold" if item.get("passed") else "normal"),
+                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold" if item.get("passed") else "normal"),
                     anchor="e"
                 )
 
@@ -1958,45 +2086,45 @@ class FaceUI:
         ]
 
         if total_revealed < len(steps_order):
-            active_y = card_y1 + 30 + total_revealed * row_h - self.boot_scroll_y
+            active_y = card_y1 + int(30 * (h / 600.0)) + total_revealed * row_h - self.boot_scroll_y
             if clip_top <= active_y <= clip_bottom:
-                bx1 = card_x1 + 24
-                by1 = active_y - 9
-                bx2 = card_x1 + 54
-                by2 = active_y + 9
+                bx1 = card_x1 + int(24 * (w / 1024.0))
+                by1 = active_y - int(9 * (h / 600.0))
+                bx2 = card_x1 + int(56 * (w / 1024.0))
+                by2 = active_y + int(9 * (h / 600.0))
                 self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill="#041c30", outline="#00f0ff")
-                self.canvas.create_text((bx1 + bx2) / 2.0, active_y, text="⟳", fill="#00f0ff", font=(FONT_FAMILY, 9, "bold"))
+                self.canvas.create_text((bx1 + bx2) / 2.0, active_y, text="⟳", fill="#00f0ff", font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"))
 
                 active_name = steps_order[total_revealed]
                 self.canvas.create_text(
-                    card_x1 + 68, active_y,
+                    card_x1 + int(72 * (w / 1024.0)), active_y,
                     text=active_name,
                     fill="#38bdf8",
-                    font=(FONT_FAMILY, 10, "bold"),
+                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
                     anchor="w"
                 )
 
                 dots = "." * (int(self.anim_phase * 3.0) % 4)
                 self.canvas.create_text(
-                    card_x2 - 28, active_y,
+                    card_x2 - int(28 * (w / 1024.0)), active_y,
                     text="Scanning" + dots,
                     fill="#00f0ff",
-                    font=(FONT_FAMILY, 10, "italic"),
+                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "italic"),
                     anchor="e"
                 )
 
         # 6. progress bar at bottom of card
-        bar_y1 = card_y2 - 34
-        bar_y2 = card_y2 - 16
-        bar_x1 = card_x1 + 24
-        bar_x2 = card_x2 - 24
+        bar_y1 = card_y2 - int(34 * (h / 600.0))
+        bar_y2 = card_y2 - int(16 * (h / 600.0))
+        bar_x1 = card_x1 + int(24 * (w / 1024.0))
+        bar_x2 = card_x2 - int(24 * (w / 1024.0))
 
         # status text above progress bar
         self.canvas.create_text(
-            bar_x1, bar_y1 - 10,
+            bar_x1, bar_y1 - int(10 * (h / 600.0)),
             text="COMPONENT CHECKLIST AND SAFETY CHECKS",
             fill="#64748b",
-            font=(FONT_FAMILY, 9, "bold"),
+            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"),
             anchor="w"
         )
 
@@ -2008,10 +2136,10 @@ class FaceUI:
             bar_text_col = "#00ff88"
 
         self.canvas.create_text(
-            bar_x2, bar_y1 - 10,
+            bar_x2, bar_y1 - int(10 * (h / 600.0)),
             text=status_right_text,
             fill=bar_text_col,
-            font=(FONT_FAMILY, 10, "bold"),
+            font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
             anchor="e"
         )
 
@@ -2030,6 +2158,6 @@ class FaceUI:
 
 # test runner to preview the face ui standalone on desktop without motors or speech
 if __name__ == "__main__":
-    print("Testing Neurolis Face UI (7-inch 1024x600 preview)...")
-    ui = FaceUI(width=1024, height=600, fullscreen=False)
+    print("Testing Neurolis Face UI (7-inch 1920x1080 preview)...")
+    ui = FaceUI(width=1920, height=1080, fullscreen=False)
     ui.start(in_background=False)

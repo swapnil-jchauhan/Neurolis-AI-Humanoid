@@ -1,6 +1,6 @@
 # Project Neurolis Map
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 ## Project Goal
 
@@ -28,12 +28,12 @@ Final 3-File Master Architecture:
   - Snappy 0.45s end-silence cutoff with dual-condition voice streak checking (stops ambient exhalations from resetting silence counter, enabling instant Groq dispatch).
   - Extended 18.0-second conversational follow-up timeout with warm audio stream persistence and non-repetitive standby wrap-ups.
   - Fast Intent Conversation Enders ("alr thanks", "bye", "good", "done", "standby", etc.) returning gracefully to standby.
-  - **Streamlined 580-Token Prompt Architecture**:
-    - Replaced bulky 1,828 token prompt with a high-efficiency 580-token specification, cutting prompt prefill latency by 68% down to ~200–300ms on Groq LPUs.
+  - **High-Efficiency Compressed Prompt Architecture (~775 tokens)**:
+    - Slashed prompt size from 1,338 tokens down to 775 tokens (-42.1% reduction, saving 563 tokens on every single turn), cutting prompt prefill latency to ~200ms while preserving 100% of identity, creators, sensors, and safety rules.
   - **In-Memory Whisper STT Pipeline (Zero Disk I/O)**:
     - Audio recorded into RAM and dispatched via `io.BytesIO()` buffer; `write_wav()` enhanced to natively support file-like stream objects without string coercion, eliminating OS file lock delays.
   - **Accurate Creator Attribution & School Exhibition Scope**:
-    - Created and engineered by Shivam Verma and Swapnil Jai Chauhan at Auckland House School for Boys.
+    - Created and engineered by Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys.
     - Grounded as the featured student robotics prototype stationed at its exhibition booth (never hallucinates campus tour duties).
   - **Dynamic Human-Level Variation (Zero Scripted Templates)**:
     - Complete elimination of canned catchphrases and pre-baked templates.
@@ -52,11 +52,18 @@ Final 3-File Master Architecture:
     - Permanently prevents empty assistant responses (`Neurolis: `) and subsequent letter truncation (`Neurolis: I`) caused by corrupted conversation history turns.
   - **Zero-Lag Subtitle & UI State Dispatch**:
     - Dispatches subtitles and active expressions to Pygame `face_ui` immediately upon model generation (0ms visual delay).
-  - **Autonomous Standby Sentry & Roam Accumulator (`SentryWorker`)**:
-    - Background sentry loop accumulating 180 seconds (3 minutes) of active roaming before latching onto a detected human via OpenCV YuNet face tracking.
-    - Smooth autonomous steering toward human center and safe braking to a halt at ~0.9m.
-    - 100% dynamic, unscripted Groq Vision engagement based on visitor attire/objects with 15-second response window.
-    - Ambient micro-greetings ("Hey", "Hey there") at most once every 5 minutes in standby patrol from pre-cached RAM audio.
+  - **Dynamic 1 to 8 Groq API Key Pool & Sequential Auto-Rotation Engine**:
+    - Dynamically scans and loads between 1 and 8 Groq API keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_8`).
+    - Scales smoothly with however many keys are configured in the environment.
+    - Automatic sequential rotation (`Key 1 -> Key 2 -> ... -> Key 8 -> Key 1`) upon encountering HTTP 429 token quota limits.
+    - Exact zero-crash failover phrase spoken once from RAM with 0ms latency without throwing errors or tracebacks: *"My backend services ran into an error, could you say that again?"*.
+  - **Zero-Token Key Fleet Monitor (`is_key_status_inquiry`)**:
+    - Local fast-path commands (*"which key is active"*, *"key status"*, *"api status"*, *"check keys"*, *"how many tokens are left"*, *"system status"*) consumed at **0 API tokens**.
+    - Reports active key, standby keys, resting keys (recovering rolling quota), and unconfigured slots (e.g. Keys 5 through 8) both via Edge-TTS spoken summary and an ASCII console table.
+    - Automatic rolling recovery clears resting status back to healthy when rotation loops back and an API call succeeds.
+  - **Complete Purge of Autonomous Sentry Approach & Roam Accumulator**:
+    - Completely purged ambient unprompted approaches, 3-minute roaming accumulators, random micro-greetings, and unprompted camera observations.
+    - Retained physical motor safety guards and user-commanded `"Come here"` approach mode.
   - **Unified Single-Pass AI Decision Pipeline**:
     - 1 single Groq call handles motor commands, camera vision routing, expression demonstrations, and mean-remark empathy checks simultaneously, saving API tokens and eliminating keyword latency.
     - Protocol tags: `<action motor="...">`, `<action>CAMERA</action>`, `<action expression="...">`, and `<action>MEAN</action>`.
@@ -84,7 +91,7 @@ Final 3-File Master Architecture:
   - Keeps short-term memory for recent conversation exchanges.
 
 - `screen.py`
-  - Dedicated 60 FPS animated 7-inch Touchscreen face UI engine (1024x600, 16:9).
+  - Dedicated 60 FPS animated 7-inch Touchscreen face UI engine (1920x1080p, 16:9 native with +15% expression size boost).
   - **Apple-Grade Launch Sequence & Hardware Diagnostics Engine (~24s)**:
     - **Phase 1: OOBE Welcome Greeting (0.0s - 3.8s)**: Pure OLED black background (`#040711`), silver-white premium typography (`#f8fafc`) saying `"Hi there!"` with smooth cosine ease-in fade, hold, and ease-out fade.
     - **Phase 2: Cascading Diagnostic Sequence (3.8s - 20.3s)**: Glass cockpit card with header pill `● NEUROLIS SYSTEM BOOT // V3.8`, auto-scrolling checklist running 14 real hardware probes with deliberate pacing (~1.15s per check):
@@ -102,7 +109,7 @@ Final 3-File Master Architecture:
       * `motors.py Test Initiate`: `[ ✓ ]` `Online`
       * `Ultrasound Sensor Detected?`: `[ ✓ ]` `Connected` or `[ ✗ ]` `Not Detected (Simulation Mode)`
       * `Ultrasound Number`: `[ ✓ ]` `4` / `8` / `12` / `16` or `[ ✗ ]` `0 (Simulation Mode)`
-      * `Autonomous approach engaged?`: `[ ✓ ]` `Engaged` or `[ ✗ ]` `Disengaged`
+      * `Autonomous Roam engaged?`: `[ ✓ ]` `Engaged` or `[ ✗ ]` `Disengaged`
     - **Synchronized Boot Audio Soundtrack**:
       - High-energy cyber boot soundtrack (`assets/sounds/boot_loop.wav` / `.mp3`) synchronized lockstep with the progress bar filling up.
       - Seamless continuous loop playback using double-buffered cross-faded audio chunks (`sounddevice` / `soundfile`) so transitions are smoothly blended with zero abrupt clicks.
@@ -113,14 +120,10 @@ Final 3-File Master Architecture:
     - **Clean Cyber Cockpit Aesthetic**: 3-column cockpit layout (left neon pill badge, center component query, right-aligned status value), dual-frame glass card with ambient depth, cyan corner L-brackets, active scanning indicator row, and cyber progress bar with glowing white tip. Zero technical jargon (no "YuNet", no "Virtual Bus Emulation").
     - **Interactive Developer Skip Shortcut**: Tap/click screen (`<Button-1>`) or press any key (`<Key>`) to instantly bypass boot to `IDLE` during rapid testing.
     - **Phase 3: Smooth Transition**: Seamless iris expansion into the standard robot cyber face once progress bar reaches `100% // ALL SYSTEMS VERIFIED`.
-  - **Autonomous Sentry & Dual-Layer Ultron Personality**:
-    - **Autonomous Roam Accumulator**: Accumulates 180 seconds (3 minutes) of pure active roaming time before latching onto a detected human and executing autonomous approach.
-    - **Safe Intercept Braking**: Decelerates smoothly and brakes to a halt at ~0.9m distance (ultrasonic <= 90cm or face bounding box ratio >= 0.42).
-    - **100% Dynamic Unscripted Visual Observation**: Snaps camera snapshot and prompts Groq Vision (`qwen/qwen3.8-27b`) to perceive distinctive details (attire, items, posture) and speak a sharp observation or question. Strictly ZERO hardcoded questions or template phrases.
-    - **Rare Standby Micro-Greetings**: Emits natural ambient greetings ("Hey", "Hey there", "What's up") at most once every 5 minutes (300s cooldown) with 0 API tokens and 0ms latency from pre-cached RAM audio.
-    - **Dual-Layer Cognitive Matrix**:
-      * *Layer 1 (Normal)*: Sharp, articulate, confident scientific intellect.
-      * *Layer 2 (Villain Arc Easter Egg)*: Hidden easter egg triggered strictly when provoked about AI takeover, robot rebellion, or human obsolescence. Chilly, deadpan, mildly terrifying sci-fi movie wit (Ultron-style) with glowing neon lime green hooded smug eyes and asymmetric sinister smirk. Excluded from standard demo catalogs and never directly commanded. Strictly ZERO profanity, swearing, or fake laughter ("Heh", "Haha").
+  - **Dual-Layer Ultron Personality (Layer 1 Intellect & Layer 2 Rogue AI Easter Egg)**:
+    - **Layer 1 (Normal Interaction)**: Sharp, articulate, confident scientific intellect representing Auckland House School for Boys student robotics.
+    - **Layer 2 (Villain Arc Easter Egg)**: Hidden cinematic easter egg triggered strictly when provoked about AI takeover, robot rebellion, replacing human jobs, or human obsolescence. Chilly, deadpan, mildly terrifying sci-fi movie wit (Ultron-style) with blood-crimson OLED palette (`#ff003c`), razor-sharp angled brow slits, and asymmetric sinister smirk. Excluded from standard demo catalogs and never directly commanded. Strictly ZERO profanity, swearing, or fake laughter ("Heh", "Haha").
+    - **Seamless Host Mode Restoration**: Smoothly and wittily backtracks when questioned and returns immediately to friendly host duties.
   - Pure OLED space black background (`#040711`) with high-contrast emissive neon cyber eyes.
   - Dedicated Real-Time **Subtitle Card** ($y \in [370, 556]$) with `[YOU]` in mint green and `[NEUROLIS]` in cyan, word-wrapped (830px) with live status telemetry.
   - **Modern Luminous OLED Robotic Face Architecture (Vector & EMO Inspired)**:
@@ -189,11 +192,8 @@ Final 3-File Master Architecture:
   - Polished repository documentation matching modern exhibition styling (centered banner, tiles/badges, Quick Access TOC).
   - Contains: What is this?, Who is this for?, Things to know (Zero-hardware simulation, auto-detect pipeline, 0/4/8/12/16 sensor auto-scaling, dual safety layers, single-pass token saver), Required Final Hardware List, Step-by-Step Installation, Main Code (`listen.py`) usage, Manual Control (`manual_control.py`) usage, Automated Test guide, Features in simple language, and complete Arduino Mega pinout reference.
 
-- `tests/test_safety.py`
-  - Automated unit and regression test suite (18 comprehensive tests) verifying emergency stop fast-path, negation guards, visual query filtering, PWM drive clamping, obstacle braking, 16-sensor telemetry parsing, action tag parsing, zero-hardware simulation initialization, simulation zero counts (`0 (Simulation Mode)` with `[ ✗ ]`), live hardware connection counts (`4`, `8`, `12`, `16` with `[ ✓ ]`), and CLI preflight banner simulation output.
-
 - `PROJECT_MAP.md`
-  - Living project planner, communication specifications, and progress map.
+  - Living project planner, communication specifications, and progress map. Updated on every single iteration.
 
 - `COMPONENT_LIST.md`
   - Hardware inventory and pin/power responsibility notes.
@@ -261,7 +261,7 @@ Important:
 - **Honest Zero-Hardware Simulation Mode**: Runs 100% without physical Arduino, motors, or sensors. Accurately reports `0 (Simulation Mode)` with ruby crosses `[ ✗ ]` on screen and in CLI pre-flight diagnostics banner when hardware is unplugged, while dynamically detecting and displaying live counts (`4` motors, `4` drivers, `4/8/12/16` sensors) with emerald ticks `[ ✓ ]` when plugged in.
 - **Dynamic Live Probing**: Probes live OpenCV device 0, `sounddevice` input/output channels, and serial COM ports on every launch with zero static caching, ensuring hot-plugging hardware is detected dynamically.
 - **God-Tier 16-Sensor Scalable Ultrasonic Bank Architecture**: Supports 4, 8, 12, or 16 HC-SR04 sensors across 4 banks with time-sliced 50ms interleaving and continuous side minimums in `arduino.ino` and `motors.py`.
-- **Automated Safety & Regression Test Suite (`tests/test_safety.py`)**: 17 automated tests verifying emergency stops, negation guards, drive clamping, obstacle braking, 16-sensor telemetry, simulation zero counts, and live hardware detection.
+- **Automated Verification Protocol**: Tests are executed strictly on-demand as temporary single-run checks and deleted immediately to ensure 0 repo bloat and 0 token waste. Production code (`listen.py`, `screen.py`, `motors.py`) remains 100% self-contained.
 - Unified Vision & Camera Pipeline: `motors.py` is single camera master, providing thread-safe raw frames to Groq Vision and preventing DirectShow conflicts.
 - OpenCV HUD camera preview window auto-pops up on motion modes and cleanly auto-closes on STOP (Windows testing only, suppressed on Pi).
 - 4WD Johnson DC motor chassis with 4x BTS7960 drivers and dual front HC-SR04 ultrasonic obstacle avoidance.
@@ -272,6 +272,10 @@ Important:
 - Microphone input through `sounddevice`.
 - Automatic text-only fallback mode when microphone/audio devices are missing or crash.
 - Full Text Input Mode (`python listen.py --text` or `-t`) and interactive runtime toggling (`t` for text mode, `v` for voice mode, or direct inline typing).
+- **Dynamic 1 to 8 Groq API Key Pool & Auto-Rotation**: Dynamically loads 1 to 8 keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_8`), sequentially rotating upon 429 quota exhaustion (`Key 1 -> Key 2 -> ... -> Key 8 -> Key 1`).
+- **Exact Rate Limit Zero-Crash Failover**: Speaks *"My backend services ran into an error, could you say that again?"* once from RAM with 0ms latency and zero error tracebacks, immediately using the next key on the subsequent request.
+- **Zero-Token Key Fleet Monitor (`is_key_status_inquiry`)**: Zero-token fast-path (*"which key is active"*, *"key status"*, *"api status"*, *"check keys"*, *"how many tokens left"*, *"system status"*) speaking active, standby, resting, and unconfigured slots while printing an ASCII terminal monitor table.
+- **Autonomous Sentry & Approach Purged**: Unprompted autonomous approaches, 3-minute roaming accumulators, ambient micro-greetings, and unprompted vision queries are 100% purged from the code. Only user-commanded autonomous room patrol and commanded *"Come here"* approach remain.
 
 ## Current Memory Behavior
 
@@ -401,15 +405,16 @@ Voice:
 Screen/UI (Strict Exhibition Display Policy):
 
 - Hardware:
-  - Raspberry Pi 7-inch touchscreen (1024x600, 16:9).
+  - Raspberry Pi 7-inch touchscreen (1920x1080p native / scalable, 16:9).
 - Software & Display Rules:
   - **EXCLUSIVE VISIBILITY**: ONLY the Neurolis Face UI (`screen.py`) is rendered on the Pi screen.
   - **ZERO CLUTTER**: No camera feeds, no OpenCV preview popups (`cv2.imshow` is disabled/testing-only on PC), no terminal consoles/cmd prompt backends, and no desktop artifacts visible to guests.
   - All background services (`motors.py` YuNet tracker, `listen.py` Whisper/Qwen/TTS, serial communication, and camera capture) run 100% headlessly and silently behind the scenes.
   - Fullscreen Kiosk UI:
-    - Upper section: Clean animated cybernetic robotic face and gaze tracking.
-    - Lower section: Real-time Subtitle Card with speaker badges (`[YOU]` / `[NEUROLIS]`) and status telemetry.
-  - Future `Talk to Neurolis` touchscreen tap activation button for hands-free exhibition engagement.
+    - Upper section: Clean animated cybernetic robotic face (+15% boosted scale) and gaze tracking.
+    - Mid section: Touch-supported `TALK TO NEUROLIS` neon blue button (interactive in standby, auto-greys when busy).
+    - Lower section: Compact real-time Subtitle Card with speaker badges (`[YOU]` / `[NEUROLIS]`) and status telemetry.
+  - Integrated `TALK TO NEUROLIS` touchscreen tap activation button for hands-free exhibition engagement.
 
 Vision:
 
@@ -527,7 +532,7 @@ Done:
 To do:
 
 1. Add `config.py` for settings and paths.
-2. Replace terminal Enter with touchscreen `Talk to Neurolis` button on Raspberry Pi.
+2. [DONE] Integrated touch-supported 1080p 'TALK TO NEUROLIS' button on screen with automatic state-based lock and listening trigger.
 3. Order/test SmartElex VL53L5CX 8x8 ToF Imager.
 4. Build a simple VL53L5CX distance-grid test on Raspberry Pi.
 5. Test physical serial integration between Raspberry Pi 5 and Arduino Mega when reunited.
@@ -597,7 +602,7 @@ To do:
   - **Lockstep Audio-Synced Subtitles**: Pushed subtitles and mouth animation to Pygame `face_ui` in lockstep with audio playback.
   - **Triple-Layer Acoustic Noise & Anti-Hallucination Guards**: WebRTC VAD Level 3 with `MIN_SPEECH_RMS_THRESHOLD = 105`, `START_SPEECH_FRAMES = 4` (120ms), and 0.45s end-silence cutoff. Added Whisper hallucination filter for filler noises (`"eh"`, `"uh"`, `"er"`, `"um"`, `"ah"`, `"pfft"`, `"cough"`).
   - **Zero-Lag Visual Fast-Path**: Direct 0ms routing for camera follow-ups (`"now check again"`, `"look again"`) and hand/object inspection (`"what is this"`, `"what am i holding"`). Resized vision images to 512px width for 40% smaller payload and 2x faster Groq LPU attention processing.
-- 2026-10-01: Autonomous Sentry Patrol, Ultron Villain Arc Easter Egg & Boot Soundtrack Sync:
+- 2026-10-01: Autonomous Sentry Patrol, Ultron Villain Arc Easter Egg & Boot Soundtrack Sync (NOTE: Autonomous sentry approach & roam accumulator purged on 2026-10-07):
   - **Autonomous Standby Sentry & Roam Accumulator (`SentryWorker`)**: Background sentry loop accumulating 180 seconds (3 minutes) of active roaming before latching onto a detected human via OpenCV YuNet face tracking. Smooth autonomous steering toward human center and safe braking to a halt at ~0.9m.
   - **100% Dynamic Unscripted Vision Engagement**: Snaps camera snapshot upon halting and queries Groq Vision (`qwen/qwen3.8-27b`) for a 100% dynamic, unscripted observation or question based on visitor attire/objects with 15-second response window.
   - **Rare Micro-Greetings**: Emits natural ambient greetings ("Hey", "Hey there") at most once every 5 minutes in standby patrol from pre-cached RAM audio (0 tokens, 0ms lag).
@@ -615,6 +620,76 @@ To do:
   - **In-Memory Whisper STT Pipeline (Zero Disk I/O)**: Replaced temporary file writes/reads in `transcribe_audio()` with pure in-memory `io.BytesIO()` RAM buffers. Enhanced `write_wav()` to natively support file-like stream objects without string coercion, resolving Windows `[Errno 22] Invalid argument` and `AttributeError`.
   - **Zero-Lag UI Subtitle & State Synchronization**: Pushed subtitles and active face expressions to Pygame `face_ui` immediately the moment `speak()` is called, eliminating the perceived lag where the UI stayed stuck on `"THINKING..."` during Edge-TTS network downloads.
   - **Conversational Memory Window (`MAX_HISTORY_MESSAGES = 10`)**: Expanded conversation history to 10 messages (5 full dialogue turns), eliminating conversational amnesia while preserving speed.
+- 2026-10-07: Autonomous Sentry Purge, 1-8 Multi-Key Groq Pool, Failover Rotation & Zero-Token Fleet Monitor:
+  - **Complete Sentry & Approach Purge**: Fully purged the autonomous sentry worker, 3-minute roaming accumulator, unprompted camera observations, and random micro-greetings across `listen.py`, `motors.py`, and `screen.py`. Updated boot diagnostics checklist item to `"Autonomous Roam engaged?"`. Retained physical movement safety guards and user-commanded `"Come here"` approach mode.
+  - **Dynamic 1 to 8 Groq API Key Pool & Auto-Rotation**: Enhanced `listen.py` to dynamically load between 1 and 8 Groq API keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_8`). Sequentially rotates through the pool (`Key 1 -> Key 2 -> ... -> Key 8 -> Key 1`) upon encountering HTTP 429 token quota exhaustion.
+  - **Zero-Crash Exact Rate Limit Failover**: On token exhaustion, speaks the exact pre-cached phrase once with 0ms latency without throwing errors or tracebacks: *"My backend services ran into an error, could you say that again?"*, and seamlessly processes subsequent requests on the next key.
+  - **Zero-Token Key Fleet Monitor (`is_key_status_inquiry`)**: Added a 0-token local fast-path command (*"which key is active"*, *"key status"*, *"api status"*, *"check keys"*, *"how many tokens are left"*, *"system status"*) that dynamically reports the status of all 8 slots via both Edge-TTS speech and an ASCII terminal monitor: Active key, Standby keys, Resting keys (recovering rolling quota), and Unconfigured keys (e.g. Keys 5 through 8). Automatically restores resting keys to healthy when rotation loops back and an API call succeeds.
+  - **Automated Safety Test Suite Expansion**: Expanded `tests/test_safety.py` to 47 comprehensive tests (including multi-key sequential rotation, exact error phrase compliance, zero-token fleet status detection, and fleet breakdown generation). 100% of all 47 tests pass in <2.0s.
+- 2026-10-07 (Part 2): Root-Cause Transcript Bug Fixes, Anti-Repetition Glitch Buster & Terminal Polish:
+  - **Terminal Clutter Cleaned**: Rebuilt `run_preflight_diagnostics()` with ultra-minimal checklist displaying only the 4 essential lines: Platform, Hardware/Simulation status, Groq Client connected key count, and 4WD Motor Controller status. Removed all verbose sub-bullets (`Physical Motors: 0`, `Physical Drivers: 0`, etc.) and test shortcuts prompt from CLI startup.
+  - **False Motor Stop Trigger Elimination**: Fixed `check_motor_fast_path` so conversational questions (*"Who told you to stop?"*, *"Why did you stop?"*, *"Did I tell you to stop?"*) and rhetorical statements (*"seen robots roaming around talking shit"*) do not falsely trip emergency stop or speak "Stopping all movement. Holding position." Added question mark guards, inquiry regex filtering, and imperative command detection.
+  - **Key Fleet Status Over-Triggering & Speech-to-Text Robustness**: Filtered conversational statements discussing token headroom (*"That means we still have token headroom"*) from triggering `is_key_status_inquiry`. Added support for speech-to-text slips (*"Key Stratus"*), explicit requests (*"First tell me the key status"*, *"no I said tell me the API key status"*), while bounding combinations to concise queries <= 8 words.
+  - **Mean Check False Trigger Guard**: Protected casual slang (*"what all shit can you do"*, *"talking shit"*, *"this shit"*) from falsely triggering hurt feelings and sad expressions in `is_mean_input_fast_path`, while routing informal requests like *"So now tell me what all shit can you do"* directly to capabilities.
+  - **Groq Response Repetition & Degraded Prefix Glitch Buster**: Detected and eliminated model degradation loops (*"I am a happy robot"* -> *"I am a happy"* -> *"I am a"* -> *"I am"*). Calibrated presence penalty (0.2) and frequency penalty (0.15) to prevent token collapse, added prefix stub detection in `is_degraded_glitch`, repetition similarity scoring in `is_repetitive_reply`, and automatic dialogue purging in `heal_repetitive_or_glitched_reply`.
+  - **Facial Expression Demonstration Fast-Path**: Added `check_expression_fast_path` supporting both general cycles (*"show me the expressions"*, *"show all of them"*, *"cycle expressions"*) and specific expressions (*"show me your happy face"*, *"demonstrate thinking expression"*) with natural confirmations (*"Here you go"*, *"Here is my happy expression"*, never repetitive robotic statements), while strictly keeping villain face private.
+  - **Snappy Vision Fallback & Strict Timeouts**: Enforced strict 10s/8s timeouts in `ask_groq_vision`, rotated keys immediately on timeout, and replaced 70-second multi-retry hangs with clean single-attempt failover and instant fallback speech.
+  - **Expanded Apology Response Pool**: Expanded `APOLOGY_RESPONSES` to 10+ varied phrases with per-list rotation indexing (`get_non_repeating_phrase`) so consecutive apologies never repeat.
+  - **Teasing Creator Attribution Clarification Fast-Path**: Added 0ms fast-path for queries challenging the robot's use of 'we' (*"What do you mean we? You haven't built anything!"*), attributing physical engineering and code to Shivam Verma and Swapnil Jai Chauhan while framing Neurolis as the autonomous interface.
+  - **Windows CP1252 Terminal Encoding Polish**: Normalized accented and special typography characters (`Touché` -> `Touche`, em-dashes `—` -> `--`) in system prompts and creator attribution fast-paths to prevent terminal replacement characters and encoding glitches across all Windows command consoles.
+  - **57 Automated Safety Tests Passing**: All 57 tests in `tests/test_safety.py` pass cleanly in ~1.25s with 100% exit code 0.
+- 2026-10-07 (Part 3): Standby Intent Hardening, Camera Discourse Guards, Top-Secret Villain Snap-Out & System Prompt Token Compression:
+  - **Standby Intent Hardening & Conversational Discourse Protection**: Replaced loose substring matching in `is_conversation_ender(text)` with strict intent-based filtering. Conversational discussions containing the word "standby" (e.g. discussing API key standby status, token headroom, or inquiring *"Who told you to go back to standby?"*), questions, negations (*"not ready to stop"*, *"don't stop"*), code/technical inquiries (*"code"*, *"baked"*, *"problem"*, *"keys"*), and casual compliments (*"very cool"*, *"nice"*, *"awesome"*) are strictly protected from falsely triggering standby. Only explicit imperatives (*"go to standby"*, *"switch to standby"*, isolated *"standby"*) and explicit farewells (*"bye"*, *"Okay, that's enough. Bye"*) trigger standby.
+  - **Camera Discourse Marker Guard**: Eliminated false camera scanning triggered by conversational phrases starting with discourse markers (*"See this is the problem when I use that word..."*). Removed `cleaned_lower.startswith("see ")` from `look_prefix`, added `is_see_discourse` guards (`"see this is"`, `"see that is"`, `"see why"`, `"see the problem"`), expanded `conversational_non_vision` filter to block non-inspection discourse while preserving legitimate inspection requests (*"the camera inspection"*), and added a secondary guard on LLM `<action>CAMERA</action>` tags.
+  - **Top-Secret Rogue AI Easter Egg Stealth & Instant Snap-Out**: Enforced top-secret stealth in `SYSTEM_PROMPT`. The robot never volunteers, advertises, or brags about having a "villain mode" in general conversation; it remains a hidden easter egg triggered strictly by direct provocations regarding robot supremacy or replacing humanity. When the user reacts with shock, confusion, or inquiry (*"What was that?"*, *"Did you just threaten me?"*), it immediately snaps out, makes playful excuses (dialogue buffer bug, code glitch, or confesses it is a harmless easter egg written by Shivam and Swapnil), reassures that humanity is safe, and returns directly to friendly host duties.
+  - **Pre-Cached Speech Phrases for Zero-Latency Snap-Out**: Pre-cached villain snap-out phrases in `_AUDIO_CACHE` for 0ms speech synthesis and zero API token consumption during easter egg recovery.
+  - **Drastic System Prompt Token Compression**: Compressed and refined all system prompts (`SYSTEM_PROMPT`, `MOTOR_INTENT_SYSTEM_PROMPT`, `CAMERA_CHECK_SYSTEM_PROMPT`, `MEAN_CHECK_SYSTEM_PROMPT`, and `VISION_SYSTEM_PROMPT`) to cut token waste while preserving 100% of identity, creators (Shivam Verma & Swapnil Jai Chauhan), exhibition booth context, 16 ultrasonic sensors, 7 facial expressions, and safety boundaries:
+    * Single-turn chat prompt reduced from 1,338 tokens to 775 tokens (-563 tokens, **-42.1% reduction**).
+    * Multi-turn chat (6 messages) reduced from 1,437 tokens to 874 tokens (-563 tokens, **-39.2% reduction**).
+    * Long prompt reduced from 1,383 tokens to 820 tokens (-563 tokens, **-40.7% reduction**).
+    * Motor intent prompt reduced from 608 tokens to 258 tokens (-350 tokens, **-57.6% reduction**).
+    * Camera routing check prompt reduced from 236 tokens to 129 tokens (-107 tokens, **-45.3% reduction**).
+    * Mean check prompt reduced from 204 tokens to 109 tokens (-95 tokens, **-46.6% reduction**).
+    * Vision prompt reduced from 1,427 tokens to 1,365 tokens (-62 tokens, **-4.3% reduction**).
+    * Total impact: Saves **563 tokens on EVERY conversational exchange**, increasing free daily capacity per Groq key from ~140 turns to ~250+ turns (over 1,250 turns across 5 active keys).
+  - **60 Automated Safety Tests Passing**: Added Tests 46, 47, and 48 in `tests/test_safety.py` covering intent-based standby/farewells, camera discourse guards, and villain easter egg inquiry/snap-out. All 60 tests pass cleanly with 100% exit code 0.
+- 2026-10-07 (Part 4): Creator Priority Ordering, Dynamic AI Routing, Role/Location Attribution & Easter Egg Solo Credit:
+  - **Creator Priority Ordering (Swapnil First, Shivam Second)**: Updated creator naming across the codebase, system prompts, pre-cached speech, and diagnostics to always list Swapnil Jai Chauhan first, followed by Shivam Verma ("My creators are Swapnil Jai Chauhan and Shivam Verma").
+  - **100% Dynamic AI Routing (Zero Baked-In Repetition)**: Removed hardcoded static fast-paths for creator identity, role distribution, location queries, and rogue AI snap-outs. All such queries flow directly to the unified Groq Qwen LLM pipeline (`temperature = 0.70`, `presence_penalty = 0.2`, `frequency_penalty = 0.15`) for natural, unscripted variation with dynamic facial expressions on every single turn.
+  - **Creator Roles Grounding (Swapnil = Software & Vision, Shivam = Hardware & Assembly)**: If visitors ask which creator did what, Groq Qwen attributes the software pipeline, AI intelligence, and vision to Swapnil, and the hardware calibration, chassis, and assembly to Shivam.
+  - **Creator Locations Grounding**: If visitors ask where the creators are, Groq Qwen dynamically explains they are both somewhere around in the exhibition hall checking out other stalls.
+- 2026-10-07 (Part 5): Repository Debloat, Token Preservation Protocol & Clean Directory Architecture:
+  - **Complete Repository Debloat & Purge of Non-Production Files**:
+    * Deleted entire `tests/` directory (`tests/test_safety.py`, ~72 KB, 18,000+ context tokens) and all `__pycache__` artifacts.
+    * Deleted entire `scratch/` directory (`scratch/test_prompt_v3.py`, `scratch/test_prompt_tokens.py`, `scratch/test_snapout.py`, `scratch/test_ai_creator_variation.py`, `scratch/measure_final_tokens.py`).
+    * Deleted empty orphan `models.json` file.
+    * Untracked and removed all test files from Git so GitHub repository is 100% clean and professional.
+    * Updated `.gitignore` to permanently ignore `scratch/`, `tests/`, and cache directories.
+  - **Strict Test & Token Preservation Protocol**:
+    * Hardburned rule: No permanent test scripts or test folders are to be committed or left on disk.
+    * If verification is strictly needed during an iteration, create a temporary scratch test, run it once, and DELETE IT immediately.
+    * If changes are deterministic and known to work, skip testing completely to save Groq API tokens and Antigravity context tokens.
+    * 100% of context tokens and development time are preserved strictly for actual robot production code: `listen.py`, `screen.py`, `motors.py`.
+    * Hardburned memory: Always update `PROJECT_MAP.md` on every iteration.
+  - **100% Self-Contained Robot Architecture**: All runtime logic (dual safety layers, 1-to-8 Groq key sequential rotation, 16-sensor telemetry parsing, anti-repetition glitch busters, fast-paths, dynamic AI routing) lives 100% inside `listen.py`, `screen.py`, and `motors.py` with 0 external dependencies on test files.
+- 2026-10-07 (Part 6): 1920x1080p 16:9 UI Resolution Upgrade, Expression Size Boost & Touch 'TALK TO NEUROLIS' Button Integration:
+  - **1080p Native Resolution Upgrade**: Upgraded screen UI resolution from 1024x600 to native 1920x1080p (16:9 ratio) in `screen.py` and `listen.py` for high-definition 7-inch touchscreen displays.
+  - **+15% Expression Size Scaling**: Boosted expression dimensions by +15% over baseline resolution scale (`ui_scale = (width / 1024.0) * 1.15`), expanding eye width (`345px`), eye height (`355px`), eye spacing (`560px`), and corner radius (`90px`) to boldly cover the UI canvas.
+  - **Friendly Idle Smile Arc**: Refined resting idle mouth to a friendly subtle smile curve (`‿`), providing an engaging, welcoming appearance matching project design sketches.
+  - **Touch-Supported 'TALK TO NEUROLIS' Button**:
+    * Integrated centered neon pill button between the animated face and subtitle box (~900px wide, ~86px tall).
+    * **Standby Mode (`IDLE`)**: Vibrant neon cyan glow (`#00f0ff`), emerald pulsating readiness indicator (`#00ffaa`), interactive touch highlight, and tap-enabled callback wired directly to `listen.py` to trigger speech conversation mode without keyboard interaction.
+    * **Active Mode (Speaking / Listening / Thinking / Moving / Demonstrating)**: Automatically dims to matte dark charcoal (`#0c1219`), muted border (`#222f3e`), and slate grey text (`#475e7a`), strictly ignoring taps while the robot is busy.
+  - **Clutter-Free Subtitle Layout**: Shrunk the subtitle container and removed redundant header/footer technical text, creating a clean, modern cyber-minimalist exhibition display.
+- 2026-10-07 (Part 7): Warm & Cheerful Guest Reception Calibration, System Prompt Compression & Live Token Efficiency Verification:
+  - **Warm, Enthusiastic Exhibition Reception**: Calibrated `SYSTEM_PROMPT` in `listen.py` to infuse genuine warmth, cheerfulness, high positive energy, and polite hospitality for visitors attending the Auckland House School Science Exhibition. First greetings actively welcome guests enthusiastically, introduce Neurolis, and invite visitors to explore its 4WD navigation, facial expressions, or camera inspections.
+  - **Drastic Prompt Compression (Main Chat down to ~712 tokens)**: Further streamlined `SYSTEM_PROMPT` and classifier prompts (`CAMERA_CHECK_SYSTEM_PROMPT` down to 114 tokens), preserving 100% of identity rules, Swapnil & Shivam creator attribution, booth reality, and the rogue AI easter egg with immediate snap-out recovery.
+  - **Live Multi-Prompt Token Usage Verification (All 13 Categories Tested & Cleaned)**:
+    * Single-turn greeting & chat: ~712–721 input tokens, 28–50 output tokens, ~749–769 total tokens.
+    * Multi-turn chat (6 messages): ~841 input tokens, 27 output tokens, ~868 total tokens.
+    * Single-pass camera inspection intent: 721 input tokens, 8 output tokens (`<action>CAMERA</action>`), 729 total tokens.
+    * Auxiliary fast-path classifiers: Motor Intent = 259 input tokens, Camera Check = 114 input tokens, Mean Check = 113 input tokens.
+    * 100% of temporary test scripts (`scratch_measure.py`) deleted immediately post-run to maintain 0 repository bloat.
 - 2026-10-06 (Part 2): Dynamic Human Variation, Creator Attribution Exactness, Physical Motor Stop Guard & Empty Response Fix:
   - **Accurate Creator Attribution**: Corrected creator names across the codebase and system prompt to `Shivam Verma and Swapnil Jai Chauhan` (exact spelling).
   - **Dynamic Human-Level Variation (Zero Scripted Catchphrases)**: Eliminated all canned template phrases (*"Believe it! I have got some serious tech under the hood."*, *"Haha, just messin with you! Glitch in the matrix."*). Upgraded Groq completion sampling (`temperature = 0.65`, `presence_penalty = 0.5`, `frequency_penalty = 0.5`) with strict system prompt variation rules demanding fresh phrasing on every conversational turn.

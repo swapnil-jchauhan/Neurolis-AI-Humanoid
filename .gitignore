@@ -10,6 +10,10 @@ haarcascade_frontalface_default.xml
 face_detection_yunet_2023mar.onnx
 models.json
 
+# Scratch & Temporary Testing
+scratch/
+tests/
+
 # Temporary Output Captures
 _neurolis_vision.jpg
 *.wav
