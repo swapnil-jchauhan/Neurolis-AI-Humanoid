@@ -683,13 +683,34 @@ To do:
   - **Clutter-Free Subtitle Layout**: Shrunk the subtitle container and removed redundant header/footer technical text, creating a clean, modern cyber-minimalist exhibition display.
 - 2026-10-07 (Part 7): Warm & Cheerful Guest Reception Calibration, System Prompt Compression & Live Token Efficiency Verification:
   - **Warm, Enthusiastic Exhibition Reception**: Calibrated `SYSTEM_PROMPT` in `listen.py` to infuse genuine warmth, cheerfulness, high positive energy, and polite hospitality for visitors attending the Auckland House School Science Exhibition. First greetings actively welcome guests enthusiastically, introduce Neurolis, and invite visitors to explore its 4WD navigation, facial expressions, or camera inspections.
-  - **Drastic Prompt Compression (Main Chat down to ~712 tokens)**: Further streamlined `SYSTEM_PROMPT` and classifier prompts (`CAMERA_CHECK_SYSTEM_PROMPT` down to 114 tokens), preserving 100% of identity rules, Swapnil & Shivam creator attribution, booth reality, and the rogue AI easter egg with immediate snap-out recovery.
+  - **Drastic Prompt Compression & User Tweaks (Confirmed ~733 tokens)**: Further streamlined `SYSTEM_PROMPT` and classifier prompts (`CAMERA_CHECK_SYSTEM_PROMPT` at 114 tokens), preserving 100% of identity rules, Swapnil & Shivam creator attribution, booth reality, and the rogue AI easter egg with immediate snap-out recovery. User refined phrasing around exhibition showcase, conversational awe matching, and feature suggestions, keeping prompt tokens at an ultra-lean ~733 tokens (down ~45% from 1,340 tokens).
   - **Live Multi-Prompt Token Usage Verification (All 13 Categories Tested & Cleaned)**:
-    * Single-turn greeting & chat: ~712–721 input tokens, 28–50 output tokens, ~749–769 total tokens.
+    * Single-turn greeting & chat: ~733–738 input tokens, 27–47 output tokens, ~760–765 total tokens.
     * Multi-turn chat (6 messages): ~841 input tokens, 27 output tokens, ~868 total tokens.
     * Single-pass camera inspection intent: 721 input tokens, 8 output tokens (`<action>CAMERA</action>`), 729 total tokens.
     * Auxiliary fast-path classifiers: Motor Intent = 259 input tokens, Camera Check = 114 input tokens, Mean Check = 113 input tokens.
     * 100% of temporary test scripts (`scratch_measure.py`) deleted immediately post-run to maintain 0 repository bloat.
+- 2026-10-07 (Part 8): Chill & Poised Host Calibration, Robust Introduction Grounding & motors.py Cleanups:
+  - **motors.py Architecture Cleanups & Refinements**:
+    * Purged all remaining obsolete sentry/autonomous approach attributes and methods (`NavMode.APPROACHING_TARGET`, `_last_roam_tick`, `_last_sim_roam_tick`, `total_roam_seconds`, `get_roam_seconds`, `add_roam_seconds`, `reset_roam_seconds`).
+    * Consolidated `approach_target()` as a safe alias pointing to `approach_user()` ("Come here" mode with ~0.9m ultrasonic auto-braking).
+    * Fixed HUD preview loop check to cleanly evaluate active navigation modes (`[NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM]`).
+    * Validated 100% clean thread shutdown, OpenCV capture release, and simulation mode physics.
+  - **Chill & Poised Persona Calibration (Zero Overexcitement & 100% Dynamic Greetings)**:
+    * Re-calibrated `SYSTEM_PROMPT` in `listen.py` to a chill, cool, fun, relaxed, and poised student-built humanoid robot (no hyper overexcitement or exaggerated eagerness).
+    * Replaced all verbatim hardcoded greeting quotes with dynamic conceptual directives and strict anti-repetition rules: welcomes guests to the Auckland House School Science Exhibition, introduces itself as Neurolis, notes its 16 ultrasonic sensors and cool features, and asks what they want to see first using fresh, natural phrasing every time.
+    * **Ultra-Low Token Usage Preserved**: Prompt tokens clocked at an ultra-lean **757 tokens** (total exchange: ~805 tokens, ~0.10s latency).
+- 2026-10-07 (Part 9): SYSTEM_PROMPT Further Token Compression & 13-Turn Live Convo Verification:
+  - **SYSTEM_PROMPT Further Token Compression (Down to 678 Tokens)**:
+    * Condensed core system instructions by consolidating identity, creator roles (Swapnil Jai Chauhan = software/AI, Shivam Verma = hardware/assembly/calibration), and location (around the exhibition hall) directly into the prompt header.
+    * Pruned syntax redundancies and wordy directives while preserving 100% of the chill, cool, witty, and poised persona, action tags (`<action expression="...">`, `<action motor="...">`), and the rogue AI easter egg with immediate recovery.
+    * Slashed baseline single-turn prompt token count from 757 tokens down to **678 tokens** (saving ~80 tokens on every single query).
+  - **13-Turn Live Conversation Test Executed & Verified (Groq Qwen 2.5 32B)**:
+    * Executed full 13-turn conversational test across all visitor interactions (greetings, student origin, 4WD roaming demo, facial expressions showcasing, creator inquiry, role breakdown, creator whereabouts, and transition to standby).
+    * Single-turn baseline: **678 prompt tokens**, 54 completion tokens, 732 total tokens.
+    * Multi-turn bounded window: Prompt tokens strictly leveled off between **751 and 918 tokens** across all 13 turns (completion: 29–69 tokens, total: 814–977 tokens) due to the 6-message sliding window.
+    * Maintained 100% dynamic, unscripted responses with zero hardcoded phrases, proper action tags, correct creator prioritization (Swapnil first, Shivam second), and natural stand-down behavior.
+    * 100% of temporary test files (`scratch_convo_test.py`) deleted post-run with zero residual disk bloat.
 - 2026-10-06 (Part 2): Dynamic Human Variation, Creator Attribution Exactness, Physical Motor Stop Guard & Empty Response Fix:
   - **Accurate Creator Attribution**: Corrected creator names across the codebase and system prompt to `Shivam Verma and Swapnil Jai Chauhan` (exact spelling).
   - **Dynamic Human-Level Variation (Zero Scripted Catchphrases)**: Eliminated all canned template phrases (*"Believe it! I have got some serious tech under the hood."*, *"Haha, just messin with you! Glitch in the matrix."*). Upgraded Groq completion sampling (`temperature = 0.65`, `presence_penalty = 0.5`, `frequency_penalty = 0.5`) with strict system prompt variation rules demanding fresh phrasing on every conversational turn.

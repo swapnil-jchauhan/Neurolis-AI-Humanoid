@@ -79,7 +79,6 @@ class NavMode:
     STANDBY = "STANDBY"
     FOLLOW = "FOLLOW"
     APPROACH = "APPROACH"
-    APPROACHING_TARGET = "APPROACHING_TARGET"
     ROAM = "ROAM"
     STEP_BACK = "STEP_BACK"
     SPIN = "SPIN"
@@ -106,11 +105,8 @@ class MotorController:
         self.ser: Optional["serial.Serial"] = None
         self.is_simulated = False
 
-        # Autonomous Sentry & Approach Tracking
+        # Navigation & Safe Approach State
         self.autonomous_approach_engaged = True
-        self.total_roam_seconds = 0.0
-        self._last_roam_tick = time.time()
-        self._last_sim_roam_tick = time.time()
         self.target_reached = False
         self.on_target_reached_callback = None
 
@@ -225,7 +221,6 @@ class MotorController:
             return self.nav_mode in [
                 NavMode.FOLLOW,
                 NavMode.APPROACH,
-                NavMode.APPROACHING_TARGET,
                 NavMode.ROAM,
                 NavMode.STEP_BACK,
                 NavMode.SPIN,
@@ -237,7 +232,6 @@ class MotorController:
             return self.nav_mode in [
                 NavMode.FOLLOW,
                 NavMode.APPROACH,
-                NavMode.APPROACHING_TARGET,
             ]
 
     @property
@@ -262,29 +256,9 @@ class MotorController:
             self._mode_start_time = time.time()
         print("[Motors] Mode: APPROACH USER ('Come Here').")
 
-    # activates autonomous sentry approach: steers toward human face and stops safely at ~0.9m
+    # alias for approach_user ('Come Here' safe intercept to ~0.9m)
     def approach_target(self):
-        with self.lock:
-            self.nav_mode = NavMode.APPROACHING_TARGET
-            self.popup_active = True
-            self.target_reached = False
-            self._mode_start_time = time.time()
-        print("[Motors] Mode: AUTONOMOUS APPROACH TARGET (~0.9m safe intercept).")
-
-    # retrieves total accumulated roaming patrol time
-    def get_roam_seconds(self) -> float:
-        with self.lock:
-            return self.total_roam_seconds
-
-    # adds seconds to accumulated roam time (useful for fast-forwarding or testing)
-    def add_roam_seconds(self, secs: float):
-        with self.lock:
-            self.total_roam_seconds += max(0.0, float(secs))
-
-    # resets accumulated roam timer back to 0
-    def reset_roam_seconds(self):
-        with self.lock:
-            self.total_roam_seconds = 0.0
+        return self.approach_user()
 
     # simulates face detection for zero-hardware PC testing and validation
     def simulate_face_detected(self, detected: bool = True, cx: float = 0.0, cy: float = 0.0, ratio: float = 0.25):
@@ -550,8 +524,8 @@ class MotorController:
                 self._prev_err_x = err_x
                 self._prev_err_dist = err_dist
 
-            # 2. APPROACH MODE & APPROACHING_TARGET ("Come here" & Autonomous Intercept)
-            elif mode in [NavMode.APPROACH, NavMode.APPROACHING_TARGET]:
+            # 2. APPROACH MODE ("Come here" Safe Intercept)
+            elif mode == NavMode.APPROACH:
                 err_x = center_x
                 steer = int(self.kp_steer * err_x)
                 front_dist = self.telemetry.front_us_cm
@@ -580,30 +554,12 @@ class MotorController:
                     self.target_detected = False
                     self.gaze_x = 0.0
                     self.gaze_y = 0.0
-            if mode == NavMode.APPROACHING_TARGET:
-                front_dist = self.telemetry.front_us_cm
-                if 0.0 < front_dist <= 90.0:
-                    with self.lock:
-                        self.target_reached = True
-                    self.stop_all()
-                    print(f"[Motors] Target reached safely (~0.9m). Front US: {front_dist:.1f}cm. Halting.")
-                    if self.on_target_reached_callback:
-                        try:
-                            self.on_target_reached_callback()
-                        except Exception as cb_err:
-                            print(f"[Motors] Target reached callback error: {cb_err}")
-                else:
-                    self.stop()
-            elif mode in [NavMode.FOLLOW, NavMode.APPROACH]:
+            if mode in [NavMode.FOLLOW, NavMode.APPROACH]:
                 self.stop()
 
 
         # 4. AUTONOMOUS ROAM / WANDER MODE (Ultrasonic obstacle avoidance)
         if mode == NavMode.ROAM:
-            roam_dt = max(0.0, min(1.0, now - self._last_roam_tick))
-            with self.lock:
-                self.total_roam_seconds += roam_dt
-            self._last_roam_tick = now
 
             f_dist = self.telemetry.front_us_cm
             l_dist = self.telemetry.left_us_cm
@@ -619,7 +575,6 @@ class MotorController:
 
         # 5. STEP BACK MODE
         elif mode == NavMode.STEP_BACK:
-            self._last_roam_tick = now
             if self.telemetry.rear_us_cm < 28.0:
                 print(f"[Motors] Rear obstacle detected ({self.telemetry.rear_us_cm:.1f}cm), braking!")
                 self.stop_all()
@@ -630,19 +585,16 @@ class MotorController:
 
         # 6. SPIN MODE
         elif mode == NavMode.SPIN:
-            self._last_roam_tick = now
             if now - self._mode_start_time < 1.2:
                 self.drive(0, 130 * getattr(self, "_spin_dir", 1))
             else:
                 self.stop_all()
-        else:
-            self._last_roam_tick = now
 
         self._prev_time = now
 
         # Draw Live Video Feed HUD if preview is active, popup_active is set, or in active nav mode
         with self.lock:
-            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.APPROACHING_TARGET, NavMode.ROAM])
+            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM])
 
         if need_display:
             disp = proc_frame.copy()
@@ -674,7 +626,7 @@ class MotorController:
         while self.running:
             should_show = False
             with self.lock:
-                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.APPROACHING_TARGET, NavMode.ROAM]))
+                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM]))
 
             if should_show and self.latest_display_frame is not None:
                 if not window_open:
@@ -707,8 +659,6 @@ class MotorController:
                     mode = self.nav_mode
 
                 if mode == NavMode.ROAM:
-                    self._last_sim_roam_tick = time.time()
-
                     # Simulate moving towards a wall and steering away
                     sim_wander_dist += sim_wander_dir * 4.0
                     if sim_wander_dist <= 30.0:
@@ -731,8 +681,7 @@ class MotorController:
                         self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
                         self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [sim_l] * 4 + [sim_r] * 4 + [150.0] * 4
 
-                elif mode in [NavMode.APPROACH, NavMode.APPROACHING_TARGET]:
-                    self._last_sim_roam_tick = time.time()
+                elif mode == NavMode.APPROACH:
                     target_done = False
                     with self.lock:
                         cur_f = self.telemetry.front_us_cm
@@ -759,7 +708,6 @@ class MotorController:
                                 print(f"[Motors] Callback error: {e}")
 
                 else:
-                    self._last_sim_roam_tick = time.time()
                     with self.lock:
                         self.telemetry.front_us_cm = 999.0
                         self.telemetry.left_us_cm = 999.0
