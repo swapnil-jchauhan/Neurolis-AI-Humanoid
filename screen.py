@@ -474,6 +474,12 @@ class FaceUI:
         self.boot_audio_player = BootAudioPlayer()
         self._boot_thread: Optional[threading.Thread] = None
 
+        # Ghostly CRT glitch & static flicker animation state (100% native Tkinter on Pi 5 & PC)
+        self.glitch_active = False
+        self.glitch_start_time = 0.0
+        self.glitch_duration = 0.3
+        self.glitch_cycles = 3
+
         # Eye tracking coordinates (-1.0 to 1.0)
         self.target_look_x = 0.0
         self.target_look_y = 0.0
@@ -694,6 +700,55 @@ class FaceUI:
             else:
                 self.status_text = f"STATE: {state.upper()}"
 
+    def trigger_glitch_flicker(self, cycles: int = 3, duration_ms: int = 300):
+        """
+        Triggers a ghostly CRT scanline / static glitch flicker effect on the canvas.
+        Renders rapid frames of scanlines, chromatic line offset, and illumination dips.
+        Works 100% natively via Tkinter drawing on Pi 5 display and PC simulation.
+        """
+        with self.lock:
+            self.glitch_active = True
+            self.glitch_start_time = time.time()
+            self.glitch_duration = max(0.05, duration_ms / 1000.0)
+            self.glitch_cycles = max(1, cycles)
+        # Briefly pause calling thread to allow GUI rendering loop to execute glitch frames (avoid freezing Tkinter thread if called from GUI thread)
+        if not (self._thread and threading.current_thread() == self._thread):
+            time.sleep(self.glitch_duration)
+
+    def _draw_glitch_overlay(self, w: float, h: float):
+        """Renders 100% native Tkinter ghostly CRT scanlines, chromatic line offsets, and illumination dips."""
+        now = time.time()
+        elapsed = now - self.glitch_start_time
+        if elapsed > self.glitch_duration:
+            self.glitch_active = False
+            return
+
+        cycle_p = (elapsed / max(0.01, self.glitch_duration)) * self.glitch_cycles
+        sub_frame = int(cycle_p * 2) % 2
+
+        # 1. Subtle illumination dip / phosphor fluctuation
+        if sub_frame == 1:
+            self.canvas.create_rectangle(0, 0, w, h, fill="#040b08", outline="")
+
+        # 2. Ghostly CRT scanlines across the canvas with phosphor pulse
+        scanline_step = 6
+        scanline_colors = ["#003b14", "#0a2e1d", "#004d26", "#052213"]
+        for i, sy in enumerate(range(0, int(h), scanline_step)):
+            scol = scanline_colors[i % len(scanline_colors)]
+            self.canvas.create_line(0, sy, w, sy, fill=scol, width=1)
+
+        # 3. Chromatic line offsets / horizontal glitch slices across the ocular region
+        slice_colors = ["#ff003c", "#39ff14", "#00f0ff", "#ffffff", "#ff1744"]
+        for _ in range(6):
+            gy = random.uniform(h * 0.1, h * 0.85)
+            gh = random.uniform(2, 6)
+            g_col = random.choice(slice_colors)
+            gx_offset = random.uniform(-35, 35)
+            self.canvas.create_rectangle(
+                max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
+                fill=g_col, outline=""
+            )
+
     # updates the subtitle box at the bottom whenever the user or robot speaks
     def set_subtitles(self, speaker: str, text: str):
         """Thread-safe subtitle updater for user transcription & robot speech."""
@@ -858,8 +913,9 @@ class FaceUI:
 
         # Palette selection based on state
         if cur_state == ExpressionState.VILLAIN:
+            pulse_6hz = math.sin(now * 12.0 * math.pi)
             main_color = "#39ff14"  # Radiant sinister neon lime green (rogue AI easter egg)
-            glow_color = "#003b14"
+            glow_color = lerp_color("#003b14", "#0a4e1e", 0.4 + 0.4 * pulse_6hz)
         elif cur_state == ExpressionState.ERROR:
             main_color = self.color_error
             glow_color = "#551122"
@@ -963,12 +1019,25 @@ class FaceUI:
             self._draw_idle_mouth(center_x, mouth_cy, main_color)
 
         # 6. 'TALK TO NEUROLIS' Touch Button (Positioned between mouth and subtitles)
-        btn_y = mouth_cy + int(self.eye_h * 0.26)
+        btn_y = mouth_cy + int(self.eye_h * 0.22)
         btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
 
         # 7. Real-Time Subtitle Card & Status (Shrunk lower pill container)
-        sub_top = btn_y + btn_h + int(18 * (h / 600.0))
+        sub_top = btn_y + btn_h + int(10 * (h / 600.0))
         self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color, sub_top)
+
+        # 8. Ghostly CRT Glitch & Static Overlay (when glitch active)
+        if self.glitch_active:
+            self._draw_glitch_overlay(w, h)
+        elif cur_state == ExpressionState.VILLAIN:
+            # 8b. Subtle 6Hz static pulse during villain speech delivery
+            pulse_6hz = math.sin(now * 12.0 * math.pi)
+            if pulse_6hz > 0.35:
+                for sy in range(0, int(h), 12):
+                    self.canvas.create_line(0, sy, w, sy, fill="#052413", width=1)
+                if random.random() < 0.2:
+                    gy = random.uniform(h * 0.15, h * 0.65)
+                    self.canvas.create_line(center_x - 140, gy, center_x + 140, gy, fill="#39ff14", width=1)
 
     # draws cybernetic eyebrows that tilt up or down depending on emotional mood
     def _draw_eyebrows(self, lx, rx, base_y, state, color):
@@ -1367,6 +1436,21 @@ class FaceUI:
                     cx - w_half * 0.85, bot_y,
                 ],
                 smooth=True, fill="#031b09", outline=""
+            )
+
+            # 2b. Ocular pupil slit with 6Hz green cyber pulse
+            pulse_6hz = math.sin(time.time() * 12.0 * math.pi)
+            slit_y = cy + eh * 0.08
+            slit_hw = w_half * (0.34 + 0.08 * pulse_6hz)
+            self.canvas.create_line(
+                cx - slit_hw, slit_y,
+                cx + slit_hw, slit_y,
+                fill="#39ff14", width=3, capstyle=tk.ROUND
+            )
+            # Center bright neon green pinpoint
+            self.canvas.create_oval(
+                cx - 3, slit_y - 2, cx + 3, slit_y + 2,
+                fill="#a6ff85", outline=""
             )
 
             # 3. Curved lower eye contour (shallow smiling bowl arc)
@@ -1847,7 +1931,7 @@ class FaceUI:
         """Draws the shrunken, dedicated Subtitle Box with speaker tags, word wrapping, and telemetry."""
         card_x1 = int(70 * (w / 1024.0))
         card_x2 = w - card_x1
-        card_y2 = h - int(36 * (h / 600.0))
+        card_y2 = h - int(16 * (h / 600.0))
         card_radius = int(18 * (h / 600.0))
 
         self._create_rounded_rect(
@@ -1873,9 +1957,9 @@ class FaceUI:
             display_spk = f"● {spk_label}"
 
         pill_w = int(140 * (w / 1024.0))
-        pill_h = int(24 * (h / 600.0))
+        pill_h = int(22 * (h / 600.0))
         px1 = card_x1 + int(18 * (w / 1024.0))
-        py1 = card_y1 + int(12 * (h / 600.0))
+        py1 = card_y1 + int(8 * (h / 600.0))
 
         self._create_rounded_rect(
             px1, py1, px1 + pill_w, py1 + pill_h,
@@ -1893,7 +1977,7 @@ class FaceUI:
             font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"), anchor="e"
         )
 
-        divider_y = py1 + pill_h + int(8 * (h / 600.0))
+        divider_y = py1 + pill_h + int(6 * (h / 600.0))
         self.canvas.create_line(
             px1, divider_y,
             card_x2 - int(18 * (w / 1024.0)), divider_y,
@@ -1901,16 +1985,26 @@ class FaceUI:
         )
 
         clean_text = text if text else "..."
-        if len(clean_text) > 320:
-            clean_text = clean_text[:317] + "..."
+        if len(clean_text) > 350:
+            clean_text = clean_text[:347] + "..."
+
+        text_len = len(clean_text)
+        if text_len <= 80:
+            font_size = int(13.0 * (h / 600.0))
+        elif text_len <= 150:
+            font_size = int(11.5 * (h / 600.0))
+        elif text_len <= 230:
+            font_size = int(10.0 * (h / 600.0))
+        else:
+            font_size = int(8.8 * (h / 600.0))
 
         self.canvas.create_text(
-            px1 + 4, divider_y + int(10 * (h / 600.0)),
+            px1 + 4, divider_y + int(8 * (h / 600.0)),
             text=clean_text,
             fill="#ffffff",
-            font=(FONT_FAMILY, int(13 * (h / 600.0)), "bold"),
+            font=(FONT_FAMILY, max(8, font_size), "bold"),
             anchor="nw",
-            width=int(card_x2 - card_x1 - 44 * (w / 1024.0)),
+            width=int(card_x2 - card_x1 - 36 * (w / 1024.0)),
         )
 
     # phase 1: apple-grade greeting screen saying "Hi there!" with smooth cosine alpha fade

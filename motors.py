@@ -10,8 +10,8 @@ Features:
      - FOLLOW: Continuous 30 FPS person tracking & following.
      - APPROACH: "Come here" -> drives to person (~0.8m) and auto-brakes to stop.
      - ROAM: Autonomous obstacle avoidance using ultrasonic sensors.
-     - STEP_BACK: Gently reverses 1.5s and halts.
-     - SPIN: Rotates in place.
+     - STEP_BACK: Reverses 5.0s (monitors rear ultrasonic sensors to avoid crash) and halts.
+     - SPIN: Rotates in place for 5.0s (clockwise default, or anticlockwise on request) and halts.
   5. Master-to-Slave Serial protocol to Arduino Mega (with Virtual Simulator on PC).
 """
 
@@ -287,8 +287,8 @@ class MotorController:
             self.popup_active = True
         print("[Motors] Mode: DEMONSTRATING AUTONOMOUS 4WD MOVEMENT.")
 
-    # backs up gently for 1.5 seconds and stops (with rear obstacle collision check)
-    def step_back(self) -> bool:
+    # backs up safely for duration (default 5.0 seconds) and stops (with active rear obstacle collision check)
+    def step_back(self, duration: float = 5.0) -> bool:
         with self.lock:
             r_dist = self.telemetry.rear_us_cm
         if r_dist < 28.0:
@@ -297,17 +297,33 @@ class MotorController:
             return False
         with self.lock:
             self.nav_mode = NavMode.STEP_BACK
+            self.popup_active = True
             self._mode_start_time = time.time()
-        print("[Motors] Mode: STEPPING BACK.")
+            self._step_back_duration = float(duration)
+        self.drive(-95, 0)
+        print(f"[Motors] Mode: STEPPING BACK ({duration:.1f}s).")
         return True
 
-    # rotates chassis in place to turn around
-    def spin(self, direction: str = "right"):
+    # rotates chassis in place for duration (default 5.0 seconds, clockwise default or anticlockwise on request)
+    def spin(self, direction: str = "clockwise", duration: float = 5.0) -> bool:
+        dir_clean = str(direction).lower().strip()
+        is_anti = any(k in dir_clean for k in ["anti", "counter", "left"])
+        spin_dir = -1 if is_anti else 1
+        dir_name = "anticlockwise" if spin_dir == -1 else "clockwise"
+        safe, reason = self.can_move("spin")
+        if not safe:
+            print(f"[Motors] Spin aborted: {reason}.")
+            self.stop_all()
+            return False
         with self.lock:
             self.nav_mode = NavMode.SPIN
+            self.popup_active = True
             self._mode_start_time = time.time()
-            self._spin_dir = 1 if direction == "right" else -1
-        print(f"[Motors] Mode: SPINNING {direction.upper()}.")
+            self._spin_dir = spin_dir
+            self._spin_duration = float(duration)
+        self.drive(0, 130 * spin_dir)
+        print(f"[Motors] Mode: SPINNING {dir_name.upper()} ({duration:.1f}s).")
+        return True
 
     # pre-flight safety check to verify if the intended direction has clearance
     def can_move(self, direction: str = "forward") -> Tuple[bool, str]:
@@ -315,18 +331,20 @@ class MotorController:
         with self.lock:
             f_dist = self.telemetry.front_us_cm
             r_dist = self.telemetry.rear_us_cm
+            l_dist = self.telemetry.left_us_cm
+            r_dist_val = self.telemetry.right_us_cm
 
-        if direction == "forward":
+        if direction in ["forward", "approach"]:
             if f_dist < 28.0:
                 return False, f"front obstacle detected ({f_dist:.1f}cm < 28cm)"
             return True, "forward path clear"
-        elif direction == "backward":
+        elif direction in ["backward", "step_back", "reverse", "back"]:
             if r_dist < 28.0:
                 return False, f"rear obstacle detected ({r_dist:.1f}cm < 28cm)"
             return True, "rear path clear"
-        elif direction in ["spin", "turn"]:
-            if f_dist < 20.0 or r_dist < 20.0:
-                return False, f"space too tight for rotation (front: {f_dist:.1f}cm, rear: {r_dist:.1f}cm)"
+        elif direction in ["spin", "turn", "rotate", "clockwise", "anticlockwise"]:
+            if f_dist < 22.0 or r_dist < 22.0 or l_dist < 20.0 or r_dist_val < 20.0:
+                return False, f"space too tight for rotation (front: {f_dist:.1f}cm, rear: {r_dist:.1f}cm, left: {l_dist:.1f}cm, right: {r_dist_val:.1f}cm)"
             return True, "rotation clear"
         return True, "ready"
 
@@ -355,13 +373,25 @@ class MotorController:
         speed = max(-255, min(255, int(speed)))
         steer = max(-255, min(255, int(steer)))
 
-        # Safety override if front ultrasonic obstacle detected (< 28cm)
-        if self.telemetry.front_us_cm < 28.0 and speed > 0:
+        with self.lock:
+            f_dist = self.telemetry.front_us_cm
+            r_dist = self.telemetry.rear_us_cm
+            l_dist = self.telemetry.left_us_cm
+            r_dist_val = self.telemetry.right_us_cm
+
+        # Safety override 1: Front ultrasonic obstacle emergency cutoff (< 24cm)
+        if f_dist < 24.0 and speed > 0:
             speed = 0
 
-        # Safety override if rear ultrasonic obstacle detected (< 28cm)
-        if self.telemetry.rear_us_cm < 28.0 and speed < 0:
+        # Safety override 2: Rear ultrasonic obstacle emergency cutoff (< 24cm)
+        if r_dist < 24.0 and speed < 0:
             speed = 0
+
+        # Safety override 3: In-place spin & aggressive rotation obstacle cutoff
+        if (speed == 0 and abs(steer) > 30) or abs(steer) > 110:
+            if f_dist < 22.0 or r_dist < 22.0 or l_dist < 20.0 or r_dist_val < 20.0:
+                speed = 0
+                steer = 0
 
         with self.lock:
             self.last_cmd_speed = speed
@@ -527,7 +557,7 @@ class MotorController:
             # 2. APPROACH MODE ("Come here" Safe Intercept)
             elif mode == NavMode.APPROACH:
                 err_x = center_x
-                steer = int(self.kp_steer * err_x)
+                steer = int(np.clip(self.kp_steer * err_x, -120, 120))
                 front_dist = self.telemetry.front_us_cm
 
                 # Safe braking condition: ultrasonic distance <= 90cm or face ratio >= 0.42 or 12s timeout
@@ -542,7 +572,14 @@ class MotorController:
                         except Exception as cb_err:
                             print(f"[Motors] Target reached callback error: {cb_err}")
                 else:
-                    self.drive(110, steer)
+                    # Progressive approach: zoom on open distance, smoothly decelerate when nearing human
+                    if front_dist > 180.0:
+                        approach_speed = 120
+                    elif front_dist > 120.0:
+                        approach_speed = 95
+                    else:
+                        approach_speed = 68
+                    self.drive(approach_speed, steer)
 
             # 3. STANDBY MODE (Motors strictly 0)
             elif mode == NavMode.STANDBY:
@@ -558,34 +595,81 @@ class MotorController:
                 self.stop()
 
 
-        # 4. AUTONOMOUS ROAM / WANDER MODE (Ultrasonic obstacle avoidance)
+        # 4. AUTONOMOUS ROAM / WANDER MODE (Tesla-Level Adaptive Navigation)
         if mode == NavMode.ROAM:
-
             f_dist = self.telemetry.front_us_cm
             l_dist = self.telemetry.left_us_cm
             r_dist = self.telemetry.right_us_cm
+            rear_dist = self.telemetry.rear_us_cm
 
-            if f_dist > 65.0:
-                self.drive(90, 0)
-            elif f_dist > 35.0:
-                steer_val = -100 if l_dist > r_dist else 100
-                self.drive(70, steer_val)
+            # Case A: Critical Emergency Proximity (< 24cm front)
+            if f_dist < 24.0:
+                if rear_dist > 30.0:
+                    escape_steer = 110 if l_dist >= r_dist else -110
+                    self.drive(-80, escape_steer)
+                else:
+                    self.drive(0, 0)
+
+            # Case B: Narrow Corridor / Tight Hallway (Both sides restricted < 55cm)
+            elif l_dist < 55.0 and r_dist < 55.0:
+                # Autopilot Lane-Centering: crawl safely between tight obstacles/tables
+                center_offset = (r_dist - l_dist)
+                corridor_steer = int(np.clip(center_offset * 2.2, -55, 55))
+                corridor_speed = 55 if f_dist > 65.0 else 40
+                self.drive(corridor_speed, corridor_steer)
+
+            # Case C: Close Turning Range (24cm <= f_dist < 60cm)
+            elif f_dist < 60.0:
+                # Decelerate smoothly and arc away towards the side with greater clearance
+                steer_bias = -105 if l_dist > r_dist else 105
+                approach_speed = int(45 + (f_dist - 24.0) / 36.0 * 25.0)
+                self.drive(approach_speed, steer_bias)
+
+            # Case D: Medium Range (60cm <= f_dist < 130cm)
+            elif f_dist < 130.0:
+                # Graceful deceleration from cruising speed down towards approach speed
+                flank_steer = 0
+                if l_dist < 40.0:
+                    flank_steer = 45   # nudge right
+                elif r_dist < 40.0:
+                    flank_steer = -45  # nudge left
+                cruise_speed = int(70 + (f_dist - 60.0) / 70.0 * 55.0)
+                self.drive(cruise_speed, flank_steer)
+
+            # Case E: Wide Open Space (f_dist >= 130cm, flanks clear)
             else:
-                self.drive(-90, 120)
+                # Open floor clearance - ZOOM cruise!
+                flank_steer = 0
+                if l_dist < 45.0:
+                    flank_steer = 35
+                elif r_dist < 45.0:
+                    flank_steer = -35
+                self.drive(135, flank_steer)
 
-        # 5. STEP BACK MODE
+        # 5. STEP BACK MODE (Active continuous rear ultrasonic safety)
         elif mode == NavMode.STEP_BACK:
+            step_dur = getattr(self, "_step_back_duration", 5.0)
             if self.telemetry.rear_us_cm < 28.0:
                 print(f"[Motors] Rear obstacle detected ({self.telemetry.rear_us_cm:.1f}cm), braking!")
                 self.stop_all()
-            elif now - self._mode_start_time < 1.5:
-                self.drive(-110, 0)
+            elif now - self._mode_start_time < step_dur:
+                self.drive(-95, 0)
             else:
                 self.stop_all()
 
-        # 6. SPIN MODE
+        # 6. SPIN MODE (Active continuous perimeter ultrasonic safety)
         elif mode == NavMode.SPIN:
-            if now - self._mode_start_time < 1.2:
+            spin_dur = getattr(self, "_spin_duration", 5.0)
+            tight = (
+                self.telemetry.front_us_cm < 22.0
+                or self.telemetry.rear_us_cm < 22.0
+                or self.telemetry.left_us_cm < 20.0
+                or self.telemetry.right_us_cm < 20.0
+            )
+            if tight:
+                print(f"[Motors] Spin halted: obstacle detected within rotation perimeter.")
+                self.stop_all()
+            elif now - self._mode_start_time < spin_dur:
                 self.drive(0, 130 * getattr(self, "_spin_dir", 1))
             else:
                 self.stop_all()
@@ -594,7 +678,7 @@ class MotorController:
 
         # Draw Live Video Feed HUD if preview is active, popup_active is set, or in active nav mode
         with self.lock:
-            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM])
+            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN])
 
         if need_display:
             disp = proc_frame.copy()
@@ -626,7 +710,7 @@ class MotorController:
         while self.running:
             should_show = False
             with self.lock:
-                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM]))
+                should_show = self.show_preview or (self.auto_popup and (self.popup_active or self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN]))
 
             if should_show and self.latest_display_frame is not None:
                 if not window_open:
@@ -707,14 +791,32 @@ class MotorController:
                             except Exception as e:
                                 print(f"[Motors] Callback error: {e}")
 
+                elif mode == NavMode.STEP_BACK:
+                    with self.lock:
+                        self.telemetry.front_us_cm = 150.0
+                        self.telemetry.left_us_cm = 120.0
+                        self.telemetry.right_us_cm = 120.0
+                        self.telemetry.rear_us_cm = 140.0
+                        self.telemetry.active_sensor_count = 0
+                        self.telemetry.sensors_all = [150.0] * 4 + [120.0] * 4 + [120.0] * 4 + [140.0] * 4
+
+                elif mode == NavMode.SPIN:
+                    with self.lock:
+                        self.telemetry.front_us_cm = 120.0
+                        self.telemetry.left_us_cm = 120.0
+                        self.telemetry.right_us_cm = 120.0
+                        self.telemetry.rear_us_cm = 120.0
+                        self.telemetry.active_sensor_count = 0
+                        self.telemetry.sensors_all = [120.0] * 16
+
                 else:
                     with self.lock:
-                        self.telemetry.front_us_cm = 999.0
-                        self.telemetry.left_us_cm = 999.0
-                        self.telemetry.right_us_cm = 999.0
-                        self.telemetry.rear_us_cm = 999.0
+                        if self.telemetry.front_us_cm <= 0: self.telemetry.front_us_cm = 999.0
+                        if self.telemetry.left_us_cm <= 0: self.telemetry.left_us_cm = 999.0
+                        if self.telemetry.right_us_cm <= 0: self.telemetry.right_us_cm = 999.0
+                        if self.telemetry.rear_us_cm <= 0: self.telemetry.rear_us_cm = 999.0
                         self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
-                        self.telemetry.sensors_all = [999.0] * 16
+                        self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [self.telemetry.left_us_cm] * 4 + [self.telemetry.right_us_cm] * 4 + [self.telemetry.rear_us_cm] * 4
 
                 time.sleep(0.05)
                 continue
@@ -792,7 +894,9 @@ if __name__ == "__main__":
     print("    [R] - Autonomous Roam / Patrol Mode (Ultrasonic Obstacle Avoidance)")
     print("    [A] - Approach Mode ('Come Here' -> Drives to you & Auto-Brakes)")
     print("    [F] - Follow Me Mode (Continuous 30 FPS Person Tracking)")
-    print("    [B] - Step Back")
+    print("    [B] - Step Back (5s)")
+    print("    [C] - Spin Clockwise (5s)")
+    print("    [X] - Spin Anticlockwise (5s)")
     print("    [S] - STOP / Lock Motors to 0")
     print("    [Q] - Exit")
     print("=" * 65)
@@ -825,8 +929,14 @@ if __name__ == "__main__":
                 print("\n>>> [COMMAND] CONTINUOUS FOLLOW-ME ENGAGED.")
                 motors.start_following()
             elif char == "b":
-                print("\n>>> [COMMAND] STEP BACK ENGAGED.")
-                motors.step_back()
+                print("\n>>> [COMMAND] STEP BACK (5s) ENGAGED.")
+                motors.step_back(duration=5.0)
+            elif char == "c":
+                print("\n>>> [COMMAND] SPIN CLOCKWISE (5s) ENGAGED.")
+                motors.spin(direction="clockwise", duration=5.0)
+            elif char == "x":
+                print("\n>>> [COMMAND] SPIN ANTICLOCKWISE (5s) ENGAGED.")
+                motors.spin(direction="anticlockwise", duration=5.0)
             elif char == "s":
                 print("\n>>> [COMMAND] EMERGENCY STOP (MOTORS LOCKED).")
                 motors.stop_all()

@@ -190,10 +190,13 @@ void loop() {
     // ping both ultrasonic sensors to see if a wall or human is ahead
     read_all_sensors();
 
-    // emergency brake: if an obstacle is within 20cm in the direction of travel, stop immediately
+    // emergency brake: if an obstacle is within 20cm in the direction of travel or rotation, stop immediately
     if (dist_front < HARD_STOP_DISTANCE_CM && current_speed > 0) {
       stop_all_motors();
     } else if (dist_rear < HARD_STOP_DISTANCE_CM && current_speed < 0) {
+      stop_all_motors();
+    } else if (abs(current_steer) > 40 && (dist_front < HARD_STOP_DISTANCE_CM || dist_rear < HARD_STOP_DISTANCE_CM || dist_left < 18 || dist_right < 18)) {
+      // rotation emergency brake: perimeter obstacle detected too close to spinning chassis
       stop_all_motors();
     } else {
       // safe to drive: send speed and steering values to the 4 h-bridges

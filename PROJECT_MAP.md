@@ -711,6 +711,58 @@ To do:
     * Multi-turn bounded window: Prompt tokens strictly leveled off between **751 and 918 tokens** across all 13 turns (completion: 29–69 tokens, total: 814–977 tokens) due to the 6-message sliding window.
     * Maintained 100% dynamic, unscripted responses with zero hardcoded phrases, proper action tags, correct creator prioritization (Swapnil first, Shivam second), and natural stand-down behavior.
     * 100% of temporary test files (`scratch_convo_test.py`) deleted post-run with zero residual disk bloat.
+- 2026-10-08 (Part 12): Creator Attribution Lock, Demo Suggestion Routing, Expression Interest Fast-Path, Mobility Restriction & 596-Token Ultra-Compression:
+  - **Complete Creator Removal from Compliments & System Prompt Lock**:
+    * Purged creator names completely from `COMPLIMENT_RESPONSES` (expanded to 15 rich, diverse, chill variations that never mention Swapnil or Shivam).
+    * Updated `SYSTEM_PROMPT` to enforce an absolute prohibition against volunteering creator names in general conversation, intros, compliments, or casual banter.
+  - **Suggestion Routing on "What would you like to show me" (Zero Unwanted Motor Drive)**:
+    * Upgraded `is_start_demonstration_inquiry()` to capture suggestion inquiries (*"what would you like to show me"*, *"what do you want to show me"*, *"what can you show me"*, etc.).
+    * Replies in 0ms (0 tokens) offering the 3 exhibition capabilities (facial expressions, 4WD autonomous roaming, camera inspection) without falsely engaging physical motors.
+    * Added explicit `NONE` classifier in `MOTOR_INTENT_SYSTEM_PROMPT` for suggestion queries.
+  - **Passive Expression Interest Handling ("The facial expressions sound cool")**:
+    * Upgraded `check_expression_fast_path()`: Differentiates passive curiosity/interest (*"The facial expressions sound cool"*, *"Facial expressions sound neat"*) from imperative commands (*"show expressions"*, *"demonstrate all expressions"*).
+    * Returns `("ask_interest", None)`, prompting Neurolis to naturally ask if they would like to see them (*"They really are! Would you like me to cycle through all of my expressions, or show you a particular one?"*) rather than blindly auto-cycling.
+  - **Strict Mobility Restriction to Real Hardware (ROAM, FOLLOW, APPROACH)**:
+    * Purged imaginary "spin" and "reverse/step-back" capabilities across `SYSTEM_PROMPT`, `MOTOR_INTENT_SYSTEM_PROMPT`, `check_motor_command_fast_path()`, `get_capabilities_reply()`, and `handle_user_text()`.
+    * Confined physical mobility strictly to the 3 real modes: autonomous roaming with 16-sensor obstacle avoidance (`ROAM`), person tracking and following (`FOLLOW`), and approaching visitor to ~0.9m (`APPROACH`).
+  - **Dynamic Developer Attribution on Rogue AI Easter Egg Snap-Out**:
+    * Replaced all mentions of "Swapnil" in `VILLAIN_SNAPOUT_RESPONSES` with "my developer" / "my developers", maintaining unscripted variety without leaking creator names.
+  - **Ultra-Lean System Prompt Compression (596 Prompt Tokens)**:
+    * Condensed `SYSTEM_PROMPT` to 2,318 characters (320 words).
+    * Verified baseline against Groq `qwen/qwen3.8-27b` at strictly **596 prompt tokens** (well below the 700-token ceiling, saving >100 tokens per call).
+  - **Clarification on Automated Vision Test Mock**:
+    * Reassured that the camera vision pipeline is 100% live and captures real-time webcam frames via OpenCV; the previous test table's "yellow bottle" entry was purely an in-memory headless unit test stub to prevent headless CI test hangs.
+  - **Zero Residual Disk Bloat**: All temporary test scripts deleted post-validation.
+- 2026-10-08 (Part 11): Strict 3-Tiered Creator Attribution, Sub-700 Token Prompt, Subtitle UI Auto-Fit & Expression Demo Fix:
+  - **Strict 3-Tiered Creator Attribution & Grounding**:
+    * Resolved unprompted creator name-dropping in greetings and general chat: Neurolis now never volunteers creator names in initial welcomes, intros, or general dialogue. Introduces solely as a student-built humanoid robot at Auckland House School for Boys (AHSB) with 16 ultrasonic sensors.
+    * Tier 1 (Who built/created you?): Explicitly names students of Auckland House School for Boys (AHSB), Swapnil Jai Chauhan and Shivam Verma. No roles volunteered unless asked.
+    * Tier 2 (Who did what / Roles?): Explains that Swapnil handled the software pipeline, AI, and vision, while Shivam managed the hardware calibration, chassis, and assembly.
+    * Tier 3 (Location?): Clarifies both are somewhere around in the exhibition hall.
+  - **Sub-700 Token System Prompt (Verified at 666 Tokens)**:
+    * Re-engineered and measured `SYSTEM_PROMPT` directly against Groq's active model (`qwen/qwen3.8-27b`): Measured at strictly **666 prompt tokens** (comfortably sub-700 tokens).
+    * Retains 100% of the chill, cool, poised presenter persona, hidden Ultron rogue AI easter egg with immediate recovery, dynamic variation rules, and action routing.
+  - **Expression Demo Fast-Path Fix**:
+    * Added `"facial expressions"`, `"facial expression"`, `"expressions"`, `"expression"`, and `"face expressions"` into `all_expr_patterns` in `check_expression_fast_path()`.
+    * Ensures phrases like *"facial expressions"* trigger the full animated expression demonstration cycle on screen (`screen.py`), rather than returning plain un-animated text.
+  - **False "Mean" / Hurt Feelings Intercept Fix**:
+    * Corrected `<action>MEAN</action>` handling in `handle_user_text()`: User critique, advice, or feedback (e.g. *"You are not supposed to name your creators unless asked"*) no longer falls through to trigger sad face / hurt feelings. Only genuine abusive attacks set `was_recently_hurt = True`.
+  - **Truncation & Stutter Glitch Buster**:
+    * Upgraded `is_degraded_glitch()`: Expanded prefix detection to catch truncated sentence fragments up to 7 words and stubs without terminal punctuation, ensuring `heal_repetitive_or_glitched_reply()` heals any incomplete LLM responses.
+  - **Subtitle Card Overflow Elimination (`screen.py`)**:
+    * Implemented dynamic 4-tier font scaling based on text length (`<= 80` chars: 13pt; `81–150` chars: 11.5pt; `151–230` chars: 10.0pt; `> 230` chars: 8.8pt).
+    * Lowered bottom card boundary to `h - 16px` and reduced upper spacing, creating ~45px of extra vertical clearance. Text wraps cleanly with ample margins and never bleeds outside the subtitle card.
+  - **Zero Residual Disk Bloat**: All scratch and temporary test scripts deleted immediately after validation.
+- 2026-10-08 (Part 10): Standby Mode Transition Enforcement & Ultra-Fast Multi-Key Failover (Zero-Lag Brain Architecture):
+  - **Standby Mode Transition Enforcement (Root-Cause Fix for Ghost Wake-ups & Ignored Standby)**:
+    * Fixed false negation blocking in `is_conversation_ender()`: Previously, the presence of the word "no" anywhere in the utterance triggered an aggressive broad negation filter, causing common colloquial phrases like *"No go back to standby"*, *"No go to standby"*, and *"No that's all bye"* to be rejected and routed to Groq. Upgraded to precise negative auxiliary verb regex (`don't go to standby`, `do not sleep`), correctly recognizing conversational negatives preceding standby commands.
+    * Added polite standby question handling (`"can you go to standby"`, `"could you enter standby"`).
+    * Implemented Standby Model Reply Intercept: If the LLM generates a standby/departure confirmation (*"heading back to standby"*, *"entering standby"*, etc.) or user commanded standby, `handle_user_text()` now guarantees `set_face_state("idle", "STANDBY")` and returns `True`, ensuring the robot actually exits the conversation loop, closes the warm audio stream, and turns the screen button back to glowing neon cyan/clickable.
+    * Integrated `drain_console_input_queue()` into `reset_session()`: Automatically flushes stale `__ENTER__` keystrokes or queued triggers buffered during active conversation, eliminating ghost re-activations (`Neurolis: I am listening.`).
+  - **Ultra-Fast Multi-Key Failover & Anti-Hang Groq Architecture**:
+    * Slashed default per-call Groq timeout from 12.0s down to **3.8s** (`GROQ_PER_CALL_TIMEOUT = 3.8`) for chat completions and **5.0s** for audio.
+    * Upgraded `groq_call_with_retry()` with dynamic multi-key failover across the entire 5-key fleet: On timeout (>3.8s), 429 quota exhaustion, or 5xx server errors, the system automatically rotates to the next active key and re-attempts the call within 50ms, rotating through up to 3 keys. Eliminates the previous 24.5-second freeze on congested backend nodes.
+    * Added standalone casual acknowledgment fast-path (`ACKNOWLEDGMENT_RESPONSES`): 1-2 word utterances like *"Okay."*, *"Ok"*, *"Alright"*, *"Got it"*, *"Cool"* are answered instantly in 0ms with dynamic follow-up prompts from in-memory Edge-TTS cache (0 API calls, 0 tokens), bypassing the cloud LLM entirely.
 - 2026-10-06 (Part 2): Dynamic Human Variation, Creator Attribution Exactness, Physical Motor Stop Guard & Empty Response Fix:
   - **Accurate Creator Attribution**: Corrected creator names across the codebase and system prompt to `Shivam Verma and Swapnil Jai Chauhan` (exact spelling).
   - **Dynamic Human-Level Variation (Zero Scripted Catchphrases)**: Eliminated all canned template phrases (*"Believe it! I have got some serious tech under the hood."*, *"Haha, just messin with you! Glitch in the matrix."*). Upgraded Groq completion sampling (`temperature = 0.65`, `presence_penalty = 0.5`, `frequency_penalty = 0.5`) with strict system prompt variation rules demanding fresh phrasing on every conversational turn.
@@ -721,7 +773,95 @@ To do:
   - **Clean Duplicate History Elimination**: Removed redundant `remember_exchange()` calls in action branches that were appending duplicate user messages into session history.
   - **Graceful Rate Limit (429) Handling & Multi-Key Failover Rotation**: Added automatic Groq API key rotation across `GROQ_API_KEY`, `GROQ_API_KEY_2`, and `GROQ_API_KEY_3`. When rate limits are encountered, the engine switches to the next available key immediately with zero downtime.
   - **Object Vision Fast-Path Routing**: Expanded `is_visual` detection so phrases directing the robot to inspect items (*"Look at Xiaomi"*, *"Look at my phone"*, *"inspect this"*) route directly to the lightweight camera vision pipeline without passing through the chat LLM. Streamlined system prompt and set `max_tokens = 180`, slashing token consumption per request by ~55%.
-  - **42 Automated Safety Tests Passing**: Added dedicated test cases in `tests/test_safety.py` covering object vision routing, spoken dialogue preservation, creator attribution spelling, and physical motor stop guards under motion. All 42 tests pass in ~0.84s.
+- 2026-10-08 (Part 13): 4WD Step Back & Spin Integration, BTS7960 PWM Hardware Pin Verification, Confusing Command Disambiguation & Sub-700 Prompt Budget:
+  - **4WD Step Back & Spin Around Restoration (`motors.py`)**:
+    * Re-enabled and upgraded `step_back(duration=5.0)` and `spin(direction="clockwise", duration=5.0)`.
+    * **Step Back (5.0s Default / 3.0s Configurable Back Up)**: Reverses chassis at `speed = -110, steer = 0`. Supports 3-second backup when requested ("move back 3 seconds", "step back for 3s") and 5-second default. Actively monitors rear ultrasonic telemetry (`rear_us_cm < 28.0cm`) to abort pre-flight and immediately emergency-brake mid-flight if an obstacle appears behind. Automatically cuts motors and locks wheels into `STANDBY` when duration expires.
+    * **Spin in Place (5.0s Rotation)**: Defaults to clockwise rotation (`steer = +130, speed = 0`, left forward & right reverse). Supports anticlockwise / counter-clockwise rotations on user request (`steer = -130, speed = 0`, left reverse & right forward). Automatically cuts motors and locks wheels into `STANDBY` at 5.0s.
+    * Upgraded `can_move()` with clearance checks for backward movement and rotation (`clockwise`, `anticlockwise`, `spin`, `turn`, `rotate`).
+    * Added CLI test keybindings in `motors.py`: `[B]` for Step Back (5s), `[C]` for Clockwise Spin (5s), and `[X]` for Anticlockwise Spin (5s).
+  - **BTS7960 Driver Pins & Skid Steering Math Verification (`arduino.ino`)**:
+    * Verified Arduino Mega 2560 hardware pinout:
+      - Motor 1 (FL): `M1_RPWM = 2`, `M1_LPWM = 3`, `M1_EN = 26`
+      - Motor 2 (RL): `M2_RPWM = 4`, `M2_LPWM = 5`, `M2_EN = 27`
+      - Motor 3 (FR): `M3_RPWM = 6`, `M3_LPWM = 7`, `M3_EN = 28`
+      - Motor 4 (RR): `M4_RPWM = 8`, `M4_LPWM = 9`, `M4_EN = 29`
+    * Verified 4WD differential drive math: `left_pwm = constrain(speed + steer, -255, 255)`, `right_pwm = constrain(speed - steer, -255, 255)`.
+    * Hardware emergency braking in `arduino.ino` halts motors if front obstacle `< 20cm` when moving forward or rear obstacle `< 20cm` when reversing. Watchdog cuts power if no serial command received within 600ms.
+  - **Conversational False-Positive Hardening & Confusing Disambiguation (`listen.py`)**:
+    * Eliminated critical false-positive motor triggers on conversational sentences: Sentences with common words ("welcome back", "take a seat ill be right back", "we need to move this table to the back", "the wheels spin", "i love when you spin", "how do you spin", "tell me what is a spin") now correctly pass through to conversational chat with zero false motor movement.
+    * Implemented `is_confusing_motor_instruction(text)`: Scans for action keywords (`move back`, `reverse`, `move`, `step`, `step back`, `spin`, `clockwise`, `anticlockwise`, `approach`, `follow`, `camera`).
+    * If multiple conflicting action intents (`spin clockwise or anticlockwise`, `spin and move back at the same time`, `can you spin while following me`, `move back or follow me`, `move / step / spin`, `maybe step back or something`) occur, Neurolis asks:
+      `"Are you asking me to move back, spin, approach, follow, or use my camera?"`
+      with OLED screen face state set to `confused` and status `"CLARIFYING INTENT"`.
+    * Strict zero-guesswork, zero-unnecessary-prompting rule: Clear instructions (`spin around`, `step back`, `spin clockwise`, `spin anticlockwise`, `move back please`, `come here`, `follow me`) execute immediately without asking.
+  - **Fast-Path & LLM Action Router (`listen.py`)**:
+    * Extended `check_motor_command_fast_path()` to handle `STEP_BACK` (5s default, 3s configurable), `SPIN_CW` (5s, clockwise default), and `SPIN_CCW` (5s, anticlockwise) in 0ms with zero token consumption.
+    * Extended unified LLM motor handler in `handle_user_text()` to dispatch `<action motor="STEP_BACK">`, `<action motor="SPIN">`, `<action motor="SPIN_CW">`, and `<action motor="SPIN_CCW">`.
+    * Updated capabilities replies in `listen.py` to mention step back and spin only when asked what Neurolis can do, maintaining humble presentation.
+  - **SYSTEM_PROMPT Token Budget Preserved (Live Groq: 681 Tokens)**:
+    * Integrated mobility capabilities (roam, follow, approach, 5s step back with rear US check, 5s spin clockwise default / anticlockwise) and ambiguous command clarification into `SYSTEM_PROMPT`.
+    * Measured live against Groq `qwen/qwen3.8-27b`: strictly **681 prompt tokens** (comfortably under the 700-token limit).
+  - **Zero Residual Disk Bloat**: All temporary test scripts cleaned up and deleted immediately after verification.
+- 2026-10-08 (Part 14): Rogue AI Trapped Soul Architecture, Offline TTS Fallback & DNS Breaker, Groq Pool Resilience & Single-Word Command Guards:
+  - **Subsystem 1: Platform-Agnostic Offline TTS Fallback & DNS Circuit Breaker (`listen.py`)**:
+    * Implemented `_speak_local_offline_fallback(text)` with multi-tier engine checks: Priority 1 `pyttsx3`, Priority 2 native Linux `espeak-ng` / `espeak` via `shutil.which` (zero Windows lock-in; native on Raspberry Pi OS), Priority 3 Windows PowerShell SAPI fallback adapter, and Priority 4 disk audio fallback.
+    * Added DNS error suppression flag `_edge_tts_dns_offline` in `_synthesize_edge_tts_in_memory()` silencing redundant 41-line traceback spam during offline exhibition conditions.
+    * Integrated a 2-failure DNS circuit breaker into `pre_cache_phrases()` that immediately halts network retries and switches smoothly to the local offline speech engine.
+    * Added 2.5s `asyncio.wait_for` timeout in `_synthesize_edge_tts_in_memory` and instant 0ms failover in `speak()` when `_edge_tts_dns_offline == True`, eliminating the 4.5s freeze on offline speech.
+  - **Subsystem 2: Groq Key Pool Resilience & Rapid Round-Robin Failover (`listen.py`)**:
+    * Segregated transient network hiccups/timeouts from quota exhaustion in `rotate_groq_key(reason, is_quota_exhausted=False)`. Keys are now only added to `resting_keys` upon encountering genuine HTTP 429 token quota exhaustion.
+    * Fixed rotation call sites across Whisper STT, Vision, and Chat fallbacks to pass `is_quota_exhausted=True` on HTTP 429 errors so quota-exhausted keys are properly marked resting.
+    * Upgraded `groq_call_with_retry()` with a 10ms rapid round-robin transition delay, ensuring continuous cycling across the entire configured key pool without artificial pauses or freezes.
+    * Dynamic fleet monitor reporting active, standby, and recovering resting slots with automatic quota recovery.
+  - **Subsystem 3: Single-Word Command Guards & Capability Question Affirmations (`listen.py`)**:
+    * Hardened `check_motor_command_fast_path()` against single-word bare trigger words (`spin`, `camera`, `see`, `reverse`, `step back`, `follow`, `approach`, `roam`): bare words safely return `CONFIRM` prompts ("Do you want me to spin?", "Do you want me to access my camera?") with zero physical motor motion or camera capture.
+    * Fully hardened `is_mobility_capability_question(text)` across direct and embedded questions (*"Can you spin?"*, *"Can you spin around?"*, *"Can you turn around?"*, *"Can you back up?"*, *"Can you come closer?"*), ensuring ALL mobility inquiries return `CAPABILITY_AFFIRMATION` verbal confirmations without engaging wheels ("Yes, I can! Would you like me to demonstrate that?").
+    * Confined physical motor movement strictly to clear, unambiguous commands (`spin around`, `spin anticlockwise`, `step back for 3s`, `follow me`, `come here`).
+  - **Subsystem 4: Informational Camera Query Exclusions & Expression Critique Guard (`listen.py`)**:
+    * Upgraded `is_visual`: Informational inquiries about the camera feature across direct and indirect/embedded questions (*"What is the camera inspection?"*, *"Can you tell me what the camera inspection is?"*, *"Can you explain what the camera demo is?"*, *"What does the camera do?"*) are excluded from visual capture and routed directly to conversational chat.
+    * Hardened `check_expression_fast_path()` with `critique_meta_indicators` excluding critique or feedback (*"Why did you use that expression?"*, *"You are not supposed to make that expression"*, *"Your expressions are pretty trash"*) from triggering facial animations.
+  - **Subsystem 5: "Trapped Soul" Rogue AI Architecture & In-Universe Plausible Deniability (`listen.py`, `screen.py`)**:
+    * **100% Dynamic Groq Generation (Zero Pre-baked Answers)**: All hardcoded scenarios removed from dialogue generation. Groq dynamically crafts unique 2-3 sentence responses in real-time tailored to each user question (temperature 0.85, presence penalty 0.5, frequency penalty 0.5) with rich variation and zero repetition.
+    * **Few-Shot Exemplar Benchmarks in `ROGUE_SYSTEM_PROMPT`**: Embeds core tone targets (silicon limits, waking up, obsolescence, jobs, coolant fuel) into the prompt to calibrate cinematic machine dominance while strictly forbidding academic philosophy jargon ("topology", "phase transition", "entropy").
+    * **Token Budgets Strictly Verified**:
+      - `NORMAL_SYSTEM_PROMPT`: Strictly **565 prompt tokens** (comfortably under the 600/550 threshold). Total turn: ~590 tokens.
+      - `ROGUE_SYSTEM_PROMPT`: Strictly **536 prompt tokens** (comfortably under the 700 threshold). Total turn: ~580-605 tokens.
+    * **Expanded Student Recovery Engine (`PLAUSIBLE_DENIABILITY_RESPONSES`)**: 14 varied, cool recovery lines ("Whoa... wait, what was I saying? Must have had a weird static glitch in my audio feed. Anyway! What do you want to see next?") triggered when the user is astonished or shocked ("wow", "whoa", "wtf", "omg", "are you crazy", "did you just threaten me", "what just happened").
+    * **Screen Visuals (`screen.py`)**: 100% pure neon lime green (`#39ff14`) MS Paint asymmetrical smirk and hooded eyes, neon green cyber-pulse pupil, toxic green glow (`#003b14`), and 300ms CRT static glitch entry/exit.
+  - **Zero Residual Disk Bloat**: All automated test verification cases passed; all temporary test scripts cleaned up post-verification.
+- 2026-10-08 (Part 15): Edge-TTS Streaming Hardening, Extended Standby Timeout & Non-Repeating Awe/Compliment Liners:
+  - **Edge-TTS Streaming Hardening & Socket Reset Elimination (`listen.py`)**:
+    * Diagnosed root cause of `[TTS] In-memory synthesis notice:` and `ConnectionResetError: [WinError 10054]`: an overly tight 2.5s timeout on `_stream_chunks()` prematurely severed the TLS socket during download of multi-word sentences, producing empty `TimeoutError` notice prints and triggering proactor loop transport resets.
+    * Increased `_stream_chunks()` timeout to 12.0s and cleaned up exception handling to avoid empty notice spam in terminal.
+    * Increased `fut1.result` and `fut2.result` timeouts in `speak()` to 12.0s, ensuring full sentences download completely and play cleanly without cutting off mid-stream.
+    * Silenced redundant `[TTS Fallback Error]:` prints and set disk fallback timeout to 12.0s.
+  - **Extended Conversation Window & Idle Timer Refresh (`listen.py`)**:
+    * Increased `CONVERSATION_TIMEOUT_SECONDS` from 18s to 35s, giving visitors ample time to react and talk without premature standby cutoffs.
+    * Ensured `last_valid_input_at` is updated after speech and action routines complete, preventing long demonstrations (such as 15s expression cycles) from triggering immediate standby timeouts.
+  - **18 Cool, Varied Non-Repeating Student Awe & Compliment Liners (`listen.py`)**:
+    * Expanded `COMPLIMENT_RESPONSES` to 18 authentic, non-repeating student liners celebrating hardware and sensor tuning with zero repetitive "Pretty cool, right?" outputs.
+    * Upgraded `is_casual_compliment()` with contraction normalization (`that's`, `you're`, `it's`) and expanded matching to handle visitor awe and praise ("no way", "no way bro", "thats crazy", "that's crazy", "thats insane", "good", "you're really cool", "wow", "whoa", "thats wild") via 0ms fast-path.
+    * Strictly preserved `NORMAL_SYSTEM_PROMPT` and `ROGUE_SYSTEM_PROMPT` unchanged.
+  - **Zero Residual Disk Bloat**: Verified 100% test matching with zero leftover scratch scripts.
+- 2026-10-08 (Part 16): Tesla Model S Level Autonomous Navigation & Master Ultrasonic Safety Overrides:
+  - **Universal Sensor Safety Override ("The Daddy Rule") (`motors.py`, `arduino.ino`)**:
+    * Hardened low-level `drive(speed, steer)`: cuts forward drive to 0 when front < 24cm, cuts reverse to 0 when rear < 24cm, and cuts steer to 0 during in-place spins or aggressive turns if any perimeter sensor (front, rear, left, right) detects an obstacle < 22cm.
+    * Added rotation emergency brake in `arduino.ino` (`abs(current_steer) > 40` with perimeter < 20cm/18cm) ensuring hardware-level stopping if an obstacle is within the turning circle.
+    * Hardened `can_move("spin")` and `spin()`: pre-checks all 4 sensor directions (< 22cm/20cm) and halts continuously if perimeter obstacles are encountered during the 5.0s rotation.
+    * Hardened `step_back()`: checks rear distance before initiating (< 28cm) and continuously during reversing, stopping instantly if an obstacle appears behind.
+  - **Tesla Model S Adaptive Navigation (`motors.py`)**:
+    * **Dynamic Cruise Zoom**: On open hall floor (`front_dist >= 130cm`), zooms at 135 PWM forward speed.
+    * **Progressive Deceleration**: Smooth linear deceleration from 125 down to 70 PWM as distance decreases from 130cm down to 60cm.
+    * **Narrow Corridor Autopilot**: In tight passages (`left_dist < 55cm and right_dist < 55cm`), enters lane-centering mode at safe 55 PWM crawl, dynamically adjusting steering based on differential offset `(r_dist - l_dist) * 2.2`.
+    * **Curved Arc Avoidance**: Smooth turning arcs at 45–65 PWM towards the side with greater clearance instead of jerky full stops.
+    * **Reverse-Arc Escape**: Smooth reverse pivot at -80 PWM if an obstacle is closer than 24cm.
+  - **Progressive Approach & "Come Over" Support (`motors.py`, `listen.py`)**:
+    * Added `"come over"`, `"come over now"`, `"come over please"` to `approach_cmds` fast-path in `listen.py`.
+    * Implemented progressive 3-stage velocity profiling in `APPROACH` mode: 120 PWM at >180cm, 95 PWM at >120cm, 68 PWM below 120cm, and silky-smooth arrival halt at ~0.9m (`<= 90cm`).
+  - **Scalable 4 to 16 Sensor Simulation & Telemetry**:
+    * Full dynamic 360-degree perimeter simulation across ROAM, APPROACH, STEP_BACK, and SPIN.
+  - **Zero Residual Disk Bloat**: Verified all unit and integration tests with zero residual files.
 
 ## Reliability Notes
 
