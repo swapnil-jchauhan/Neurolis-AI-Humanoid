@@ -40,12 +40,12 @@ class ArduinoBridge:
         self.lock = threading.Lock()
         self.running = True
 
-        # Telemetry state
+        # Telemetry state (16 sensors standardized across Project Neurolis)
         self.dist_front = 999.0
         self.dist_left = 999.0
         self.dist_right = 999.0
         self.dist_rear = 999.0
-        self.active_sensor_count = 0
+        self.active_sensor_count = 16
         self.sensors_all: List[float] = [999.0] * 16
 
         # Motion state
@@ -126,8 +126,12 @@ class ArduinoBridge:
             self.port = port_name
             self.is_connected = True
             self.is_simulated = False
-            self.add_log(f"Connected to Arduino Mega on {port_name} @ 115200 baud.")
-            print(f"[ManualControl] Connected to physical Arduino on {port_name}")
+            try:
+                self.ser.write(b"CONFIG_SENSORS,16\n")
+            except Exception:
+                pass
+            self.add_log(f"Connected to Arduino Mega on {port_name} @ 115200 baud (16 Sensors Active).")
+            print(f"[ManualControl] Connected to physical Arduino on {port_name} (16 Sensors Configured)")
         except Exception as e:
             self.enter_simulation(f"Failed to open {port_name}: {e}")
 
@@ -141,9 +145,9 @@ class ArduinoBridge:
             self.dist_left = 90.0
             self.dist_right = 85.0
             self.dist_rear = 150.0
-            self.active_sensor_count = 0
-            self.sensors_all = [120.0] * 4 + [90.0] * 4 + [85.0] * 4 + [150.0] * 4
-        msg = f"Virtual Simulation Mode active. {reason}"
+            self.active_sensor_count = 16
+            self.sensors_all = [120.0, 90.0, 85.0, 150.0] * 4
+        msg = f"Virtual Simulation Mode active (16 Virtual Sensors). {reason}"
         self.add_log(msg)
         print(f"[ManualControl] {msg}")
 
@@ -177,6 +181,58 @@ class ArduinoBridge:
             self.last_cmd_time = time.time()
         self.send_raw("STOP\n")
 
+    def run_action(self, action_name: str, duration_sec: float = 5.0):
+        """Runs a preset motion sequence matching motors.py protocols."""
+        action_name = str(action_name).lower().strip()
+
+        def _exec():
+            if action_name == "spin_cw":
+                self.add_log(f"ACTION: Clockwise In-Place Spin @ Steer +130 for {duration_sec}s")
+                self.drive(0, 130)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("ACTION COMPLETE: Clockwise Spin halted.")
+            elif action_name == "spin_ccw":
+                self.add_log(f"ACTION: Anticlockwise In-Place Spin @ Steer -130 for {duration_sec}s")
+                self.drive(0, -130)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("ACTION COMPLETE: Anticlockwise Spin halted.")
+            elif action_name == "step_back":
+                self.add_log(f"ACTION: Step Back @ Speed -95 for {duration_sec}s")
+                self.drive(-95, 0)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("ACTION COMPLETE: Step Back halted.")
+            elif action_name == "cruise":
+                self.add_log(f"ACTION: Tesla Zoom Cruise @ Speed 135 for {duration_sec}s")
+                self.drive(135, 0)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("ACTION COMPLETE: Cruise halted.")
+            elif action_name == "corridor":
+                self.add_log(f"ACTION: Corridor Centering Crawl @ Speed 55 for {duration_sec}s")
+                self.drive(55, 0)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("ACTION COMPLETE: Corridor crawl halted.")
+            elif action_name == "test_all_fwd":
+                self.add_log(f"BENCH: Pulsing All 4 Wheels FORWARD @ PWM 120 for {duration_sec}s")
+                self.drive(120, 0)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("BENCH COMPLETE: All wheels stopped.")
+            elif action_name == "test_all_rev":
+                self.add_log(f"BENCH: Pulsing All 4 Wheels REVERSE @ PWM -120 for {duration_sec}s")
+                self.drive(-120, 0)
+                time.sleep(duration_sec)
+                self.stop()
+                self.add_log("BENCH COMPLETE: All wheels stopped.")
+            else:
+                self.stop()
+
+        threading.Thread(target=_exec, daemon=True).start()
+
     def test_motor(self, motor_num: int, pwm: int, duration_sec: float = 1.0):
         """Pulses a single motor (1..4) to verify physical wiring and rotation direction."""
         motor_num = max(1, min(4, int(motor_num)))
@@ -195,6 +251,11 @@ class ArduinoBridge:
         """Configures active sensors on Arduino (4, 8, 12, 16, or 'AUTO')."""
         self.add_log(f"CONFIG_SENSORS -> {count}")
         self.send_raw(f"CONFIG_SENSORS,{count}\n")
+        with self.lock:
+            if str(count).isdigit():
+                self.active_sensor_count = int(count)
+            elif str(count).upper() == "AUTO":
+                self.active_sensor_count = 16
 
     def send_raw(self, line: str):
         if not line.endswith("\n"):
@@ -216,13 +277,15 @@ class ArduinoBridge:
                 with self.lock:
                     if val.isdigit():
                         self.active_sensor_count = int(val)
+                    elif val.upper() == "AUTO":
+                        self.active_sensor_count = 16
 
     def _rx_loop(self):
         sim_wander = 120.0
         sim_dir = -1.0
         while self.running:
             if self.is_simulated:
-                # Virtual physics telemetry
+                # Virtual physics telemetry (16 sensors simulated)
                 with self.lock:
                     spd = self.current_speed
                 if spd > 0:
@@ -239,6 +302,8 @@ class ArduinoBridge:
                     self.dist_left = 75.0
                     self.dist_right = 80.0
                     self.dist_rear = 150.0
+                    self.active_sensor_count = 16
+                    self.sensors_all = [round(sim_wander, 1), 75.0, 80.0, 150.0] * 4
 
                 time.sleep(0.06)
                 continue
@@ -256,7 +321,8 @@ class ArduinoBridge:
                                 self.dist_rear = float(parts[4])
                                 if len(parts) > 5:
                                     try:
-                                        self.active_sensor_count = int(parts[5])
+                                        cnt = int(parts[5])
+                                        self.active_sensor_count = cnt if cnt > 0 else 16
                                         if len(parts) > 6:
                                             self.sensors_all = [float(p) for p in parts[6:]]
                                     except Exception:
@@ -694,13 +760,25 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       <div class="kbd-hint">
         Use keyboard <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or <kbd>Arrow Keys</kbd> to drive. Press <kbd>Space</kbd> to instant stop.
       </div>
+
+      <!-- Autonomous Preset Movement Sequences (Part 19 Protocols) -->
+      <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-size: 0.75rem; color: var(--cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Autonomous Preset Sequences</span>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;">
+          <button style="background: #0f2b3e; border-color: var(--cyan); color: #a5f3fc; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('spin_cw', 5.0)">⟳ Spin CW (5s)</button>
+          <button style="background: #0f2b3e; border-color: var(--cyan); color: #a5f3fc; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('spin_ccw', 5.0)">⟲ Spin CCW (5s)</button>
+          <button style="background: #2e1065; border-color: #a855f7; color: #f3e8ff; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('step_back', 5.0)">▼ Step Back (5s)</button>
+          <button style="background: #064e3b; border-color: var(--emerald); color: #d1fae5; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('cruise', 3.0)">⚡ Cruise Zoom (3s)</button>
+          <button style="background: #1e1b4b; border-color: #6366f1; color: #e0e7ff; font-size: 0.72rem; padding: 7px 4px; grid-column: span 2;" onclick="runAction('corridor', 3.0)">↔ Corridor Centering (3s)</button>
+        </div>
+      </div>
     </div>
 
     <!-- Card 2: 16-Sensor Ultrasonic Radar & Chassis Status -->
     <div class="card">
       <div class="card-header">
         <h2>Ultrasonic Radar & Safety Telemetry</h2>
-        <span id="activeSensorsBadge" style="font-size:0.75rem; color:var(--emerald);">4 Sensors Active</span>
+        <span id="activeSensorsBadge" style="font-size:0.75rem; color:var(--emerald); font-weight:bold;">16 Sensors Active</span>
       </div>
 
       <div class="radar-view">
@@ -723,7 +801,18 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+      <!-- 16-Sensor Live Bank Matrix Readout -->
+      <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.75rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">16-Sensor Bank Matrix</span>
+          <span style="font-size:0.68rem; color:var(--text-muted);">4 Banks &times; 4 Sides</span>
+        </div>
+        <div id="sensorMatrix" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 0.68rem;">
+          <!-- Populated dynamically via JS telemetry -->
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
         <span style="font-size:0.8rem; color:var(--text-muted);">Switch Sensor Bank:</span>
         <div style="display:flex; gap:6px;">
           <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('0')">0</button>
@@ -791,6 +880,15 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           <b id="durationDisplay">1.0s</b>
         </div>
         <input type="range" id="durationSlider" min="0.3" max="3.0" step="0.1" value="1.0" oninput="testDuration = parseFloat(this.value); document.getElementById('durationDisplay').innerText = this.value + 's';">
+      </div>
+
+      <!-- Whole Chassis 4WD Bench Pulse -->
+      <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size:0.75rem; color:var(--cyan); font-weight:700; text-transform:uppercase;">Whole Chassis Bench Test</span>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <button style="background: #064e3b; border-color: var(--emerald); color: #a7f3d0; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('test_all_fwd', testDuration)">All Wheels FWD (+)</button>
+          <button style="background: #4c1d95; border-color: #a855f7; color: #ddd6fe; font-size: 0.72rem; padding: 7px 4px;" onclick="runAction('test_all_rev', testDuration)">All Wheels REV (-)</button>
+        </div>
       </div>
     </div>
 
@@ -866,6 +964,10 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
 
   function setSensorCount(cnt) {
     apiPost('/api/config_sensors', { count: cnt });
+  }
+
+  function runAction(actionName, durationSec) {
+    apiPost('/api/action', { action: actionName, duration: durationSec || 5.0 });
   }
 
   function sendRawCommand() {
@@ -969,14 +1071,43 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       // Speeds
       document.getElementById('speedSteerBadge').innerText = `SPD: ${data.speed:+4d} | STR: ${data.steer:+4d}`;
 
-      // Ultrasonic Radar
+      // Ultrasonic Radar Minimums
       updateTag('tagFront', 'FRONT', data.dist_front);
       updateTag('tagRear', 'REAR', data.dist_rear);
       updateTag('tagLeft', 'LEFT', data.dist_left);
       updateTag('tagRight', 'RIGHT', data.dist_right);
 
-      const cnt = data.active_sensor_count || 0;
-      document.getElementById('activeSensorsBadge').innerText = `${cnt > 0 ? cnt : 'Simulation'} Sensors Active`;
+      const cnt = data.active_sensor_count || 16;
+      document.getElementById('activeSensorsBadge').innerText = `${cnt} Sensors Active`;
+
+      // 16-Sensor Bank Matrix rendering
+      const matrixEl = document.getElementById('sensorMatrix');
+      if (matrixEl && data.sensors_all && data.sensors_all.length >= 16) {
+        const SENSOR_NAMES = [
+          "F1", "L1", "R1", "B1",
+          "F2", "L2", "R2", "B2",
+          "F3", "L3", "R3", "B3",
+          "F4", "L4", "R4", "B4"
+        ];
+        let html = '';
+        for (let i = 0; i < 16; i++) {
+          const val = parseFloat(data.sensors_all[i]);
+          let badgeColor = 'var(--emerald)';
+          let bg = 'rgba(0,255,136,0.08)';
+          if (val < 20.0) {
+            badgeColor = 'var(--ruby)';
+            bg = 'rgba(239,68,68,0.2)';
+          } else if (val < 50.0) {
+            badgeColor = 'var(--amber)';
+            bg = 'rgba(245,158,11,0.15)';
+          }
+          html += `<div style="background:${bg}; border:1px solid ${badgeColor}; border-radius:4px; padding:3px 2px; text-align:center; color:${badgeColor}; font-weight:600;">
+            <div style="font-size:0.6rem; color:var(--text-muted);">${SENSOR_NAMES[i]}</div>
+            <div>${val >= 990 ? '>200' : val.toFixed(0)}cm</div>
+          </div>`;
+        }
+        matrixEl.innerHTML = html;
+      }
 
       // Logs
       const term = document.getElementById('terminalLog');
@@ -1083,6 +1214,12 @@ class ManualControlRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/disconnect":
             bridge.disconnect()
             self._send_json({"ok": True})
+
+        elif self.path == "/api/action":
+            action = payload.get("action", "")
+            duration = float(payload.get("duration", 5.0))
+            bridge.run_action(action, duration)
+            self._send_json({"ok": True, "action": action, "duration": duration})
 
         elif self.path == "/api/raw":
             cmd = payload.get("cmd", "")

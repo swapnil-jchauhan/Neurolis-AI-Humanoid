@@ -522,10 +522,13 @@ class FaceUI:
         self.eye_spacing = int(260 * self.ui_scale)
         self.corner_radius = int(42 * self.ui_scale)
 
-        # Touchscreen 'TALK TO NEUROLIS' Button attributes & callback
+        # Touchscreen 'TALK TO NEUROLIS' & 'STAND-BY' Button attributes & callbacks
         self.on_talk_click = None
+        self.on_standby_click = None
         self.talk_btn_bbox = None
+        self.standby_btn_bbox = None
         self._last_talk_press_time = 0.0
+        self._last_standby_press_time = 0.0
 
         # Optical Human Latch tracking attributes
         self.target_latched = False
@@ -575,19 +578,56 @@ class FaceUI:
             self.skip_boot()
             return
 
-        # 2. Check touch tap on TALK TO NEUROLIS button
-        if self.talk_btn_bbox is not None:
+        with self.lock:
+            is_standby = (self.state == ExpressionState.IDLE)
+            is_roam = ("ROAM" in (self.status_text or "").upper())
+
+        # If roaming, any touchscreen interaction immediately halts roaming (<5ms)
+        if is_roam:
+            # Check if STAND-BY button was clicked to hold position
+            if self.standby_btn_bbox is not None:
+                sbx1, sby1, sbx2, sby2 = self.standby_btn_bbox
+                if sbx1 <= event.x <= sbx2 and sby1 <= event.y <= sby2:
+                    self._last_standby_press_time = time.time()
+                    if self.on_standby_click is not None:
+                        try:
+                            self.on_standby_click()
+                        except Exception as e:
+                            print(f"[Screen] Standby button callback error: {e}")
+                    return
+
+            # Any other touch interaction (clicking TALK or tapping screen) resumes active conversation
+            self._last_talk_press_time = time.time()
+            if self.on_talk_click is not None:
+                try:
+                    self.on_talk_click()
+                except Exception as e:
+                    print(f"[Screen] Talk button callback error: {e}")
+            return
+
+        # 2. Check touch tap on TALK TO NEUROLIS button (Clickable ONLY when in STANDBY)
+        if self.talk_btn_bbox is not None and is_standby:
             bx1, by1, bx2, by2 = self.talk_btn_bbox
             if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
-                with self.lock:
-                    is_standby = (self.state == ExpressionState.IDLE)
-                if is_standby:
-                    self._last_talk_press_time = time.time()
-                    if self.on_talk_click is not None:
-                        try:
-                            self.on_talk_click()
-                        except Exception as e:
-                            print(f"[Screen] Talk button callback error: {e}")
+                self._last_talk_press_time = time.time()
+                if self.on_talk_click is not None:
+                    try:
+                        self.on_talk_click()
+                    except Exception as e:
+                        print(f"[Screen] Talk button callback error: {e}")
+                return
+
+        # 3. Check touch tap on STAND-BY button (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
+        if self.standby_btn_bbox is not None and not is_standby:
+            sbx1, sby1, sbx2, sby2 = self.standby_btn_bbox
+            if sbx1 <= event.x <= sbx2 and sby1 <= event.y <= sby2:
+                self._last_standby_press_time = time.time()
+                if self.on_standby_click is not None:
+                    try:
+                        self.on_standby_click()
+                    except Exception as e:
+                        print(f"[Screen] Standby button callback error: {e}")
+                return
 
     # starts the background thread that tests each hardware component one after another
     def _start_diagnostic_thread(self):
@@ -785,6 +825,9 @@ class FaceUI:
                 self.root.after(0, self._destroy_tk)
             except Exception:
                 pass
+
+    def close(self):
+        self.stop()
 
     # destroys the tkinter root window without throwing thread errors
     def _destroy_tk(self):
@@ -1843,39 +1886,66 @@ class FaceUI:
         dot_r = int(5 * (h / 600.0))
         self.canvas.create_oval(32, 22 - dot_r, 32 + dot_r * 2, 22 + dot_r, fill=dot_color, outline="")
 
-    # prominent touch-enabled 'TALK TO NEUROLIS' button
+    # prominent touch-enabled 'TALK TO NEUROLIS' and 'STAND-BY' buttons
     def _draw_talk_button(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
         """
-        Renders the touchable 'TALK TO NEUROLIS' button.
-        In IDLE/STANDBY: Glowing Neon Blue, clickable.
-        In ACTIVE (speaking/listening/thinking/etc): Matte Muted Dark Grey, unclickable.
+        Renders the touchable 'TALK TO NEUROLIS' and 'STAND-BY' buttons side-by-side,
+        keeping the combined button area perfectly centered.
+        In IDLE/STANDBY:
+          - TALK TO NEUROLIS: Vibrant glowing Neon Cyan with active green indicator, clickable.
+          - STAND-BY: Muted dark grey with inactive dot, greyed out and unclickable.
+        In ACTIVE (speaking/listening/thinking/watching/roaming):
+          - TALK TO NEUROLIS: Muted dark grey with inactive dot, greyed out and unclickable.
+          - STAND-BY: Vibrant glowing Neon Cyan with active green indicator, clickable kill switch.
         Returns the height of the button.
         """
-        btn_w = int(480 * (w / 1024.0))  # ~900 px on 1080p
-        btn_h = int(48 * (h / 600.0))    # ~86 px on 1080p
-        bx1 = cx - btn_w / 2.0
-        bx2 = cx + btn_w / 2.0
+        scale_x = w / 1024.0
+        scale_y = h / 600.0
+
+        btn_h = int(48 * scale_y)
+        radius = int(24 * scale_y)
+        gap = int(14 * scale_x)
+
+        talk_w = int(340 * scale_x)
+        standby_w = int(160 * scale_x)
+        total_w = talk_w + gap + standby_w
+
+        # Perfectly center the combined dual-button bar on cx
+        bx1 = cx - total_w / 2.0
+        bx2 = bx1 + talk_w
+        sbx1 = bx2 + gap
+        sbx2 = sbx1 + standby_w
+
         by1 = btn_y
         by2 = btn_y + btn_h
-        radius = int(24 * (h / 600.0))
 
-        # Store bounding box for touchscreen tap & mouse click handling
+        # Store bounding boxes for touchscreen tap & mouse click handling
         self.talk_btn_bbox = (bx1, by1, bx2, by2)
+        self.standby_btn_bbox = (sbx1, by1, sbx2, by2)
 
-        is_standby = (state == ExpressionState.IDLE)
+        is_roam = ("ROAM" in (self.status_text or "").upper())
+        talk_active = (state == ExpressionState.IDLE) or is_roam
+        standby_active = (state != ExpressionState.IDLE)
         now = time.time()
-        just_pressed = (now - self._last_talk_press_time) < 0.25
+        talk_pressed = (now - self._last_talk_press_time) < 0.25
+        standby_pressed = (now - self._last_standby_press_time) < 0.25
 
-        if is_standby:
-            # Standby state: Vibrant Neon Cyan / Electric Blue (Clickable)
-            btn_bg = "#003254" if just_pressed else "#001b2e"
+        glow_pad = int(5 * scale_y)
+        inset = int(4 * scale_y)
+        dot_r = int(5 * scale_y)
+        dot_cy = (by1 + by2) / 2.0
+        font_size = int(13 * scale_y)
+
+        # ---------------- 1. TALK TO NEUROLIS BUTTON ----------------
+        if talk_active:
+            # Standby / Roaming state: Vibrant Neon Cyan / Electric Blue (Clickable)
+            btn_bg = "#003254" if talk_pressed else "#001b2e"
             btn_border = "#00f0ff"
             btn_glow = "#00384d"
-            text_col = "#ffffff" if just_pressed else "#00f0ff"
-            dot_col = "#00ffaa"
+            talk_text_col = "#ffffff" if talk_pressed else "#00f0ff"
+            talk_dot_col = "#00ffaa"
 
             # Ambient glow behind button
-            glow_pad = int(5 * (h / 600.0))
             self._create_rounded_rect(
                 bx1 - glow_pad, by1 - glow_pad,
                 bx2 + glow_pad, by2 + glow_pad,
@@ -1887,40 +1957,90 @@ class FaceUI:
                 radius=radius, fill=btn_bg, outline=btn_border, width=3
             )
             # Inner high-tech specular bevel
-            inset = int(4 * (h / 600.0))
             self._create_rounded_rect(
                 bx1 + inset, by1 + inset, bx2 - inset, by2 - inset,
                 radius=max(4, radius - inset), fill="", outline="#004d73", width=1
             )
         else:
-            # Active state: Muted Charcoal / Dark Grey (Unclickable)
-            btn_bg = "#0c1219"
-            btn_border = "#222f3e"
-            text_col = "#475e7a"
-            dot_col = "#2a3b4c"
+            # Active state: Muted Charcoal / Dark Grey (Greyed out & unclickable)
+            talk_bg = "#0c1219"
+            talk_border = "#222f3e"
+            talk_text_col = "#475e7a"
+            talk_dot_col = "#2a3b4c"
 
-            # Main muted button pill
             self._create_rounded_rect(
                 bx1, by1, bx2, by2,
-                radius=radius, fill=btn_bg, outline=btn_border, width=2
+                radius=radius, fill=talk_bg, outline=talk_border, width=2
             )
 
-        # Pulsing / status dot on left
-        dot_r = int(5 * (h / 600.0))
-        dot_x = bx1 + int(46 * (w / 1024.0))
-        dot_cy = (by1 + by2) / 2.0
+        # Talk button indicator dot
+        talk_dot_x = bx1 + int(32 * scale_x)
         self.canvas.create_oval(
-            dot_x - dot_r, dot_cy - dot_r,
-            dot_x + dot_r, dot_cy + dot_r,
-            fill=dot_col, outline=""
+            talk_dot_x - dot_r, dot_cy - dot_r,
+            talk_dot_x + dot_r, dot_cy + dot_r,
+            fill=talk_dot_col, outline=""
         )
 
-        # Smooth, prominent button typography
-        font_size = int(14 * (h / 600.0))
+        # Talk button typography
+        talk_text_x = (bx1 + bx2) / 2.0 + int(10 * scale_x)
         self.canvas.create_text(
-            cx, dot_cy,
+            talk_text_x, dot_cy,
             text="TALK TO NEUROLIS",
-            fill=text_col,
+            fill=talk_text_col,
+            font=(FONT_FAMILY, font_size, "bold")
+        )
+
+        # ---------------- 2. STAND-BY BUTTON ----------------
+        if standby_active:
+            # Active state: Vibrant Neon Cyan / Electric Blue (Clickable kill switch)
+            btn_bg = "#003254" if standby_pressed else "#001b2e"
+            btn_border = "#00f0ff"
+            btn_glow = "#00384d"
+            standby_text_col = "#ffffff" if standby_pressed else "#00f0ff"
+            standby_dot_col = "#00ffaa"
+
+            # Ambient glow behind button
+            self._create_rounded_rect(
+                sbx1 - glow_pad, by1 - glow_pad,
+                sbx2 + glow_pad, by2 + glow_pad,
+                radius=radius + glow_pad, fill=btn_glow, outline=""
+            )
+            # Main button pill
+            self._create_rounded_rect(
+                sbx1, by1, sbx2, by2,
+                radius=radius, fill=btn_bg, outline=btn_border, width=3
+            )
+            # Inner high-tech specular bevel
+            self._create_rounded_rect(
+                sbx1 + inset, by1 + inset, sbx2 - inset, by2 - inset,
+                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
+            )
+        else:
+            # Standby state: Muted Charcoal / Dark Grey (Greyed out & unclickable)
+            standby_bg = "#0c1219"
+            standby_border = "#222f3e"
+            standby_text_col = "#475e7a"
+            standby_dot_col = "#2a3b4c"
+
+            self._create_rounded_rect(
+                sbx1, by1, sbx2, by2,
+                radius=radius, fill=standby_bg, outline=standby_border, width=2
+            )
+
+        # Standby button indicator dot
+        standby_dot_x = sbx1 + int(24 * scale_x)
+        self.canvas.create_oval(
+            standby_dot_x - dot_r, dot_cy - dot_r,
+            standby_dot_x + dot_r, dot_cy + dot_r,
+            fill=standby_dot_col, outline=""
+        )
+
+        # Standby button typography (strictly no emojis)
+        standby_text_x = (sbx1 + sbx2) / 2.0 + int(8 * scale_x)
+        self.canvas.create_text(
+            standby_text_x, dot_cy,
+            text="STAND-BY",
+            fill=standby_text_col,
             font=(FONT_FAMILY, font_size, "bold")
         )
 

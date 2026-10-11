@@ -69,7 +69,7 @@ class TelemetryData:
     left_us_cm: float = 999.0
     right_us_cm: float = 999.0
     rear_us_cm: float = 999.0
-    active_sensor_count: int = 0
+    active_sensor_count: int = 16
     sensors_all: Optional[list] = None
     battery_mv: int = 12000
 
@@ -191,7 +191,11 @@ class MotorController:
                 self.ser = serial.Serial(port, 115200, timeout=0.1)
                 time.sleep(1.5)
                 self.is_simulated = False
-                print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud.")
+                try:
+                    self.ser.write(b"CONFIG_SENSORS,16\n")
+                except Exception:
+                    pass
+                print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud (16 Sensors Active).")
             except Exception as e:
                 self._enter_sim(f"Serial connection failed: {e}")
         else:
@@ -229,10 +233,12 @@ class MotorController:
     @property
     def is_following(self) -> bool:
         with self.lock:
-            return self.nav_mode in [
-                NavMode.FOLLOW,
-                NavMode.APPROACH,
-            ]
+            return self.nav_mode == NavMode.FOLLOW
+
+    @property
+    def is_approaching(self) -> bool:
+        with self.lock:
+            return self.nav_mode == NavMode.APPROACH
 
     @property
     def is_roaming(self) -> bool:
@@ -472,6 +478,75 @@ class MotorController:
                 self._process_frame(sim_frame)
                 time.sleep(0.04)
 
+    # parses connected ultrasonic sensors (scalable 4 to 16) into an 8-sector radial perception map
+    def get_radial_sectors(self) -> dict:
+        """
+        Parses all connected ultrasonic sensors (scalable from 4 to 16) into
+        an 8-sector radial perception map:
+          - front_center: 0 deg (cruising velocity control)
+          - front_left: 45 deg (corner avoidance)
+          - front_right: 315 deg (corner avoidance)
+          - flank_left: 90 deg (corridor width & centering)
+          - flank_right: 270 deg (corridor width & centering)
+          - rear_left: 135 deg (turning clearance)
+          - rear_right: 225 deg (turning clearance)
+          - rear_center: 180 deg (reverse escape)
+        """
+        with self.lock:
+            s_all = self.telemetry.sensors_all
+            f_min = self.telemetry.front_us_cm
+            l_min = self.telemetry.left_us_cm
+            r_min = self.telemetry.right_us_cm
+            b_min = self.telemetry.rear_us_cm
+
+        if s_all and len(s_all) >= 16:
+            # 16-Sensor Radial Array across 4 modular banks:
+            # Bank 1: 0=F1, 1=L1, 2=R1, 3=B1
+            # Bank 2: 4=F2, 5=L2, 6=R2, 7=B2
+            # Bank 3: 8=F3, 9=L3, 10=R3, 11=B3
+            # Bank 4: 12=F4, 13=L4, 14=R4, 15=B4
+            fc = min(s_all[0], s_all[4])
+            fl = min(s_all[8], s_all[5])
+            fr = min(s_all[12], s_all[6])
+            ll = min(s_all[1], s_all[9])
+            rr = min(s_all[2], s_all[10])
+            rl = min(s_all[7], s_all[13])
+            rr_corner = min(s_all[11], s_all[14])
+            rc = min(s_all[3], s_all[15])
+        elif s_all and len(s_all) >= 8:
+            fc = min(s_all[0], s_all[4])
+            fl = min(s_all[0], s_all[5])
+            fr = min(s_all[0], s_all[6])
+            ll = s_all[1]
+            rr = s_all[2]
+            rl = min(s_all[3], s_all[5])
+            rr_corner = min(s_all[3], s_all[6])
+            rc = min(s_all[3], s_all[7])
+        else:
+            fc = f_min
+            fl = min(f_min, l_min)
+            fr = min(f_min, r_min)
+            ll = l_min
+            rr = r_min
+            rl = min(b_min, l_min)
+            rr_corner = min(b_min, r_min)
+            rc = b_min
+
+        return {
+            "front_center": fc,
+            "front_left": fl,
+            "front_right": fr,
+            "flank_left": ll,
+            "flank_right": rr,
+            "rear_left": rl,
+            "rear_right": rr_corner,
+            "rear_center": rc,
+            "front_min": min(fc, fl, fr),
+            "lateral_left": min(fl, ll),
+            "lateral_right": min(fr, rr),
+            "rear_min": min(rc, rl, rr_corner),
+        }
+
     # runs yunet deep learning face detection on the camera frame and calculates steering math
     def _process_frame(self, frame: np.ndarray):
         h, w = frame.shape[:2]
@@ -591,60 +666,83 @@ class MotorController:
                     self.target_detected = False
                     self.gaze_x = 0.0
                     self.gaze_y = 0.0
-            if mode in [NavMode.FOLLOW, NavMode.APPROACH]:
+            if mode == NavMode.APPROACH and (now - self._mode_start_time > 12.0):
+                with self.lock:
+                    self.target_reached = True
+                self.stop_all()
+                print("[Motors] Approach mode timeout (12.0s reached without face target). Safely holding position.")
+                if self.on_target_reached_callback:
+                    try:
+                        self.on_target_reached_callback()
+                    except Exception as cb_err:
+                        print(f"[Motors] Target reached callback error: {cb_err}")
+            elif mode in [NavMode.FOLLOW, NavMode.APPROACH]:
                 self.stop()
 
 
-        # 4. AUTONOMOUS ROAM / WANDER MODE (Tesla-Level Adaptive Navigation)
+        # 4. AUTONOMOUS ROAM / WANDER MODE (Tesla Bot Level Continuous Vector Navigation)
         if mode == NavMode.ROAM:
-            f_dist = self.telemetry.front_us_cm
-            l_dist = self.telemetry.left_us_cm
-            r_dist = self.telemetry.right_us_cm
-            rear_dist = self.telemetry.rear_us_cm
+            sectors = self.get_radial_sectors()
+            f_center = sectors["front_center"]
+            f_left = sectors["front_left"]
+            f_right = sectors["front_right"]
+            f_min = sectors["front_min"]
+            l_flank = sectors["flank_left"]
+            r_flank = sectors["flank_right"]
+            l_eff = sectors["lateral_left"]
+            r_eff = sectors["lateral_right"]
+            rear_clearance = sectors["rear_min"]
 
-            # Case A: Critical Emergency Proximity (< 24cm front)
-            if f_dist < 24.0:
-                if rear_dist > 30.0:
-                    escape_steer = 110 if l_dist >= r_dist else -110
+            # Zone 1: Perimeter Safety Hard Lockout (< 24cm front obstacle)
+            if f_min < 24.0:
+                if rear_clearance > 35.0:
+                    # Emergency cutoff with automatic reverse escape
+                    escape_steer = 105 if l_eff >= r_eff else -105
                     self.drive(-80, escape_steer)
                 else:
+                    # Trapped front and rear: emergency cutoff
                     self.drive(0, 0)
 
-            # Case B: Narrow Corridor / Tight Hallway (Both sides restricted < 55cm)
-            elif l_dist < 55.0 and r_dist < 55.0:
-                # Autopilot Lane-Centering: crawl safely between tight obstacles/tables
-                center_offset = (r_dist - l_dist)
-                corridor_steer = int(np.clip(center_offset * 2.2, -55, 55))
-                corridor_speed = 55 if f_dist > 65.0 else 40
+            # Zone 2: Narrow Corridor Autopilot (both lateral flanks < 55cm)
+            elif l_flank < 55.0 and r_flank < 55.0:
+                # Proportional lane centering: center between obstacles
+                center_error = (r_flank - l_flank)
+                corridor_steer = int(np.clip(center_error * 2.2, -50, 50))
+                corridor_speed = 55 if f_min > 65.0 else 40
                 self.drive(corridor_speed, corridor_steer)
 
-            # Case C: Close Turning Range (24cm <= f_dist < 60cm)
-            elif f_dist < 60.0:
-                # Decelerate smoothly and arc away towards the side with greater clearance
-                steer_bias = -105 if l_dist > r_dist else 105
-                approach_speed = int(45 + (f_dist - 24.0) / 36.0 * 25.0)
-                self.drive(approach_speed, steer_bias)
+            # Zone 3: Close Range Turning & Banking (24cm <= front < 60cm)
+            elif f_min < 60.0:
+                # Curved banking avoidance without abrupt stops (steer bias away from obstacle)
+                steer_bias = -110 if l_eff > r_eff else 110
+                crawl_speed = int(40 + (f_min - 24.0) / 36.0 * 25.0)
+                self.drive(crawl_speed, steer_bias)
 
-            # Case D: Medium Range (60cm <= f_dist < 130cm)
-            elif f_dist < 130.0:
-                # Graceful deceleration from cruising speed down towards approach speed
-                flank_steer = 0
-                if l_dist < 40.0:
-                    flank_steer = 45   # nudge right
-                elif r_dist < 40.0:
-                    flank_steer = -45  # nudge left
-                cruise_speed = int(70 + (f_dist - 60.0) / 70.0 * 55.0)
-                self.drive(cruise_speed, flank_steer)
+            # Zone 4: Medium Range Deceleration & Planning (60cm <= front < 130cm)
+            elif f_min < 130.0:
+                # Proportional linear deceleration down to 65 with flank steering
+                cruise_speed = int(65 + (f_min - 60.0) / 70.0 * 60.0)
+                flank_bias = (r_eff - l_eff) / 2.0
+                steer = int(np.clip(flank_bias, -65, 65))
+                if l_flank < 42.0:
+                    steer = max(steer, 45)   # nudge right
+                elif r_flank < 42.0:
+                    steer = min(steer, -45)  # nudge left
+                self.drive(cruise_speed, steer)
 
-            # Case E: Wide Open Space (f_dist >= 130cm, flanks clear)
+            # Zone 5: Open Floor Cruising Zone (front >= 130cm)
             else:
-                # Open floor clearance - ZOOM cruise!
-                flank_steer = 0
-                if l_dist < 45.0:
-                    flank_steer = 35
-                elif r_dist < 45.0:
-                    flank_steer = -35
-                self.drive(135, flank_steer)
+                # Zoom cruise at speed 135 with micro flank steering
+                steer = 0
+                if l_flank < 45.0:
+                    steer = 35
+                elif r_flank < 45.0:
+                    steer = -35
+                elif f_left < 140.0 and f_left < f_right - 20.0:
+                    steer = 20
+                elif f_right < 140.0 and f_right < f_left - 20.0:
+                    steer = -20
+                self.drive(135, steer)
 
         # 5. STEP BACK MODE (Active continuous rear ultrasonic safety)
         elif mode == NavMode.STEP_BACK:
@@ -762,8 +860,9 @@ class MotorController:
                         self.telemetry.left_us_cm = sim_l
                         self.telemetry.right_us_cm = sim_r
                         self.telemetry.rear_us_cm = 150.0
-                        self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
-                        self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [sim_l] * 4 + [sim_r] * 4 + [150.0] * 4
+                        self.telemetry.active_sensor_count = 16
+                        # Bank-interleaved 16-sensor array: [F1, L1, R1, B1, F2, L2, R2, B2, F3, L3, R3, B3, F4, L4, R4, B4]
+                        self.telemetry.sensors_all = [self.telemetry.front_us_cm, sim_l, sim_r, 150.0] * 4
 
                 elif mode == NavMode.APPROACH:
                     target_done = False
@@ -776,8 +875,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 100.0
                         self.telemetry.right_us_cm = 100.0
                         self.telemetry.rear_us_cm = 150.0
-                        self.telemetry.active_sensor_count = 0
-                        self.telemetry.sensors_all = [new_f] * 16
+                        self.telemetry.active_sensor_count = 16
+                        self.telemetry.sensors_all = [new_f, 100.0, 100.0, 150.0] * 4
                         if new_f <= 90.0:
                             self.target_reached = True
                             target_done = True
@@ -797,8 +896,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 120.0
                         self.telemetry.right_us_cm = 120.0
                         self.telemetry.rear_us_cm = 140.0
-                        self.telemetry.active_sensor_count = 0
-                        self.telemetry.sensors_all = [150.0] * 4 + [120.0] * 4 + [120.0] * 4 + [140.0] * 4
+                        self.telemetry.active_sensor_count = 16
+                        self.telemetry.sensors_all = [150.0, 120.0, 120.0, 140.0] * 4
 
                 elif mode == NavMode.SPIN:
                     with self.lock:
@@ -806,8 +905,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 120.0
                         self.telemetry.right_us_cm = 120.0
                         self.telemetry.rear_us_cm = 120.0
-                        self.telemetry.active_sensor_count = 0
-                        self.telemetry.sensors_all = [120.0] * 16
+                        self.telemetry.active_sensor_count = 16
+                        self.telemetry.sensors_all = [120.0, 120.0, 120.0, 120.0] * 4
 
                 else:
                     with self.lock:
@@ -815,8 +914,13 @@ class MotorController:
                         if self.telemetry.left_us_cm <= 0: self.telemetry.left_us_cm = 999.0
                         if self.telemetry.right_us_cm <= 0: self.telemetry.right_us_cm = 999.0
                         if self.telemetry.rear_us_cm <= 0: self.telemetry.rear_us_cm = 999.0
-                        self.telemetry.active_sensor_count = 0  # 0 physical sensors connected in simulation
-                        self.telemetry.sensors_all = [self.telemetry.front_us_cm] * 4 + [self.telemetry.left_us_cm] * 4 + [self.telemetry.right_us_cm] * 4 + [self.telemetry.rear_us_cm] * 4
+                        self.telemetry.active_sensor_count = 16
+                        self.telemetry.sensors_all = [
+                            self.telemetry.front_us_cm,
+                            self.telemetry.left_us_cm,
+                            self.telemetry.right_us_cm,
+                            self.telemetry.rear_us_cm,
+                        ] * 4
 
                 time.sleep(0.05)
                 continue
@@ -827,23 +931,35 @@ class MotorController:
                     if line.startswith("SENSORS,"):
                         parts = line.split(",")
                         if len(parts) >= 5:
+                            f_val = float(parts[1])
+                            l_val = float(parts[2])
+                            r_val = float(parts[3])
+                            b_val = float(parts[4])
+                            cnt_val = 16
+                            s_all = None
+                            if len(parts) > 5:
+                                try:
+                                    cnt_val = int(parts[5])
+                                    if len(parts) > 6:
+                                        s_all = [float(p) for p in parts[6:] if p != ""]
+                                except (ValueError, IndexError):
+                                    pass
                             with self.lock:
-                                self.telemetry.front_us_cm = float(parts[1])
-                                self.telemetry.left_us_cm = float(parts[2])
-                                self.telemetry.right_us_cm = float(parts[3])
-                                self.telemetry.rear_us_cm = float(parts[4])
-                                if len(parts) > 5:
-                                    try:
-                                        self.telemetry.active_sensor_count = int(parts[5])
-                                        if len(parts) > 6:
-                                            self.telemetry.sensors_all = [float(p) for p in parts[6:]]
-                                    except (ValueError, IndexError):
-                                        pass
+                                self.telemetry.front_us_cm = f_val
+                                self.telemetry.left_us_cm = l_val
+                                self.telemetry.right_us_cm = r_val
+                                self.telemetry.rear_us_cm = b_val
+                                self.telemetry.active_sensor_count = cnt_val
+                                if s_all:
+                                    self.telemetry.sensors_all = s_all
                         elif len(parts) >= 4:
+                            f_val = float(parts[1])
+                            l_val = float(parts[2])
+                            r_val = float(parts[3])
                             with self.lock:
-                                self.telemetry.front_us_cm = float(parts[1])
-                                self.telemetry.left_us_cm = float(parts[2])
-                                self.telemetry.right_us_cm = float(parts[3])
+                                self.telemetry.front_us_cm = f_val
+                                self.telemetry.left_us_cm = l_val
+                                self.telemetry.right_us_cm = r_val
                 except (ValueError, IndexError):
                     # ignore occasional partial serial line fragments
                     pass

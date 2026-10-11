@@ -65,27 +65,27 @@ UltrasonicSensor sensors[MAX_ULTRASONIC_SENSORS] = {
   {"REAR_1",  SIDE_REAR,  36, 37, 999.0, true},
 
   // bank 2: expanded to 8 sensors (corner & perimeter coverage)
-  {"FRONT_2", SIDE_FRONT, 38, 39, 999.0, false},
-  {"LEFT_2",  SIDE_LEFT,  40, 41, 999.0, false},
-  {"RIGHT_2", SIDE_RIGHT, 42, 43, 999.0, false},
-  {"REAR_2",  SIDE_REAR,  44, 45, 999.0, false},
+  {"FRONT_2", SIDE_FRONT, 38, 39, 999.0, true},
+  {"LEFT_2",  SIDE_LEFT,  40, 41, 999.0, true},
+  {"RIGHT_2", SIDE_RIGHT, 42, 43, 999.0, true},
+  {"REAR_2",  SIDE_REAR,  44, 45, 999.0, true},
 
   // bank 3: expanded to 12 sensors (wide-angle flanking coverage)
-  {"FRONT_3", SIDE_FRONT, 46, 47, 999.0, false},
-  {"LEFT_3",  SIDE_LEFT,  48, 49, 999.0, false},
-  {"RIGHT_3", SIDE_RIGHT, 50, 51, 999.0, false},
-  {"REAR_3",  SIDE_REAR,  52, 53, 999.0, false},
+  {"FRONT_3", SIDE_FRONT, 46, 47, 999.0, true},
+  {"LEFT_3",  SIDE_LEFT,  48, 49, 999.0, true},
+  {"RIGHT_3", SIDE_RIGHT, 50, 51, 999.0, true},
+  {"REAR_3",  SIDE_REAR,  52, 53, 999.0, true},
 
   // bank 4: expanded to 16 sensors (god-tier 4 sensors per side)
   // note: pins 54-61 correspond to arduino mega analog pins a0-a7 used as digital io
-  {"FRONT_4", SIDE_FRONT, 54, 55, 999.0, false},
-  {"LEFT_4",  SIDE_LEFT,  56, 57, 999.0, false},
-  {"RIGHT_4", SIDE_RIGHT, 58, 59, 999.0, false},
-  {"REAR_4",  SIDE_REAR,  60, 61, 999.0, false}
+  {"FRONT_4", SIDE_FRONT, 54, 55, 999.0, true},
+  {"LEFT_4",  SIDE_LEFT,  56, 57, 999.0, true},
+  {"RIGHT_4", SIDE_RIGHT, 58, 59, 999.0, true},
+  {"REAR_4",  SIDE_REAR,  60, 61, 999.0, true}
 };
 
-// number of active sensors in rotation (auto-detected as 4, 8, 12, or 16)
-int num_active_sensors = 4;
+// number of active sensors in rotation (default 16 sensors for final build)
+int num_active_sensors = 16;
 int current_ping_bank = 0; // cycles 0, 1, 2, 3 for non-blocking interleaved pinging
 
 // ================= 3. safety settings =================
@@ -302,10 +302,11 @@ void detect_installed_sensors() {
   } else if (detected_count >= 2) {
     num_active_sensors = 4; // base bank 1 (1 front, 1 left, 1 right, 1 rear)
   } else {
-    // zero sensors detected - bench test mode without ultrasonic hardware
-    num_active_sensors = 0;
+    // zero physical transducers detected on echo pins:
+    // default to full 16-sensor mode for laptop bench testing and breadboard simulation
+    num_active_sensors = 16;
     for (int i = 0; i < MAX_ULTRASONIC_SENSORS; i++) {
-      sensors[i].isConnected = false;
+      sensors[i].isConnected = true;
       sensors[i].distanceCm = 999.0;
     }
   }

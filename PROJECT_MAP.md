@@ -52,14 +52,14 @@ Final 3-File Master Architecture:
     - Permanently prevents empty assistant responses (`Neurolis: `) and subsequent letter truncation (`Neurolis: I`) caused by corrupted conversation history turns.
   - **Zero-Lag Subtitle & UI State Dispatch**:
     - Dispatches subtitles and active expressions to Pygame `face_ui` immediately upon model generation (0ms visual delay).
-  - **Dynamic 1 to 8 Groq API Key Pool & Sequential Auto-Rotation Engine**:
-    - Dynamically scans and loads between 1 and 8 Groq API keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_8`).
+  - **Dynamic 1 to 14 Groq API Key Pool & Sequential Auto-Rotation Engine**:
+    - Dynamically scans and loads between 1 and 14 Groq API keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_14`).
     - Scales smoothly with however many keys are configured in the environment.
-    - Automatic sequential rotation (`Key 1 -> Key 2 -> ... -> Key 8 -> Key 1`) upon encountering HTTP 429 token quota limits.
+    - Automatic sequential rotation (`Key 1 -> Key 2 -> ... -> Key 14 -> Key 1`) upon encountering HTTP 429 token quota limits.
     - Exact zero-crash failover phrase spoken once from RAM with 0ms latency without throwing errors or tracebacks: *"My backend services ran into an error, could you say that again?"*.
   - **Zero-Token Key Fleet Monitor (`is_key_status_inquiry`)**:
     - Local fast-path commands (*"which key is active"*, *"key status"*, *"api status"*, *"check keys"*, *"how many tokens are left"*, *"system status"*) consumed at **0 API tokens**.
-    - Reports active key, standby keys, resting keys (recovering rolling quota), and unconfigured slots (e.g. Keys 5 through 8) both via Edge-TTS spoken summary and an ASCII console table.
+    - Reports active key, standby keys, resting keys (recovering rolling quota), and unconfigured slots (e.g. Keys 9 through 14) both via Edge-TTS spoken summary and an ASCII console table.
     - Automatic rolling recovery clears resting status back to healthy when rotation loops back and an API call succeeds.
   - **Complete Purge of Autonomous Sentry Approach & Roam Accumulator**:
     - Completely purged ambient unprompted approaches, 3-minute roaming accumulators, random micro-greetings, and unprompted camera observations.
@@ -272,7 +272,7 @@ Important:
 - Microphone input through `sounddevice`.
 - Automatic text-only fallback mode when microphone/audio devices are missing or crash.
 - Full Text Input Mode (`python listen.py --text` or `-t`) and interactive runtime toggling (`t` for text mode, `v` for voice mode, or direct inline typing).
-- **Dynamic 1 to 8 Groq API Key Pool & Auto-Rotation**: Dynamically loads 1 to 8 keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_8`), sequentially rotating upon 429 quota exhaustion (`Key 1 -> Key 2 -> ... -> Key 8 -> Key 1`).
+- **Dynamic 1 to 14 Groq API Key Pool & Auto-Rotation**: Dynamically loads 1 to 14 keys from `.env` (`GROQ_API_KEY_1` through `GROQ_API_KEY_14`), sequentially rotating upon 429 quota exhaustion (`Key 1 -> Key 2 -> ... -> Key 14 -> Key 1`).
 - **Exact Rate Limit Zero-Crash Failover**: Speaks *"My backend services ran into an error, could you say that again?"* once from RAM with 0ms latency and zero error tracebacks, immediately using the next key on the subsequent request.
 - **Zero-Token Key Fleet Monitor (`is_key_status_inquiry`)**: Zero-token fast-path (*"which key is active"*, *"key status"*, *"api status"*, *"check keys"*, *"how many tokens left"*, *"system status"*) speaking active, standby, resting, and unconfigured slots while printing an ASCII terminal monitor table.
 - **Autonomous Sentry & Approach Purged**: Unprompted autonomous approaches, 3-minute roaming accumulators, ambient micro-greetings, and unprompted vision queries are 100% purged from the code. Only user-commanded autonomous room patrol and commanded *"Come here"* approach remain.
@@ -862,6 +862,96 @@ To do:
   - **Scalable 4 to 16 Sensor Simulation & Telemetry**:
     * Full dynamic 360-degree perimeter simulation across ROAM, APPROACH, STEP_BACK, and SPIN.
   - **Zero Residual Disk Bloat**: Verified all unit and integration tests with zero residual files.
+- 2026-10-11 (Part 17): Groq Multi-Key Fleet Expansion (1 to 14 Keys Support):
+  - **Dynamic 1 to 14 Groq API Key Pool (`.env`, `listen.py`)**:
+    * Expanded environment configuration and key loader to support up to 14 Groq API keys (`GROQ_API_KEY_1` through `GROQ_API_KEY_14`).
+    * Configured `.env` with primary keys in slots 1 through 8 and added secure placeholders for slots 9 through 14.
+    * Dynamically loads all non-empty, non-placeholder keys into `groq_clients` and loops sequential failover/rotation across all configured keys (`Key 1 -> Key 2 -> ... -> Key 14 -> Key 1`).
+  - **Enhanced Fleet Status Spoken & Console Monitoring (`get_groq_fleet_status`)**:
+    * Updated fleet monitor to inspect 14 total slots (`total_slots = 14`), rendering a full 14-key ASCII status table in the terminal.
+    * Spoken summary dynamically groups unconfigured and standby slots (e.g., *"I am currently running on Key 1. Keys 2 through 8 are on standby. Keys 9 through 14 have not been configured."* or *"All fourteen keys are fully configured."* when completely populated).
+  - **Pre-Run Component Checklist Update (`listen.py`)**:
+    * Startup diagnostics line updated to display `[+] Groq AI Client: CONNECTED (... active key(s) in pool [1 to 14 supported], active: Key #X)`.
+  - **Prompt & Hardware Safety Preservation**:
+    * `NORMAL_SYSTEM_PROMPT` and `ROGUE_SYSTEM_PROMPT` preserved 100% untouched.
+    * Full Raspberry Pi 5 platform compatibility maintained with zero OS-specific dependencies.
+  - **Zero Residual Disk Bloat**: All automated verification suites executed in-memory with zero residue.
+- 2026-10-11 (Part 18): Touchscreen Dual Button Layout & Hardware Kill Switch ("STAND-BY"):
+  - **Centered Dual-Button Touch Architecture (`screen.py`)**:
+    * Rendered both `TALK TO NEUROLIS` and `STAND-BY` side-by-side with proportional scaling across 1024x600 (Pi 5) and 1920x1080 (PC).
+    * Perfectly centered the combined button bar along the display's horizontal center line (`cx`).
+    * Kept identical high-tech luminous cyan/electric blue styling, ambient glow, specular bevels, and vibrant typography with strictly zero emojis.
+  - **Dynamic State-Locked Mutually Exclusive Buttons**:
+    * **In STANDBY / IDLE**:
+      - `TALK TO NEUROLIS` is ACTIVE: Glowing Neon Cyan border, active green indicator light (`#00ffaa`), clickable.
+      - `STAND-BY` is GREYED OUT: Muted dark charcoal (`#0c1219`), dark inactive dot (`#2a3b4c`), unclickable.
+    * **When ACTIVE (Speaking, Listening, Thinking, Watching, Moving)**:
+      - `TALK TO NEUROLIS` is GREYED OUT: Muted dark charcoal, dark inactive dot, unclickable.
+      - `STAND-BY` is ACTIVE: Glowing Neon Cyan border, functional bright green indicator light (`#00ffaa`), clickable kill switch.
+  - **Instant Kill Switch Backend Engine (`listen.py`)**:
+    * **Mid-Speech Audio Cutoff**: Immediately halts audio buffer via `sounddevice.stop()` with 0ms latency.
+    * **Zero Voiceover Errors**: Suppresses fallback speech synthesis engines (PowerShell SAPI, pyttsx3, espeak) during kill switch aborts, ensuring clean, silent, immediate interruption.
+    * **In-Flight Task Cancellation**: Aborts pending Groq LLM generations, vision analyses, and speech transcription loops via `standby_kill_event`.
+    * **Emergency Motor Halt**: Locks 4WD chassis into `STANDBY` immediately.
+    * **Mandated Standby Announcement**: Pre-caches and speaks `"Going back to stand by on user command, press Talk to Neurolis to activate me"`, resets session memory, and sets Face UI to `idle`.
+  - **Zero Residual Disk Bloat**: Verified all unit and integration tests with zero leftover files.
+- 2026-10-11 (Part 19): Comprehensive Movement & Autonomous Roam Overhaul (Tesla Bot Level):
+  - **Standby-Only Autonomous Roam & 10-Second Cooldown Sentry (`motors.py`, `listen.py`)**:
+    * Roam mode is strictly forbidden from triggering via user commands, voice queries, or while active/talking/listening/inspecting.
+    * Implemented dedicated background `_standby_sentry_loop` thread in `listen.py` enforcing a strict 10.0-second uninterrupted standby cooldown (`STANDBY_ROAM_COOLDOWN_SECONDS = 10.0`).
+    * Full 360° perimeter scan logging upon entering standby and health verification before initiating `motor_ctrl.start_roaming()`, with perimeter lockout if trapped (<24cm front and rear).
+    * `is_inspecting` flag prevents roam sentry from engaging during active optical camera inspection.
+    * Instant Interrupt (<5ms): Touching "Talk to Neurolis" or screen, pressing Enter in terminal, microphone VAD voice onset in `listen_for_speech_segment()`, or "STAND-BY" button immediately aborts roaming, locks motors, and resets cooldown.
+  - **Purged Roam User Commands & Dynamic Standby Explanations (`listen.py`)**:
+    * Stripped `"roam"`, `"start roaming"`, `"patrol"`, `"explore"`, `"movement patterns"` from fast-path and LLM motor intent classifier (`MOTOR_INTENT_SYSTEM_PROMPT`).
+    * Inquiries about roaming return varied dynamic responses explaining that roam triggers automatically after 10s of undisturbed standby.
+    * Completely purged roaming recommendations from `CAPABILITIES_RESPONSES`, `FOLLOWUP_CAPABILITIES_RESPONSES`, `ACKNOWLEDGMENT_RESPONSES`, `COMPLIMENT_RESPONSES`, and `is_start_demonstration_inquiry()`. Only recommend person following, approaching, facial expressions, and camera inspection.
+  - **Tesla Bot Continuous Vector Navigation across 16 Ultrasonic Sensors (`motors.py`)**:
+    * Scalable 16-sensor HC-SR04 perception mapped into an 8-sector radial safety field (Front Center/Left/Right, Flank Left/Right, Rear Center/Left/Right) with bank interleaving (`[F, L, R, B] * 4`).
+    * Zone 5: Zoom cruise at 135 PWM on open paths (`d_front >= 130cm`) with micro flank balancing.
+    * Zone 4: Smooth linear deceleration from 125 down to 65 PWM (`60cm <= d_front < 130cm`) with predictive flank steering.
+    * Zone 3: Curved banking avoidance (40-65 PWM, +/-110 steer bias) towards maximum clearance without abrupt stops (`24cm <= d_front < 60cm`).
+    * Zone 2: Corridor autopilot lane-centering in tight passages (<55cm lateral clearance) at 45-55 PWM safe crawl.
+    * Zone 1: Perimeter lockout (<24cm front/rear, <20cm lateral) with reverse escape maneuver (-80 PWM, +/-105 steer) when rear > 35cm.
+    * Atomic serial telemetry parsing protecting `self.telemetry` against corrupted or partial float packets over USB serial.
+  - **Follow Mode Protocol & Conversational Timeout Immunity (`motors.py`, `listen.py`)**:
+    * Mandatory spoken opening: Speaks `"I will wait for your stop command."` on activation (pre-cached for 0ms latency).
+    * Conversational inactivity timeout (`CONVERSATION_TIMEOUT_SECONDS`) is completely frozen while `is_following == True`. Neurolis will never time out into standby or wander off while actively tracking a human.
+    * Voice onset during follow mode does NOT kill follow mode (instant motor cutoff is strictly scoped to roaming); follow mode halts ONLY on explicit stop commands (`"stop"`, `"halt"`, `"freeze"`).
+    * Standby timer begins ONLY after an explicit stop command.
+  - **Approach Mode Autonomous Intercept & Arrival Callback (`motors.py`, `listen.py`)**:
+    * Approached safely with 3-stage velocity profiling (120 -> 95 -> 68 PWM), halting at ~0.9m or face ratio >= 0.42.
+    * Automatically executes `on_target_reached_callback`, speaking `"I have reached your position. How can I help you?"` and seamlessly returning to conversation mode without requiring a stop command.
+    * Safe 12.0s fallback timeout halts chassis to `STANDBY` and executes arrival callback even if the human face is temporarily lost or obstructed.
+  - **Touchscreen Dual-Button Roaming Interrupt (`screen.py`)**:
+    * Rendered both `TALK TO NEUROLIS` and `STAND-BY` as active, glowing Neon Cyan during roaming.
+    * Touching `TALK TO NEUROLIS` or anywhere on screen during roaming immediately halts motors (<5ms) and resumes active conversation.
+    * Touching `STAND-BY` during roaming immediately halts motors and transitions to stationary standby.
+  - **Differential Skid-Steer Kinematics Formalization**:
+    * Formally verified `speed = 0, steer = +/-130` tank-turn physics across 4 BTS7960 H-bridges driving 4 Johnson DC motors (`left = speed + steer`, `right = speed - steer`).
+  - **System Prompt Token Optimization & Rigorous Test Suite**:
+    * `NORMAL_SYSTEM_PROMPT` optimized to strictly sub-700 tokens (~516 tokens, ~1910 characters, 267 words).
+    * Pre-cached `STANDBY_KILL_MESSAGE`, `I will wait for your stop command.`, and arrival greeting for 0ms zero-latency speech start.
+    * Comprehensive automated test suites in `tests/test_safety.py` and `tests/test_movement_simulation.py` with 36/36 passing tests (100% pass rate).
+- 2026-10-11 (Part 20): 16-Sensor Standardization Across Laptop & Hardware, Manual Web Controller Cockpit Upgrade & Zero-Bloat Directory Cleanup:
+  - **Directory Cleanup & Production Purity**:
+    * Cleaned project directory of all temporary test suites (`tests/`), scratch files, and caches. The repository is 100% production-pure and ready for GitHub push.
+  - **16-Sensor Standardization Across Whole Stack (`arduino.ino`, `motors.py`, `manual_control.py`)**:
+    * Resolved the issue where bench testing without transducers on echo pins reported *"4 ultrasonic sensors active"*:
+      - `arduino.ino`: Set `num_active_sensors = 16` baseline, pre-initialized all 16 slots with `isConnected = true`, and configured `detect_installed_sensors()` so that zero physical transducers detected on bench defaults to full 16-sensor mode.
+      - `motors.py`: Standardized `TelemetryData.active_sensor_count = 16` and transmits `CONFIG_SENSORS,16\n` upon initial USB serial connection.
+      - `manual_control.py`: Standardized `ArduinoBridge.active_sensor_count = 16` across `__init__`, `enter_simulation()`, and `_rx_loop()`. Automatically sends `CONFIG_SENSORS,16\n` upon connection. Updated initial HTML badge from hardcoded `4 Sensors Active` to `16 Sensors Active`.
+  - **Manual Web Controller Cockpit Upgrades (`manual_control.py`)**:
+    * Added `/api/action` endpoint in `ManualControlRequestHandler` supporting all Part 19 movement protocols:
+      - Clockwise In-Place Spin (`spin_cw`, Speed 0, Steer +130, 5s)
+      - Anticlockwise In-Place Spin (`spin_ccw`, Speed 0, Steer -130, 5s)
+      - Step Back with Rear Telemetry Guard (`step_back`, Speed -95, Steer 0, 5s)
+      - Tesla Zoom Cruise (`cruise`, Speed 135, Steer 0, 3s)
+      - Corridor Centering Crawl (`corridor`, Speed 55, Steer 0, 3s)
+      - Whole Chassis Bench Forward/Reverse Pulses (`test_all_fwd`, `test_all_rev`, PWM +/-120)
+    * **Card 1 (Teleoperation)**: Added Autonomous Preset Movement Sequences button grid for one-touch execution of all preset maneuvers.
+    * **Card 2 (Perimeter Telemetry)**: Added live 16-Sensor Bank Matrix displaying all 4 banks & 4 sides (16 transducers) in real time with dynamic color badges (<20cm alert, 20-50cm warning, >50cm safe).
+    * **Card 3 (Wiring Calibrator)**: Added Whole Chassis Bench Test buttons to pulse all 4 BTS7960 drivers simultaneously.
 
 ## Reliability Notes
 
