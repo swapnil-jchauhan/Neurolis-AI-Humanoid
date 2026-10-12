@@ -18,6 +18,7 @@ Features:
 import os
 import ssl
 import sys
+import glob
 import threading
 import time
 import urllib.request
@@ -181,29 +182,66 @@ class MotorController:
 
         self._preview_thread = threading.Thread(target=self._preview_loop, daemon=True)
         self._preview_thread.start()
+
+        self._hotplug_thread = threading.Thread(target=self._hotplug_loop, daemon=True)
+        self._hotplug_thread.start()
         print("[Motors] Motor Controller Online. Status: STANDBY (MOTORS LOCKED).")
 
     # tries to find and connect to the physical arduino mega plugged into usb
-    def _connect_serial(self):
+    def _connect_serial(self) -> bool:
         if not HAS_SERIAL:
             self._enter_sim("PySerial not installed.")
-            return
+            return False
 
         port = self._find_arduino()
         if port:
             try:
-                self.ser = serial.Serial(port, 115200, timeout=0.1)
+                self.ser = serial.Serial(
+                    port,
+                    115200,
+                    timeout=0.1,
+                    write_timeout=0.5
+                )
+                try:
+                    self.ser.dtr = False
+                    self.ser.rts = False
+                    time.sleep(0.1)
+                    self.ser.dtr = True
+                    self.ser.rts = True
+                except Exception:
+                    pass
+
                 time.sleep(1.5)
-                self.is_simulated = False
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
+
+                with self.lock:
+                    self.is_simulated = False
                 try:
                     self.ser.write(b"CONFIG_SENSORS,12\n")
                 except Exception:
                     pass
                 print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud (12 Sensors Active).")
+                return True
             except Exception as e:
                 self._enter_sim(f"Serial connection failed: {e}")
+                return False
         else:
             self._enter_sim("No physical Arduino Mega detected.")
+            return False
+
+    # background monitor that automatically connects when physical Arduino is plugged in
+    def _hotplug_loop(self):
+        while self.running:
+            time.sleep(2.0)
+            with self.lock:
+                needs_connect = self.is_simulated or self.ser is None or not getattr(self.ser, "is_open", False)
+
+            if needs_connect:
+                port = self._find_arduino()
+                if port:
+                    print(f"[Motors] [Hotplug] Physical Arduino detected on {port}! Auto-connecting...")
+                    self._connect_serial()
 
     # fallback into simulation mode if no arduino is plugged in so code runs smoothly on pc
     def _enter_sim(self, reason: str):
@@ -215,22 +253,38 @@ class MotorController:
     def _find_arduino(self) -> Optional[str]:
         if not HAS_SERIAL:
             return None
-        ports = list(serial.tools.list_ports.comports())
-        for p in ports:
-            dev = (p.device or "").lower()
-            desc = (p.description or "").lower()
-            hwid = (p.hwid or "").lower()
 
-            # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
-            if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
-                continue
+        # 1. Check pyserial comports
+        try:
+            ports = list(serial.tools.list_ports.comports())
+            for p in ports:
+                dev = (p.device or "").lower()
+                desc = (p.description or "").lower()
+                hwid = (p.hwid or "").lower()
 
-            # Genuine USB serial criteria
-            is_usb_path = any(dev.startswith(prefix) for prefix in ["/dev/ttyacm", "/dev/ttyusb"])
-            is_usb_desc = any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"])
+                # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
+                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                    continue
 
-            if is_usb_path or is_usb_desc:
-                return p.device
+                is_known_vid = any(vid in hwid for vid in ["2341:", "1a86:", "10c4:", "0403:"])
+                is_usb_desc = any(k in desc or k in hwid or k in dev for k in [
+                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "cdc", "acm"
+                ])
+
+                if is_known_vid or is_usb_desc:
+                    return p.device
+        except Exception:
+            pass
+
+        # 2. Linux native globbing prioritising /dev/ttyACM* then /dev/ttyUSB*
+        if sys.platform.startswith("linux"):
+            for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"]:
+                try:
+                    matches = sorted(glob.glob(pat))
+                    if matches:
+                        return matches[0]
+                except Exception:
+                    pass
 
         return None
 

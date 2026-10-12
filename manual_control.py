@@ -14,6 +14,7 @@ Features:
 
 import os
 import sys
+import glob
 import json
 import time
 import socket
@@ -60,6 +61,10 @@ class ArduinoBridge:
         self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
         self.rx_thread.start()
 
+        # Start dynamic USB hotplug monitor thread (auto-connects when Mega is plugged in)
+        self.hotplug_thread = threading.Thread(target=self._hotplug_monitor_loop, daemon=True)
+        self.hotplug_thread.start()
+
         # Attempt initial auto-connect
         self.auto_connect()
 
@@ -70,73 +75,167 @@ class ArduinoBridge:
             if len(self.log_history) > 60:
                 self.log_history.pop(0)
 
+    def find_all_candidate_ports(self) -> List[Dict[str, str]]:
+        """Scans system for USB serial candidates including comports, Linux globbing, and by-id symlinks."""
+        discovered: Dict[str, str] = {}
+        if HAS_SERIAL:
+            try:
+                for p in serial.tools.list_ports.comports():
+                    dev = p.device or ""
+                    dev_low = dev.lower()
+                    desc = p.description or dev
+                    desc_low = desc.lower()
+                    # Exclude internal serial consoles and bluetooth
+                    if any(ex in dev_low or ex in desc_low for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                        continue
+                    discovered[dev] = desc
+            except Exception:
+                pass
+
+        if sys.platform.startswith("linux"):
+            # Deep Linux discovery for all USB-to-Serial chips
+            linux_patterns = [
+                "/dev/ttyACM*",
+                "/dev/ttyUSB*",
+                "/dev/serial/by-id/*",
+                "/dev/serial/by-path/*"
+            ]
+            for pat in linux_patterns:
+                try:
+                    for node in sorted(glob.glob(pat)):
+                        real_path = os.path.realpath(node)
+                        if real_path not in discovered:
+                            discovered[real_path] = f"USB Serial Device ({os.path.basename(node)})"
+                        if node not in discovered and node != real_path:
+                            discovered[node] = f"USB Serial Link ({os.path.basename(node)})"
+                except Exception:
+                    pass
+
+        candidates = [{"device": dev, "description": desc} for dev, desc in discovered.items()]
+        return candidates
+
     def list_ports(self) -> List[Dict[str, str]]:
         if not HAS_SERIAL:
             return [{"device": "VIRTUAL_COM1", "description": "Virtual Simulation Port (PySerial not installed)"}]
-        ports = []
-        try:
-            for p in serial.tools.list_ports.comports():
-                ports.append({
-                    "device": p.device,
-                    "description": p.description or p.device
-                })
-        except Exception:
-            pass
+        ports = self.find_all_candidate_ports()
         if not ports:
             ports.append({"device": "VIRTUAL_COM1", "description": "No physical COM ports found (Simulation Available)"})
         return ports
 
-    def auto_connect(self):
+    def detect_arduino_port(self) -> Optional[str]:
+        """Pinpoints the physical Arduino Mega port using description, hardware ID, and device path heuristics."""
         if not HAS_SERIAL:
-            self.enter_simulation("PySerial library not installed (pip install pyserial).")
-            return
+            return None
 
-        ports = list(serial.tools.list_ports.comports())
-        target_port = None
-        for p in ports:
-            dev = (p.device or "").lower()
-            desc = (p.description or "").lower()
-            hwid = (p.hwid or "").lower()
+        # 1. Inspect comports for known vendor/chip signatures
+        try:
+            for p in serial.tools.list_ports.comports():
+                dev = (p.device or "").lower()
+                desc = (p.description or "").lower()
+                hwid = (p.hwid or "").lower()
 
-            if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
-                continue
+                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                    continue
 
-            if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"]):
-                target_port = p.device
-                break
+                # VID:PID matches:
+                # 2341:0010, 2341:0042 (Arduino Mega 2560)
+                # 1a86:7523 (CH340/CH341 USB chip)
+                # 10c4:ea60 (Silicon Labs CP210x)
+                # 0403:6001 (FTDI FT232R)
+                is_known_vid = any(vid in hwid for vid in ["2341:", "1a86:", "10c4:", "0403:"])
+                is_known_name = any(k in desc or k in hwid or k in dev for k in [
+                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "cdc", "acm"
+                ])
 
-        # On Linux/Pi prioritize /dev/ttyACM0 or /dev/ttyUSB0
-        if not target_port and sys.platform.startswith("linux"):
-            for candidate in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
-                if os.path.exists(candidate):
-                    target_port = candidate
-                    break
+                if is_known_vid or is_known_name:
+                    return p.device
+        except Exception:
+            pass
 
+        # 2. Linux native globbing prioritising /dev/ttyACM* then /dev/ttyUSB*
+        if sys.platform.startswith("linux"):
+            for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"]:
+                try:
+                    matches = sorted(glob.glob(pat))
+                    if matches:
+                        return matches[0]
+                except Exception:
+                    pass
+
+        return None
+
+    def auto_connect(self) -> bool:
+        """Attempts to find and connect to physical Arduino Mega."""
+        if not HAS_SERIAL:
+            self.enter_simulation("PySerial library not installed.")
+            return False
+
+        target_port = self.detect_arduino_port()
         if target_port:
-            self.connect(target_port)
+            return self.connect(target_port)
         else:
-            self.enter_simulation("No physical Arduino Mega detected on USB.")
+            if not self.is_connected or not self.is_simulated:
+                self.enter_simulation("No physical Arduino Mega detected on USB. Hotplug auto-scan active...")
+            return False
 
-    def connect(self, port_name: str):
+    def _hotplug_monitor_loop(self):
+        """Continuously monitors USB ports in the background. Auto-connects if Arduino is plugged in."""
+        while self.running:
+            time.sleep(2.0)
+            with self.lock:
+                already_physical = self.is_connected and not self.is_simulated and self.ser is not None and getattr(self.ser, "is_open", False)
+
+            if not already_physical:
+                port = self.detect_arduino_port()
+                if port:
+                    print(f"[ManualControl] [Hotplug] Detected Arduino device on {port}! Auto-connecting...")
+                    self.add_log(f"[Hotplug] Detected hardware on {port}. Initiating connection...")
+                    self.connect(port)
+
+    def connect(self, port_name: str) -> bool:
         if not HAS_SERIAL or "VIRTUAL" in port_name:
             self.enter_simulation("Connected to Virtual Physics Simulation.")
-            return
+            return False
 
         self.disconnect()
         try:
-            self.ser = serial.Serial(port_name, 115200, timeout=0.08)
-            time.sleep(1.2)  # Allow Arduino bootloader to initialize
-            self.port = port_name
-            self.is_connected = True
-            self.is_simulated = False
+            self.ser = serial.Serial(
+                port_name,
+                115200,
+                timeout=0.1,
+                write_timeout=0.5
+            )
+            # Toggle DTR/RTS to cleanly reset Arduino Mega bootloader
+            try:
+                self.ser.dtr = False
+                self.ser.rts = False
+                time.sleep(0.1)
+                self.ser.dtr = True
+                self.ser.rts = True
+            except Exception:
+                pass
+
+            time.sleep(1.5)  # Allow Arduino Mega bootloader to initialize
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+
+            with self.lock:
+                self.port = port_name
+                self.is_connected = True
+                self.is_simulated = False
+
+            # Configure 12 ultrasonic sensors
             try:
                 self.ser.write(b"CONFIG_SENSORS,12\n")
             except Exception:
                 pass
+
             self.add_log(f"Connected to Arduino Mega on {port_name} @ 115200 baud (12 Sensors Active).")
             print(f"[ManualControl] Connected to physical Arduino on {port_name} (12 Sensors Configured)")
+            return True
         except Exception as e:
             self.enter_simulation(f"Failed to open {port_name}: {e}")
+            return False
 
     def enter_simulation(self, reason: str = ""):
         self.disconnect()
@@ -703,6 +802,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
         <option value="">Scanning ports...</option>
       </select>
       <button onclick="handleConnect()">Connect</button>
+      <button onclick="handleRescan()" style="background:#0c4a6e; border-color:var(--cyan); color:#e0f2fe;">⟳ Rescan Hardware</button>
       <button onclick="handleDisconnect()">Disconnect</button>
       <button class="btn-estop" onclick="sendStop()">EMERGENCY STOP (SPACE)</button>
     </div>
@@ -1045,6 +1145,18 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
     }
   }
 
+  async function handleRescan() {
+    const sub = document.getElementById('subStatus');
+    sub.innerText = 'Scanning USB ports and testing Arduino Mega link...';
+    try {
+      const res = await apiPost('/api/rescan', {});
+      await loadPorts();
+      await pollStatus();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   function handleDisconnect() {
     apiPost('/api/disconnect', {});
   }
@@ -1211,8 +1323,17 @@ class ManualControlRequestHandler(BaseHTTPRequestHandler):
 
         elif self.path == "/api/connect":
             port = payload.get("port", "")
-            bridge.connect(port)
-            self._send_json({"ok": True, "port": port})
+            success = bridge.connect(port)
+            self._send_json({"ok": success, "port": port})
+
+        elif self.path == "/api/rescan":
+            success = bridge.auto_connect()
+            self._send_json({
+                "ok": True,
+                "connected": success,
+                "status": bridge.get_status(),
+                "ports": bridge.list_ports()
+            })
 
         elif self.path == "/api/disconnect":
             bridge.disconnect()
