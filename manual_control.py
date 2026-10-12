@@ -40,13 +40,13 @@ class ArduinoBridge:
         self.lock = threading.Lock()
         self.running = True
 
-        # Telemetry state (16 sensors standardized across Project Neurolis)
+        # Telemetry state (12 sensors standardized across Project Neurolis)
         self.dist_front = 999.0
         self.dist_left = 999.0
         self.dist_right = 999.0
         self.dist_rear = 999.0
-        self.active_sensor_count = 16
-        self.sensors_all: List[float] = [999.0] * 16
+        self.active_sensor_count = 12
+        self.sensors_all: List[float] = [999.0] * 12
 
         # Motion state
         self.current_speed = 0
@@ -127,11 +127,11 @@ class ArduinoBridge:
             self.is_connected = True
             self.is_simulated = False
             try:
-                self.ser.write(b"CONFIG_SENSORS,16\n")
+                self.ser.write(b"CONFIG_SENSORS,12\n")
             except Exception:
                 pass
-            self.add_log(f"Connected to Arduino Mega on {port_name} @ 115200 baud (16 Sensors Active).")
-            print(f"[ManualControl] Connected to physical Arduino on {port_name} (16 Sensors Configured)")
+            self.add_log(f"Connected to Arduino Mega on {port_name} @ 115200 baud (12 Sensors Active).")
+            print(f"[ManualControl] Connected to physical Arduino on {port_name} (12 Sensors Configured)")
         except Exception as e:
             self.enter_simulation(f"Failed to open {port_name}: {e}")
 
@@ -145,9 +145,9 @@ class ArduinoBridge:
             self.dist_left = 90.0
             self.dist_right = 85.0
             self.dist_rear = 150.0
-            self.active_sensor_count = 16
-            self.sensors_all = [120.0, 90.0, 85.0, 150.0] * 4
-        msg = f"Virtual Simulation Mode active (16 Virtual Sensors). {reason}"
+            self.active_sensor_count = 12
+            self.sensors_all = [120.0, 90.0, 85.0, 150.0] * 3
+        msg = f"Virtual Simulation Mode active (12 Virtual Sensors). {reason}"
         self.add_log(msg)
         print(f"[ManualControl] {msg}")
 
@@ -255,7 +255,7 @@ class ArduinoBridge:
             if str(count).isdigit():
                 self.active_sensor_count = int(count)
             elif str(count).upper() == "AUTO":
-                self.active_sensor_count = 16
+                self.active_sensor_count = 12
 
     def send_raw(self, line: str):
         if not line.endswith("\n"):
@@ -278,14 +278,14 @@ class ArduinoBridge:
                     if val.isdigit():
                         self.active_sensor_count = int(val)
                     elif val.upper() == "AUTO":
-                        self.active_sensor_count = 16
+                        self.active_sensor_count = 12
 
     def _rx_loop(self):
         sim_wander = 120.0
         sim_dir = -1.0
         while self.running:
             if self.is_simulated:
-                # Virtual physics telemetry (16 sensors simulated)
+                # Virtual physics telemetry (12 sensors simulated)
                 with self.lock:
                     spd = self.current_speed
                 if spd > 0:
@@ -302,8 +302,8 @@ class ArduinoBridge:
                     self.dist_left = 75.0
                     self.dist_right = 80.0
                     self.dist_rear = 150.0
-                    self.active_sensor_count = 16
-                    self.sensors_all = [round(sim_wander, 1), 75.0, 80.0, 150.0] * 4
+                    self.active_sensor_count = 12
+                    self.sensors_all = [round(sim_wander, 1), 75.0, 80.0, 150.0] * 3
 
                 time.sleep(0.06)
                 continue
@@ -774,11 +774,11 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Card 2: 16-Sensor Ultrasonic Radar & Chassis Status -->
+    <!-- Card 2: 12-Sensor Ultrasonic Radar & Chassis Status -->
     <div class="card">
       <div class="card-header">
         <h2>Ultrasonic Radar & Safety Telemetry</h2>
-        <span id="activeSensorsBadge" style="font-size:0.75rem; color:var(--emerald); font-weight:bold;">16 Sensors Active</span>
+        <span id="activeSensorsBadge" style="font-size:0.75rem; color:var(--emerald); font-weight:bold;">12 Sensors Active</span>
       </div>
 
       <div class="radar-view">
@@ -801,11 +801,11 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- 16-Sensor Live Bank Matrix Readout -->
+      <!-- 12-Sensor Live Bank Matrix Readout -->
       <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:0.75rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">16-Sensor Bank Matrix</span>
-          <span style="font-size:0.68rem; color:var(--text-muted);">4 Banks &times; 4 Sides</span>
+          <span style="font-size:0.75rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">12-Sensor Bank Matrix</span>
+          <span style="font-size:0.68rem; color:var(--text-muted);">3 Banks &times; 4 Sides</span>
         </div>
         <div id="sensorMatrix" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 0.68rem;">
           <!-- Populated dynamically via JS telemetry -->
@@ -819,7 +819,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('4')">4</button>
           <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('8')">8</button>
           <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('12')">12</button>
-          <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('16')">16</button>
           <button style="padding:4px 8px; font-size:0.75rem;" onclick="setSensorCount('AUTO')">AUTO</button>
         </div>
       </div>
@@ -1077,12 +1076,12 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       updateTag('tagLeft', 'LEFT', data.dist_left);
       updateTag('tagRight', 'RIGHT', data.dist_right);
 
-      const cnt = data.active_sensor_count || 16;
+      const cnt = data.active_sensor_count || 12;
       document.getElementById('activeSensorsBadge').innerText = `${cnt} Sensors Active`;
 
-      // 16-Sensor Bank Matrix rendering
+      // Sensor Bank Matrix rendering (dynamically supports 12 or 16 sensors)
       const matrixEl = document.getElementById('sensorMatrix');
-      if (matrixEl && data.sensors_all && data.sensors_all.length >= 16) {
+      if (matrixEl && data.sensors_all && data.sensors_all.length > 0) {
         const SENSOR_NAMES = [
           "F1", "L1", "R1", "B1",
           "F2", "L2", "R2", "B2",
@@ -1090,7 +1089,8 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           "F4", "L4", "R4", "B4"
         ];
         let html = '';
-        for (let i = 0; i < 16; i++) {
+        const numSensors = Math.min(data.sensors_all.length, SENSOR_NAMES.length);
+        for (let i = 0; i < numSensors; i++) {
           const val = parseFloat(data.sensors_all[i]);
           let badgeColor = 'var(--emerald)';
           let bg = 'rgba(0,255,136,0.08)';

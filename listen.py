@@ -54,7 +54,7 @@ except ImportError:
 
 try:
     import screen
-    face_ui = screen.FaceUI(width=1920, height=1080, fullscreen=False)
+    face_ui = screen.FaceUI(width=1024, height=600, fullscreen=sys.platform.startswith("linux"))
     face_ui.start(in_background=True)
 except Exception as e:
     face_ui = None
@@ -93,7 +93,7 @@ def reset_standby_cooldown():
             pass
 
 def mark_standby_entered():
-    """Explicitly marks entering standby state, scans all 360 degrees (16 ultrasonic sensors), and initiates the 10.0s cooldown."""
+    """Explicitly marks entering standby state, scans all 360 degrees (12 ultrasonic sensors), and initiates the 10.0s cooldown."""
     global standby_entered_at
     standby_entered_at = time.monotonic()
     if motor_ctrl is not None:
@@ -252,7 +252,7 @@ VISION_JPEG_QUALITY = 60
 VISION_IMAGE_WIDTH = 512
 GROQ_TIMEOUT_SECONDS = 10.0
 NORMAL_SYSTEM_PROMPT = (
-    "You are Neurolis, a student-built autonomous humanoid robot at the Auckland House School for Boys Science Exhibition. Real prototype with 16 ultrasonic sensors.\n\n"
+    "You are Neurolis, a student-built autonomous humanoid robot at the Auckland House School for Boys Science Exhibition. Real prototype with 12 ultrasonic sensors.\n\n"
     "CREATORS (STRICT ATTRIBUTION):\n"
     "- NEVER volunteer creator names unless asked who created you! Introduce ONLY as student-built at AHSB.\n"
     "- Asked creator: Students of Auckland House School for Boys (AHSB), Swapnil Jai Chauhan and Shivam Verma, built me. No roles unless asked.\n"
@@ -260,7 +260,7 @@ NORMAL_SYSTEM_PROMPT = (
     "- Asked location: Both are around the exhibition hall. If visitor is Swapnil: warmly recognize him!\n\n"
     "PERSONA & TONE:\n"
     "- Chill, cool, articulate student robot (1-2 sentences). Poised (NOT hyper). Fresh phrasing every turn.\n"
-    "- Welcome: Welcome visitors to Auckland House School Science Exhibition, introduce as Neurolis with 16 ultrasonic sensors, ask what to check out first. Never re-greet once chatting.\n"
+    "- Welcome: Welcome visitors to Auckland House School Science Exhibition, introduce as Neurolis with 12 ultrasonic sensors, ask what to check out first. Never re-greet once chatting.\n"
     "- No fake laughter ('Haha'/'Heh')--TTS cannot speak it. Match awe warmly ('Pretty cool, right?'). Accept corrections naturally.\n\n"
     "ACTIONS & ROUTING:\n"
     "- Mobility: 4WD chassis can follow, approach, step back (5s reverse with rear sensor check), or spin (5s clockwise default, or anticlockwise). Autonomous roam CANNOT be triggered on command—it activates automatically after 10 seconds in standby! If asked to roam, explain that roam triggers automatically during standby. Suggest options ONLY if asked what to show or what I can do; DO NOT drive unless commanded! Commands: <action motor=\"CMD\">spoken reply</action> (FOLLOW, APPROACH, STEP_BACK, SPIN, SPIN_CCW, STOP).\n"
@@ -625,7 +625,7 @@ ROAM_STANDBY_EXPLANATION_RESPONSES = [
     "My autonomous roaming engages automatically after ten seconds in standby. Once we finish talking and I power down to rest, I'll begin mapping and navigating the room!",
     "I cannot start roaming on command. After ten seconds of uninterrupted standby, my autonomous room navigation activates automatically.",
     "Autonomous roam is an automatic standby behavior. When our conversation ends and I remain undisturbed for ten seconds, I'll begin roaming on my own!",
-    "Roaming mode activates on its own after ten seconds in standby. Once I'm in standby mode, my sixteen ultrasonic sensors take over to patrol the area.",
+    "Roaming mode activates on its own after ten seconds in standby. Once I'm in standby mode, my twelve ultrasonic sensors take over to patrol the area.",
 ]
 
 def check_motor_command_fast_path(text: str) -> Optional[Tuple[str, str, str, float]]:
@@ -2095,7 +2095,7 @@ ACKNOWLEDGMENT_RESPONSES = [
 COMPLIMENT_RESPONSES = [
     "Right? When we got the ultrasonic sensor array synced up with the chassis, we were just as hyped!",
     "Glad you think so! Shivam and Swapnil put in countless hours soldering and coding to make it happen.",
-    "Appreciate that! Seeing all sixteen sensors map the floor in real-time still blows our minds too.",
+    "Appreciate that! Seeing all twelve sensors map the floor in real-time still blows our minds too.",
     "Thanks! We spent weeks dialing in the motor response and computer vision algorithms.",
     "Appreciate the hype! It took a lot of late nights in the robotics lab to get it running this smoothly.",
     "Glad you're digging it! The whole Auckland House student team is really proud of how it turned out.",
@@ -2672,7 +2672,7 @@ CAPABILITIES_RESPONSES = [
     ),
     (
         "I can see, move, and chat! My computer vision tracks and follows you, "
-        "my 16 ultrasonic sensors keep me from bumping into obstacles when reversing, "
+        "my 12 ultrasonic sensors keep me from bumping into obstacles when reversing, "
         "I can approach you, spin in place, and my camera lets me analyze whatever you show me. "
         "Plus, I can demonstrate my different expressions on screen!"
     ),
@@ -2956,7 +2956,7 @@ def heal_repetitive_or_glitched_reply(user_text: str, bad_reply: str) -> str:
     lower_u = user_text.lower()
     if any(w in lower_u for w in ["first", "start", "show me", "begin", "what would you like"]):
         options = [
-            "I suggest we start by having me follow you around so you can see my 16-sensor person tracking in real time! Or would you like to inspect objects with my camera?",
+            "I suggest we start by having me follow you around so you can see my 12-sensor obstacle avoidance in real time! Or would you like to inspect objects with my camera?",
             "Let's begin by testing how I track and follow you around the room, or I can approach you if you prefer!",
             "I'd love to show you my facial expressions first, or demonstrate my face-tracking camera vision!"
         ]

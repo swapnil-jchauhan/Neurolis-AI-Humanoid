@@ -62,14 +62,14 @@ def ensure_yunet_model():
 
 
 
-# data container for ultrasonic distance measurements coming back from the arduino (supports up to 16 sensors)
+# data container for ultrasonic distance measurements coming back from the arduino (supports up to 12 sensors)
 @dataclass
 class TelemetryData:
     front_us_cm: float = 999.0
     left_us_cm: float = 999.0
     right_us_cm: float = 999.0
     rear_us_cm: float = 999.0
-    active_sensor_count: int = 16
+    active_sensor_count: int = 12
     sensors_all: Optional[list] = None
     battery_mv: int = 12000
 
@@ -192,10 +192,10 @@ class MotorController:
                 time.sleep(1.5)
                 self.is_simulated = False
                 try:
-                    self.ser.write(b"CONFIG_SENSORS,16\n")
+                    self.ser.write(b"CONFIG_SENSORS,12\n")
                 except Exception:
                     pass
-                print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud (16 Sensors Active).")
+                print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud (12 Sensors Active).")
             except Exception as e:
                 self._enter_sim(f"Serial connection failed: {e}")
         else:
@@ -205,7 +205,7 @@ class MotorController:
     def _enter_sim(self, reason: str):
         self.is_simulated = True
         print(f"[Motors] [SIMULATION MODE] {reason}")
-        print("[Motors] Hardware-Free Testing Active: Virtual 16-Sensor 4WD Physics Enabled.")
+        print("[Motors] Hardware-Free Testing Active: Virtual 12-Sensor 4WD Physics Enabled.")
 
     # scans all com ports looking for an arduino mega, ch340, or cp2102 chip
     def _find_arduino(self) -> Optional[str]:
@@ -513,6 +513,19 @@ class MotorController:
             rl = min(s_all[7], s_all[13])
             rr_corner = min(s_all[11], s_all[14])
             rc = min(s_all[3], s_all[15])
+        elif s_all and len(s_all) >= 12:
+            # 12-Sensor Radial Array across 3 modular banks (3 sensors per side: 3 front, 3 left, 3 right, 3 rear):
+            # Bank 1: 0=F1, 1=L1, 2=R1, 3=B1
+            # Bank 2: 4=F2, 5=L2, 6=R2, 7=B2
+            # Bank 3: 8=F3, 9=L3, 10=R3, 11=B3
+            fc = s_all[0]                          # FRONT_1 (Center)
+            fl = min(s_all[4], s_all[1])           # FRONT_2 & LEFT_1 (Front-Left Corner)
+            fr = min(s_all[8], s_all[2])           # FRONT_3 & RIGHT_1 (Front-Right Corner)
+            ll = s_all[5]                          # LEFT_2 (Left Flank)
+            rr = s_all[6]                          # RIGHT_2 (Right Flank)
+            rl = min(s_all[7], s_all[9])           # REAR_2 & LEFT_3 (Rear-Left Corner)
+            rr_corner = min(s_all[11], s_all[10])  # REAR_3 & RIGHT_3 (Rear-Right Corner)
+            rc = s_all[3]                          # REAR_1 (Rear Center)
         elif s_all and len(s_all) >= 8:
             fc = min(s_all[0], s_all[4])
             fl = min(s_all[0], s_all[5])
@@ -860,9 +873,9 @@ class MotorController:
                         self.telemetry.left_us_cm = sim_l
                         self.telemetry.right_us_cm = sim_r
                         self.telemetry.rear_us_cm = 150.0
-                        self.telemetry.active_sensor_count = 16
-                        # Bank-interleaved 16-sensor array: [F1, L1, R1, B1, F2, L2, R2, B2, F3, L3, R3, B3, F4, L4, R4, B4]
-                        self.telemetry.sensors_all = [self.telemetry.front_us_cm, sim_l, sim_r, 150.0] * 4
+                        self.telemetry.active_sensor_count = 12
+                        # Bank-interleaved 12-sensor array (3 banks: F1, L1, R1, B1, F2, L2, R2, B2, F3, L3, R3, B3)
+                        self.telemetry.sensors_all = [self.telemetry.front_us_cm, sim_l, sim_r, 150.0] * 3
 
                 elif mode == NavMode.APPROACH:
                     target_done = False
@@ -875,8 +888,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 100.0
                         self.telemetry.right_us_cm = 100.0
                         self.telemetry.rear_us_cm = 150.0
-                        self.telemetry.active_sensor_count = 16
-                        self.telemetry.sensors_all = [new_f, 100.0, 100.0, 150.0] * 4
+                        self.telemetry.active_sensor_count = 12
+                        self.telemetry.sensors_all = [new_f, 100.0, 100.0, 150.0] * 3
                         if new_f <= 90.0:
                             self.target_reached = True
                             target_done = True
@@ -896,8 +909,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 120.0
                         self.telemetry.right_us_cm = 120.0
                         self.telemetry.rear_us_cm = 140.0
-                        self.telemetry.active_sensor_count = 16
-                        self.telemetry.sensors_all = [150.0, 120.0, 120.0, 140.0] * 4
+                        self.telemetry.active_sensor_count = 12
+                        self.telemetry.sensors_all = [150.0, 120.0, 120.0, 140.0] * 3
 
                 elif mode == NavMode.SPIN:
                     with self.lock:
@@ -905,8 +918,8 @@ class MotorController:
                         self.telemetry.left_us_cm = 120.0
                         self.telemetry.right_us_cm = 120.0
                         self.telemetry.rear_us_cm = 120.0
-                        self.telemetry.active_sensor_count = 16
-                        self.telemetry.sensors_all = [120.0, 120.0, 120.0, 120.0] * 4
+                        self.telemetry.active_sensor_count = 12
+                        self.telemetry.sensors_all = [120.0, 120.0, 120.0, 120.0] * 3
 
                 else:
                     with self.lock:
@@ -914,13 +927,13 @@ class MotorController:
                         if self.telemetry.left_us_cm <= 0: self.telemetry.left_us_cm = 999.0
                         if self.telemetry.right_us_cm <= 0: self.telemetry.right_us_cm = 999.0
                         if self.telemetry.rear_us_cm <= 0: self.telemetry.rear_us_cm = 999.0
-                        self.telemetry.active_sensor_count = 16
+                        self.telemetry.active_sensor_count = 12
                         self.telemetry.sensors_all = [
                             self.telemetry.front_us_cm,
                             self.telemetry.left_us_cm,
                             self.telemetry.right_us_cm,
                             self.telemetry.rear_us_cm,
-                        ] * 4
+                        ] * 3
 
                 time.sleep(0.05)
                 continue
@@ -935,7 +948,7 @@ class MotorController:
                             l_val = float(parts[2])
                             r_val = float(parts[3])
                             b_val = float(parts[4])
-                            cnt_val = 16
+                            cnt_val = 12
                             s_all = None
                             if len(parts) > 5:
                                 try:

@@ -37,9 +37,9 @@ const int M4_RPWM = 8;   // forward speed pin
 const int M4_LPWM = 9;   // reverse speed pin
 const int M4_EN   = 29;  // enable pin to power up driver
 
-// ================= 2. ultrasonic sensors (scalable 16-sensor array) =================
-// 16 total sensor slots arranged in 4 modular banks (1 sensor per side per bank)
-#define MAX_ULTRASONIC_SENSORS 16
+// ================= 2. ultrasonic sensors (dedicated 12-sensor array) =================
+// 12 total sensor slots arranged in 3 modular banks (1 sensor per side per bank: 3 front, 3 left, 3 right, 3 rear)
+#define MAX_ULTRASONIC_SENSORS 12
 
 enum SensorSide { SIDE_FRONT = 0, SIDE_LEFT = 1, SIDE_RIGHT = 2, SIDE_REAR = 3 };
 
@@ -52,41 +52,33 @@ struct UltrasonicSensor {
   bool isConnected;
 };
 
-// 16-slot sensor registry across 4 symmetrical banks:
+// 12-slot sensor registry across 3 symmetrical banks:
 // bank 1 (slots 0..3)  -> 4 sensors total (1 per side: front, left, right, rear)
 // bank 2 (slots 4..7)  -> 8 sensors total (2 per side)
-// bank 3 (slots 8..11) -> 12 sensors total (3 per side)
-// bank 4 (slots 12..15)-> 16 sensors total (4 per side - full 360-degree coverage)
+// bank 3 (slots 8..11) -> 12 sensors total (3 per side - complete perimeter coverage)
 UltrasonicSensor sensors[MAX_ULTRASONIC_SENSORS] = {
-  // bank 1: base 4 sensors (standard default)
+  // bank 1: base 4 sensors (center sensors on each side)
   {"FRONT_1", SIDE_FRONT, 30, 31, 999.0, true},
   {"LEFT_1",  SIDE_LEFT,  32, 33, 999.0, true},
   {"RIGHT_1", SIDE_RIGHT, 34, 35, 999.0, true},
   {"REAR_1",  SIDE_REAR,  36, 37, 999.0, true},
 
-  // bank 2: expanded to 8 sensors (corner & perimeter coverage)
+  // bank 2: expanded to 8 sensors (corner & flank coverage)
   {"FRONT_2", SIDE_FRONT, 38, 39, 999.0, true},
   {"LEFT_2",  SIDE_LEFT,  40, 41, 999.0, true},
   {"RIGHT_2", SIDE_RIGHT, 42, 43, 999.0, true},
   {"REAR_2",  SIDE_REAR,  44, 45, 999.0, true},
 
-  // bank 3: expanded to 12 sensors (wide-angle flanking coverage)
+  // bank 3: expanded to 12 sensors (wide-angle perimeter coverage)
   {"FRONT_3", SIDE_FRONT, 46, 47, 999.0, true},
   {"LEFT_3",  SIDE_LEFT,  48, 49, 999.0, true},
   {"RIGHT_3", SIDE_RIGHT, 50, 51, 999.0, true},
-  {"REAR_3",  SIDE_REAR,  52, 53, 999.0, true},
-
-  // bank 4: expanded to 16 sensors (god-tier 4 sensors per side)
-  // note: pins 54-61 correspond to arduino mega analog pins a0-a7 used as digital io
-  {"FRONT_4", SIDE_FRONT, 54, 55, 999.0, true},
-  {"LEFT_4",  SIDE_LEFT,  56, 57, 999.0, true},
-  {"RIGHT_4", SIDE_RIGHT, 58, 59, 999.0, true},
-  {"REAR_4",  SIDE_REAR,  60, 61, 999.0, true}
+  {"REAR_3",  SIDE_REAR,  52, 53, 999.0, true}
 };
 
-// number of active sensors in rotation (default 16 sensors for final build)
-int num_active_sensors = 16;
-int current_ping_bank = 0; // cycles 0, 1, 2, 3 for non-blocking interleaved pinging
+// number of active sensors in rotation (12 sensors for physical build)
+int num_active_sensors = 12;
+int current_ping_bank = 0; // cycles 0, 1, 2 for non-blocking interleaved pinging across 3 banks
 
 // ================= 3. safety settings =================
 // if anything gets closer than 20cm in our driving path, slam the brakes immediately
@@ -292,10 +284,8 @@ void detect_installed_sensors() {
     }
   }
 
-  // snap to 0, 4, 8, 12, or 16 active sensor banks
-  if (detected_count >= 14) {
-    num_active_sensors = 16;
-  } else if (detected_count >= 10) {
+  // snap to 0, 4, 8, or 12 active sensor banks
+  if (detected_count >= 10) {
     num_active_sensors = 12;
   } else if (detected_count >= 6) {
     num_active_sensors = 8;
@@ -303,8 +293,8 @@ void detect_installed_sensors() {
     num_active_sensors = 4; // base bank 1 (1 front, 1 left, 1 right, 1 rear)
   } else {
     // zero physical transducers detected on echo pins:
-    // default to full 16-sensor mode for laptop bench testing and breadboard simulation
-    num_active_sensors = 16;
+    // default to 12-sensor mode for laptop bench testing and breadboard simulation
+    num_active_sensors = 12;
     for (int i = 0; i < MAX_ULTRASONIC_SENSORS; i++) {
       sensors[i].isConnected = true;
       sensors[i].distanceCm = 999.0;
@@ -338,7 +328,7 @@ float read_ultrasonic(int trig_pin, int echo_pin) {
   return duration * 0.0343 / 2.0;
 }
 
-// time-sliced god-tier sensor reading: pings 1 bank (4 sensors: 1 per side) each 50ms tick
+// time-sliced sensor reading: pings 1 bank (4 sensors: 1 per side) each 50ms tick across 3 banks
 // this keeps cpu load ultra low, guarantees zero acoustic cross-talk, and updates side minimums
 void read_all_sensors() {
   if (num_active_sensors == 0) {
@@ -351,7 +341,7 @@ void read_all_sensors() {
 
   int num_banks = num_active_sensors / 4;
   if (num_banks < 1) num_banks = 1;
-  if (num_banks > 4) num_banks = 4;
+  if (num_banks > 3) num_banks = 3;
 
   // determine which bank of 4 sensors to ping on this tick
   int start_idx = current_ping_bank * 4;
@@ -443,7 +433,7 @@ void process_serial() {
         detect_installed_sensors();
       } else {
         int val = cfg.toInt();
-        if (val == 0 || val == 4 || val == 8 || val == 12 || val == 16) {
+        if (val == 0 || val == 4 || val == 8 || val == 12) {
           num_active_sensors = val;
           for (int i = 0; i < num_active_sensors; i++) sensors[i].isConnected = true;
           for (int i = num_active_sensors; i < MAX_ULTRASONIC_SENSORS; i++) {

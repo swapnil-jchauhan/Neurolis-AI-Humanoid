@@ -19,4 +19,7 @@ _neurolis_vision.jpg
 *.wav
 *.mp3
 !assets/sounds/*.wav
-!assets/sounds/*.mp3
+!assets/sounds/*.mp3env 
+.env 
+env
+.env
