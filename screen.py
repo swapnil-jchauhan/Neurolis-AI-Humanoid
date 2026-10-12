@@ -447,9 +447,9 @@ class FaceUI:
     # constructor sets up the window dimensions, colors, eye sizes, and animation timers
     def __init__(
         self,
-        width: int = 1024,
-        height: int = 600,
-        fullscreen: bool = sys.platform.startswith("linux"),
+        width: int = 1920,
+        height: int = 1080,
+        fullscreen: bool = False,
         bg_color: str = "#040711",
         enable_boot: bool = True,
     ):
@@ -515,8 +515,12 @@ class FaceUI:
         self.color_confused = "#ffb703"
         self.color_confused_glow = "#4d3400"
 
-        # Geometry dynamically calibrated for 7-inch (1024x600) Raspberry Pi Touchscreen
-        self._update_dimensions(self.width, self.height)
+        # Geometry scaled for 1920x1080 16:9 with +15% expression size boost
+        self.ui_scale = (self.width / 1024.0) * 1.15
+        self.eye_w = int(160 * self.ui_scale)
+        self.eye_h = int(165 * self.ui_scale)
+        self.eye_spacing = int(260 * self.ui_scale)
+        self.corner_radius = int(42 * self.ui_scale)
 
         # Touchscreen 'TALK TO NEUROLIS' & 'STAND-BY' Button attributes & callbacks
         self.on_talk_click = None
@@ -525,17 +529,6 @@ class FaceUI:
         self.standby_btn_bbox = None
         self._last_talk_press_time = 0.0
         self._last_standby_press_time = 0.0
-
-    def _update_dimensions(self, w: int, h: int):
-        """Recalculates eye and element scaling dynamically based on screen resolution."""
-        self.width = w
-        self.height = h
-        scale = min(w / 1024.0, h / 600.0)
-        self.ui_scale = scale
-        self.eye_w = int(125 * scale)
-        self.eye_h = int(130 * scale)
-        self.eye_spacing = int(210 * scale)
-        self.corner_radius = int(32 * scale)
 
         # Optical Human Latch tracking attributes
         self.target_latched = False
@@ -706,35 +699,14 @@ class FaceUI:
     def _run_tk_loop(self):
         self.root = tk.Tk()
         self.root.title("Neurolis Face UI")
-
-        is_linux = sys.platform.startswith("linux")
-        try:
-            self.root.update_idletasks()
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-        except Exception:
-            sw, sh = self.width, self.height
-
-        # On Raspberry Pi or when fullscreen requested, adapt to screen dimensions
-        if self.fullscreen or is_linux:
-            if sw > 0 and sh > 0:
-                self._update_dimensions(sw, sh)
-            self.root.geometry(f"{self.width}x{self.height}+0+0")
-            try:
-                self.root.attributes("-fullscreen", True)
-            except Exception:
-                try:
-                    self.root.wm_attributes("-fullscreen", 1)
-                except Exception:
-                    pass
-        else:
-            self.root.geometry(f"{self.width}x{self.height}")
-
+        self.root.geometry(f"{self.width}x{self.height}")
         self.root.configure(bg=self.bg_color)
+
+        if self.fullscreen:
+            self.root.attributes("-fullscreen", True)
 
         self.root.bind("<Escape>", lambda e: self.stop())
         self.root.bind("f", lambda e: self._toggle_fullscreen())
-        self.root.bind("<F11>", lambda e: self._toggle_fullscreen())
         self.root.bind("<Button-1>", self._on_screen_press)
         self.root.bind("<Key>", self._on_key)
 
@@ -746,31 +718,17 @@ class FaceUI:
             highlightthickness=0,
         )
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.bind("<Button-1>", self._on_screen_press)
 
         self.running = True
         self._animate_loop()
         self.root.mainloop()
 
-    def _on_canvas_configure(self, event):
-        if event.width > 50 and event.height > 50:
-            if event.width != self.width or event.height != self.height:
-                self._update_dimensions(event.width, event.height)
-
-    # hit 'f' or 'F11' on the keyboard to toggle between windowed and borderless fullscreen
+    # hit 'f' on the keyboard to toggle between windowed and borderless fullscreen
     def _toggle_fullscreen(self):
         if self.root:
             self.fullscreen = not self.fullscreen
-            try:
-                self.root.attributes("-fullscreen", self.fullscreen)
-            except Exception:
-                try:
-                    self.root.wm_attributes("-fullscreen", 1 if self.fullscreen else 0)
-                except Exception:
-                    pass
-            if not self.fullscreen:
-                self.root.geometry(f"{self.width}x{self.height}+50+50")
+            self.root.attributes("-fullscreen", self.fullscreen)
 
     # thread-safe function that listen.py calls to switch expressions (happy, sad, etc)
     def set_state(self, state: str, status_msg: Optional[str] = None):
@@ -932,7 +890,7 @@ class FaceUI:
 
         # Position face in upper region so subtitles sit comfortably in lower region
         center_x = w / 2.0
-        center_y = h * 0.31
+        center_y = h * 0.33
 
         with self.lock:
             cur_state = self.state
@@ -1033,10 +991,10 @@ class FaceUI:
         self._draw_ambient_header(w, h, main_color, cur_state)
 
         # 2. Eye Positioning (with gentle suspension dynamics when driving & ocular gaze tracking)
-        gaze_scale = self.ui_scale
-        gaze_dx = look_x * (18.0 * gaze_scale)
-        gaze_dy = look_y * (12.0 * gaze_scale)
-        suspension_bounce = math.sin(self.anim_phase * 6.0) * (2.5 * gaze_scale) if cur_state == ExpressionState.MOVING else 0.0
+        gaze_scale = self.ui_scale / 1.8
+        gaze_dx = look_x * (24.0 * gaze_scale)
+        gaze_dy = look_y * (16.0 * gaze_scale)
+        suspension_bounce = math.sin(self.anim_phase * 6.0) * (3.0 * gaze_scale) if cur_state == ExpressionState.MOVING else 0.0
         left_eye_cx = center_x - (self.eye_spacing / 2.0) + gaze_dx
         right_eye_cx = center_x + (self.eye_spacing / 2.0) + gaze_dx
         eye_cy = center_y + suspension_bounce + gaze_dy
@@ -1104,7 +1062,7 @@ class FaceUI:
             self._draw_idle_mouth(center_x, mouth_cy, main_color)
 
         # 6. 'TALK TO NEUROLIS' Touch Button (Positioned between mouth and subtitles)
-        btn_y = mouth_cy + int(self.eye_h * 0.28)
+        btn_y = mouth_cy + int(self.eye_h * 0.22)
         btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
 
         # 7. Real-Time Subtitle Card & Status (Shrunk lower pill container)
@@ -1944,12 +1902,12 @@ class FaceUI:
         scale_x = w / 1024.0
         scale_y = h / 600.0
 
-        btn_h = int(38 * scale_y)
-        radius = int(btn_h / 2)
-        gap = int(12 * scale_x)
+        btn_h = int(48 * scale_y)
+        radius = int(24 * scale_y)
+        gap = int(14 * scale_x)
 
-        talk_w = int(260 * scale_x)
-        standby_w = int(130 * scale_x)
+        talk_w = int(340 * scale_x)
+        standby_w = int(160 * scale_x)
         total_w = talk_w + gap + standby_w
 
         # Perfectly center the combined dual-button bar on cx
@@ -1972,11 +1930,11 @@ class FaceUI:
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
 
-        glow_pad = int(4 * scale_y)
-        inset = int(3 * scale_y)
-        dot_r = int(4 * scale_y)
+        glow_pad = int(5 * scale_y)
+        inset = int(4 * scale_y)
+        dot_r = int(5 * scale_y)
         dot_cy = (by1 + by2) / 2.0
-        font_size = int(11 * scale_y)
+        font_size = int(13 * scale_y)
 
         # ---------------- 1. TALK TO NEUROLIS BUTTON ----------------
         if talk_active:
@@ -2016,7 +1974,7 @@ class FaceUI:
             )
 
         # Talk button indicator dot
-        talk_dot_x = bx1 + int(24 * scale_x)
+        talk_dot_x = bx1 + int(32 * scale_x)
         self.canvas.create_oval(
             talk_dot_x - dot_r, dot_cy - dot_r,
             talk_dot_x + dot_r, dot_cy + dot_r,
@@ -2024,7 +1982,7 @@ class FaceUI:
         )
 
         # Talk button typography
-        talk_text_x = (bx1 + bx2) / 2.0 + int(8 * scale_x)
+        talk_text_x = (bx1 + bx2) / 2.0 + int(10 * scale_x)
         self.canvas.create_text(
             talk_text_x, dot_cy,
             text="TALK TO NEUROLIS",
@@ -2070,7 +2028,7 @@ class FaceUI:
             )
 
         # Standby button indicator dot
-        standby_dot_x = sbx1 + int(18 * scale_x)
+        standby_dot_x = sbx1 + int(24 * scale_x)
         self.canvas.create_oval(
             standby_dot_x - dot_r, dot_cy - dot_r,
             standby_dot_x + dot_r, dot_cy + dot_r,
@@ -2078,7 +2036,7 @@ class FaceUI:
         )
 
         # Standby button typography (strictly no emojis)
-        standby_text_x = (sbx1 + sbx2) / 2.0 + int(6 * scale_x)
+        standby_text_x = (sbx1 + sbx2) / 2.0 + int(8 * scale_x)
         self.canvas.create_text(
             standby_text_x, dot_cy,
             text="STAND-BY",
@@ -2414,6 +2372,6 @@ class FaceUI:
 
 # test runner to preview the face ui standalone on desktop without motors or speech
 if __name__ == "__main__":
-    print("Testing Neurolis Face UI (7-inch 1024x600 preview)...")
-    ui = FaceUI(width=1024, height=600, fullscreen=sys.platform.startswith("linux"))
+    print("Testing Neurolis Face UI (7-inch 1920x1080 preview)...")
+    ui = FaceUI(width=1920, height=1080, fullscreen=False)
     ui.start(in_background=False)
