@@ -94,9 +94,14 @@ class ArduinoBridge:
         ports = list(serial.tools.list_ports.comports())
         target_port = None
         for p in ports:
+            dev = (p.device or "").lower()
             desc = (p.description or "").lower()
             hwid = (p.hwid or "").lower()
-            if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "usb serial"]):
+
+            if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                continue
+
+            if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"]):
                 target_port = p.device
                 break
 
@@ -109,8 +114,6 @@ class ArduinoBridge:
 
         if target_port:
             self.connect(target_port)
-        elif ports:
-            self.connect(ports[0].device)
         else:
             self.enter_simulation("No physical Arduino Mega detected on USB.")
 

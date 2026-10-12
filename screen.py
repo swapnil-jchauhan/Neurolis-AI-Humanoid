@@ -22,6 +22,23 @@ import tkinter as tk
 from pathlib import Path
 from typing import Optional
 
+# Suppress verbose OpenCV warnings and V4L2 probe noise
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0"
+
+# Suppress PortAudio ALSA C-level error traces on Linux
+if sys.platform.startswith("linux"):
+    try:
+        import ctypes
+        asound = ctypes.cdll.LoadLibrary("libasound.so.2")
+        ERROR_HANDLER_FUNC = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p)
+        def _alsa_error_handler(filename, line, function, err, fmt):
+            pass
+        _c_alsa_error_handler = ERROR_HANDLER_FUNC(_alsa_error_handler)
+        asound.snd_lib_error_set_handler(_c_alsa_error_handler)
+    except Exception:
+        pass
+
 # crisp system font family selection across windows and linux / raspberry pi
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "DejaVu Sans"
 
@@ -221,19 +238,37 @@ class BootAudioPlayer:
             return
         try:
             import sounddevice as sd
+            # Probe available output devices before opening stream to prevent ALSA -9994 error
+            try:
+                devices = sd.query_devices()
+                has_output = any(d.get("max_output_channels", 0) > 0 for d in devices if isinstance(d, dict))
+                if not has_output:
+                    self.is_playing = False
+                    return
+            except Exception:
+                pass
+
             self.is_playing = True
             self.fade_vol = 1.0
             self.is_fading = False
             self.pos = 0
-            self.stream = sd.OutputStream(
-                samplerate=self.samplerate,
-                channels=self.channels,
-                callback=self._audio_callback,
-            )
+
+            # Fallback to standard 44.1kHz if float32 48kHz is unsupported on Linux/Pi audio sinks
+            try:
+                self.stream = sd.OutputStream(
+                    samplerate=self.samplerate,
+                    channels=self.channels,
+                    callback=self._audio_callback,
+                )
+            except Exception:
+                self.stream = sd.OutputStream(
+                    samplerate=44100,
+                    channels=min(2, self.channels),
+                    callback=self._audio_callback,
+                )
             self.stream.start()
-        except Exception as e:
+        except Exception:
             self.is_playing = False
-            print(f"[Screen] Boot audio start notice: {e}")
 
     def fade_out_and_stop(self, fade_duration: float = 0.5):
         with self.lock:
@@ -272,15 +307,27 @@ class HardwareInspector:
                 ser = getattr(self.motor_controller, "ser", None)
                 if ser is not None and getattr(ser, "is_open", False):
                     return True, getattr(ser, "port", "USB")
+            else:
+                return False, None
 
         # 2. scan live serial com ports
         try:
             import serial.tools.list_ports as lp
             ports = list(lp.comports())
             for p in ports:
+                dev = (p.device or "").lower()
                 desc = (p.description or "").lower()
                 hwid = (p.hwid or "").lower()
-                if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "usb serial"]):
+
+                # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
+                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                    continue
+
+                # Genuine USB serial criteria
+                is_usb_path = any(dev.startswith(prefix) for prefix in ["/dev/ttyacm", "/dev/ttyusb"])
+                is_usb_desc = any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"])
+
+                if is_usb_path or is_usb_desc:
                     return True, p.device
         except Exception:
             pass
@@ -605,17 +652,15 @@ class FaceUI:
                     print(f"[Screen] Talk button callback error: {e}")
             return
 
-        # 2. Check touch tap on TALK TO NEUROLIS button (Clickable ONLY when in STANDBY)
-        if self.talk_btn_bbox is not None and is_standby:
-            bx1, by1, bx2, by2 = self.talk_btn_bbox
-            if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
-                self._last_talk_press_time = time.time()
-                if self.on_talk_click is not None:
-                    try:
-                        self.on_talk_click()
-                    except Exception as e:
-                        print(f"[Screen] Talk button callback error: {e}")
-                return
+        # 2. Check touch tap in STANDBY: tapping TALK TO NEUROLIS button or anywhere on screen wakes up Neurolis
+        if is_standby:
+            self._last_talk_press_time = time.time()
+            if self.on_talk_click is not None:
+                try:
+                    self.on_talk_click()
+                except Exception as e:
+                    print(f"[Screen] Talk button callback error: {e}")
+            return
 
         # 3. Check touch tap on STAND-BY button (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
         if self.standby_btn_bbox is not None and not is_standby:
@@ -873,15 +918,17 @@ class FaceUI:
         self.anim_phase += dt * 3.2
         self.thinking_angle += dt * 4.5
 
-    # the 60fps heartbeat that updates physics and repaints the canvas every 16ms
+    # the heartbeat that updates physics and repaints the canvas (33ms on Linux/Pi, 16ms on Windows)
     def _animate_loop(self):
         if not self.running or self.canvas is None:
             return
-        dt = 0.016
+        is_linux = sys.platform.startswith("linux")
+        interval_ms = 33 if is_linux else 16
+        dt = 0.033 if is_linux else 0.016
         self._update_physics(dt)
         self._render()
         if self.root and self.running:
-            self.root.after(16, self._animate_loop)
+            self.root.after(interval_ms, self._animate_loop)
 
     # helper math to draw smooth rounded rectangles for eyes and cards
     def _create_rounded_rect(self, x1, y1, x2, y2, radius, **kwargs):

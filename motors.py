@@ -25,6 +25,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+# Suppress verbose OpenCV warnings and V4L2 probe noise on Linux
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0"
+
 import cv2
 import numpy as np
 
@@ -103,7 +107,7 @@ class MotorController:
         # Telemetry
         self.telemetry = TelemetryData()
         self.ser: Optional["serial.Serial"] = None
-        self.is_simulated = False
+        self.is_simulated = True
 
         # Navigation & Safe Approach State
         self.autonomous_approach_engaged = True
@@ -207,17 +211,28 @@ class MotorController:
         print(f"[Motors] [SIMULATION MODE] {reason}")
         print("[Motors] Hardware-Free Testing Active: Virtual 12-Sensor 4WD Physics Enabled.")
 
-    # scans all com ports looking for an arduino mega, ch340, or cp2102 chip
+    # scans all com ports looking for an authentic usb arduino mega, ch340, or cp2102 chip
     def _find_arduino(self) -> Optional[str]:
         if not HAS_SERIAL:
             return None
         ports = list(serial.tools.list_ports.comports())
         for p in ports:
+            dev = (p.device or "").lower()
             desc = (p.description or "").lower()
             hwid = (p.hwid or "").lower()
-            if any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "usb serial"]):
+
+            # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
+            if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                continue
+
+            # Genuine USB serial criteria
+            is_usb_path = any(dev.startswith(prefix) for prefix in ["/dev/ttyacm", "/dev/ttyusb"])
+            is_usb_desc = any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"])
+
+            if is_usb_path or is_usb_desc:
                 return p.device
-        return ports[0].device if ports else None
+
+        return None
 
     @property
     def is_moving(self) -> bool:
@@ -444,39 +459,74 @@ class MotorController:
 
     # background thread that reads the webcam at 30 fps without blocking the main brain
     def _vision_loop(self):
-        if sys.platform.startswith("win"):
-            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-        else:
-            self.cap = cv2.VideoCapture(self.camera_index)
+        try:
+            if sys.platform.startswith("win"):
+                self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            else:
+                self.cap = cv2.VideoCapture(self.camera_index)
+        except Exception:
+            self.cap = None
 
+        last_probe_time = time.monotonic()
+        consecutive_read_failures = 0
         while self.running:
-            if self.cap and self.cap.isOpened():
+            has_camera = self.cap is not None and self.cap.isOpened()
+            # If camera is not plugged in, probe periodically (every 5s) instead of looping/thrashing V4L2
+            if not has_camera and (time.monotonic() - last_probe_time > 5.0):
+                last_probe_time = time.monotonic()
+                try:
+                    if sys.platform.startswith("win"):
+                        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+                    else:
+                        self.cap = cv2.VideoCapture(self.camera_index)
+                except Exception:
+                    self.cap = None
+                has_camera = self.cap is not None and self.cap.isOpened()
+                if has_camera:
+                    consecutive_read_failures = 0
+
+            if has_camera:
                 ok, frame = self.cap.read()
                 if ok and frame is not None:
+                    consecutive_read_failures = 0
                     with self.lock:
                         self.latest_raw_frame = frame.copy()
                     self._process_frame(frame)
                 else:
+                    consecutive_read_failures += 1
+                    if consecutive_read_failures >= 10:
+                        try:
+                            self.cap.release()
+                        except Exception:
+                            pass
+                        self.cap = None
                     time.sleep(0.04)
             else:
-                # Zero-hardware simulation mode: synthesize frames when no physical webcam is attached
-                sim_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                sim_frame[:] = (18, 10, 5)  # dark cyber canvas
-                sim_face = getattr(self, "_simulated_face", None)
-                if sim_face and sim_face[0]:
-                    _, scx, scy, sratio = sim_face
-                    fcx = int((scx + 1.0) * 320.0)
-                    fcy = int((scy + 1.0) * 240.0)
-                    frad = max(20, int(240 * sratio))
-                    if cv2 is not None:
-                        cv2.circle(sim_frame, (fcx, fcy), frad, (200, 180, 150), -1)
-                        cv2.circle(sim_frame, (fcx, fcy), frad + 4, (0, 240, 255), 2)
-                        cv2.putText(sim_frame, "SIMULATED HUMAN", (fcx - 60, max(20, fcy - frad - 10)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 200), 1)
                 with self.lock:
-                    self.latest_raw_frame = sim_frame.copy()
-                self._process_frame(sim_frame)
-                time.sleep(0.04)
+                    mode = self.nav_mode
+                    need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN])
+
+                if mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN] or need_display:
+                    # Zero-hardware simulation mode: synthesize frames when no physical webcam is attached
+                    sim_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    sim_frame[:] = (18, 10, 5)  # dark cyber canvas
+                    sim_face = getattr(self, "_simulated_face", None)
+                    if sim_face and sim_face[0]:
+                        _, scx, scy, sratio = sim_face
+                        fcx = int((scx + 1.0) * 320.0)
+                        fcy = int((scy + 1.0) * 240.0)
+                        frad = max(20, int(240 * sratio))
+                        if cv2 is not None:
+                            cv2.circle(sim_frame, (fcx, fcy), frad, (200, 180, 150), -1)
+                            cv2.circle(sim_frame, (fcx, fcy), frad + 4, (0, 240, 255), 2)
+                            cv2.putText(sim_frame, "SIMULATED HUMAN", (fcx - 60, max(20, fcy - frad - 10)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 200), 1)
+                    with self.lock:
+                        self.latest_raw_frame = sim_frame.copy()
+                    self._process_frame(sim_frame)
+                    time.sleep(0.04)
+                else:
+                    time.sleep(0.1)
 
     # parses connected ultrasonic sensors (scalable 4 to 16) into an 8-sector radial perception map
     def get_radial_sectors(self) -> dict:
@@ -562,49 +612,62 @@ class MotorController:
 
     # runs yunet deep learning face detection on the camera frame and calculates steering math
     def _process_frame(self, frame: np.ndarray):
+        with self.lock:
+            mode = self.nav_mode
+            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN])
+
         h, w = frame.shape[:2]
         proc_w = 480
         scale = proc_w / float(w)
         proc_h = int(h * scale)
-        proc_frame = cv2.resize(frame, (proc_w, proc_h))
+        proc_frame = None
 
         detected_faces = []
+        is_hardware_camera = (self.cap is not None and self.cap.isOpened())
 
-        # 1. High-Accuracy YuNet Face Detection
-        if self.detector is not None:
-            self.detector.setInputSize((proc_w, proc_h))
-            _, faces = self.detector.detect(proc_frame)
-            if faces is not None:
-                for f in faces:
-                    score = f[-1]
-                    if score >= 0.60:  # Confident face only
-                        fx, fy, fw, fh = int(f[0]), int(f[1]), int(f[2]), int(f[3])
-                        detected_faces.append((fx, fy, fw, fh, score))
+        # On-Demand YuNet Vision:
+        # ROAM mode is 100% ultrasonic and does NOT use YuNet.
+        # YuNet must be completely sleeping (0 FPS inference, 0% CPU) during STANDBY, ROAM, STEP_BACK, and SPIN.
+        # YuNet activates ONLY on user command in FOLLOW or APPROACH modes when a physical camera is present.
+        if mode in [NavMode.FOLLOW, NavMode.APPROACH]:
+            if proc_frame is None:
+                proc_frame = cv2.resize(frame, (proc_w, proc_h))
+            if is_hardware_camera:
+                # 1. High-Accuracy YuNet Face Detection
+                if self.detector is not None:
+                    self.detector.setInputSize((proc_w, proc_h))
+                    _, faces = self.detector.detect(proc_frame)
+                    if faces is not None:
+                        for f in faces:
+                            score = f[-1]
+                            if score >= 0.60:  # Confident face only
+                                fx, fy, fw, fh = int(f[0]), int(f[1]), int(f[2]), int(f[3])
+                                detected_faces.append((fx, fy, fw, fh, score))
 
-        # 2. Fallback Haar Cascade
-        elif self.cascade is not None:
-            gray = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
-            faces = self.cascade.detectMultiScale(
-                gray, scaleFactor=1.15, minNeighbors=5, minSize=(int(proc_h * 0.15), int(proc_h * 0.15))
-            )
-            for fx, fy, fw, fh in faces:
-                detected_faces.append((fx, fy, fw, fh, 1.0))
-
-        # Fallback to simulated face if zero-hardware simulation active
-        sim_face = getattr(self, "_simulated_face", None)
-        if len(detected_faces) == 0 and sim_face and sim_face[0]:
-            _, scx, scy, sratio = sim_face
-            sfh = max(10, int(proc_h * sratio))
-            sfw = sfh
-            sfx = int((scx + 1.0) * (proc_w / 2.0) - sfw / 2.0)
-            sfy = int((scy + 1.0) * (proc_h / 2.0) - sfh / 2.0)
-            detected_faces.append((sfx, sfy, sfw, sfh, 0.99))
+                # 2. Fallback Haar Cascade
+                elif self.cascade is not None:
+                    gray = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
+                    faces = self.cascade.detectMultiScale(
+                        gray, scaleFactor=1.15, minNeighbors=5, minSize=(int(proc_h * 0.15), int(proc_h * 0.15))
+                    )
+                    for fx, fy, fw, fh in faces:
+                        detected_faces.append((fx, fy, fw, fh, 1.0))
+            else:
+                # Zero-hardware simulation mode: synthesize without neural inference (0% CPU)
+                sim_face = getattr(self, "_simulated_face", None)
+                if sim_face and sim_face[0]:
+                    _, scx, scy, sratio = sim_face
+                    sfh = max(10, int(proc_h * sratio))
+                    sfw = sfh
+                    sfx = int((scx + 1.0) * (proc_w / 2.0) - sfw / 2.0)
+                    sfy = int((scy + 1.0) * (proc_h / 2.0) - sfh / 2.0)
+                    detected_faces.append((sfx, sfy, sfw, sfh, 0.99))
+        else:
+            # STANDBY, ROAM, STEP_BACK, SPIN: YuNet is completely sleeping (0 FPS inference, 0% CPU)
+            detected_faces = []
 
         now = time.time()
         dt = max(0.01, now - self._prev_time)
-
-        with self.lock:
-            mode = self.nav_mode
 
         if len(detected_faces) > 0:
             # Select largest primary face
@@ -792,6 +855,8 @@ class MotorController:
             need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN])
 
         if need_display:
+            if proc_frame is None:
+                proc_frame = cv2.resize(frame, (proc_w, proc_h))
             disp = proc_frame.copy()
             if len(detected_faces) > 0:
                 for fx, fy, fw, fh, score in detected_faces:
