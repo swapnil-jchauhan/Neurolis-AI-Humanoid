@@ -1013,12 +1013,12 @@ def is_casual_compliment(text: str) -> bool:
 
 
 def is_standalone_acknowledgment(text: str) -> bool:
-    """Detects isolated 1-2 word casual conversational acknowledgments (e.g. 'okay', 'got it', 'cool')."""
+    """Detects isolated 1-2 word casual conversational acknowledgments (e.g. 'okay', 'got it', 'alright')."""
     cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
     words = cleaned.split()
     if not words or len(words) > 2:
         return False
-    ack_words = {"okay", "ok", "alright", "got it", "cool", "sure", "nice", "fine", "sounds good", "great", "understood", "right"}
+    ack_words = {"okay", "ok", "alright", "got it", "sure", "fine", "sounds good", "understood", "right"}
     return cleaned in ack_words or (len(words) == 1 and words[0] in ack_words)
 
 

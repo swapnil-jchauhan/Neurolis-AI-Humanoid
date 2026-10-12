@@ -352,18 +352,18 @@ def probe_hardware_sample_rate() -> int:
 HW_SAMPLE_RATE = probe_hardware_sample_rate()
 HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
-START_SPEECH_FRAMES = 4            # 120ms to trip speech start (filters out clicks, sighs, breath puffs)
-END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff - snappy and responsive without cutting off speech
+START_SPEECH_FRAMES = 4            # 120ms to trip speech start (filters out clicks, sighs, breath puffs, and transient room noises)
+END_SILENCE_SECONDS = 0.50         # 500ms silence cutoff - natural speech cadence without early cutoffs
 CONVERSATION_TIMEOUT_SECONDS = 35  # 35s follow-up window (comfortable time to converse without premature standby)
 MAX_RECORD_SECONDS = 25
-MIN_RECORD_SECONDS = 0.50          # Requires at least 500ms audio to avoid phantom acoustic pops
+MIN_RECORD_SECONDS = 0.40          # 400ms minimum speech segment
 POST_REPLY_COOLDOWN_SECONDS = 0.04
-AMBIENT_CALIBRATION_SECONDS = 0.35
+AMBIENT_CALIBRATION_SECONDS = 0.55 # 550ms calibration window so steady-state room audio is measured after skipping 200ms surge
 MAX_CALIBRATION_AMBIENT_RMS = 150
-SPEECH_THRESHOLD_MULTIPLIER = 1.6
+SPEECH_THRESHOLD_MULTIPLIER = 1.50 # Clean headroom above ambient room noise
 CONTINUE_SPEECH_THRESHOLD_RATIO = 0.65
-MIN_SPEECH_RMS_THRESHOLD = 105     # Tuned to 105 RMS so normal voice triggers immediately while breaths/fan noise are ignored
-VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD to aggressively filter background noise
+MIN_SPEECH_RMS_THRESHOLD = 160.0   # Tuned to 160 RMS to reject 70-130 RMS ambient room/fan noise on uncalibrated mic
+VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD Mode 3 to aggressively filter background noise
 EDGE_TTS_VOICE = "en-US-ChristopherNeural"
 EDGE_TTS_RATE = "+14%"
 EDGE_TTS_VOLUME = "+0%"
@@ -702,7 +702,65 @@ def callback(indata, frames, time_info, status):
         resampled = np.interp(target_x, orig_x, raw).astype(np.int16)
         audio_queue.put(resampled)
 
-# listens to the room for 0.4 seconds to measure background ambient noise
+def apply_vocal_tunnel_filter(audio_16k: np.ndarray) -> np.ndarray:
+    """
+    Vertical Vocal Tunnel Acoustic Filter (Zero-Latency NumPy DSP):
+    Tailored for uncalibrated/cheap microphones where human speech sounds distant or muffled.
+      1. Pre-emphasis filter: Sharpens speech consonants (reduces low muffled bass boom, lifts clarity).
+      2. Vertical Vocal Tunnel FFT Passband (160 Hz - 4200 Hz): Isolates genuine human vocal chords
+         and formants while stripping sub-bass room rumble (<160 Hz) and high-frequency electrical hiss (>4500 Hz).
+      3. Mid-High Formant Clarity Boost (+4.5 dB at 1.8 kHz - 3.8 kHz): Restores intelligibility for Whisper.
+      4. Dynamic Vocal AGC: Smoothly amplifies soft/distant voices up to 4.5x without clipping.
+    """
+    if audio_16k is None or audio_16k.size < 64:
+        return audio_16k
+
+    try:
+        samples = audio_16k.astype(np.float32)
+
+        # 1. Pre-emphasis filter (alpha = 0.96) to lift consonant clarity
+        emphasized = np.empty_like(samples)
+        emphasized[0] = samples[0]
+        emphasized[1:] = samples[1:] - 0.96 * samples[:-1]
+
+        # 2. Fast FFT
+        n = len(samples)
+        fft_vals = np.fft.rfft(emphasized)
+        freqs = np.fft.rfftfreq(n, d=1.0 / 16000.0)
+
+        # 3. Vocal Tunnel Gain Profile (160 Hz to 4200 Hz passband)
+        gain = np.zeros_like(freqs, dtype=np.float32)
+        pass_mask = (freqs >= 160.0) & (freqs <= 4200.0)
+        gain[pass_mask] = 1.0
+
+        # Smooth bass roll-off (100 Hz to 160 Hz)
+        low_trans = (freqs >= 100.0) & (freqs < 160.0)
+        gain[low_trans] = 0.5 * (1.0 - np.cos(np.pi * (freqs[low_trans] - 100.0) / 60.0))
+
+        # Smooth high roll-off (4200 Hz to 5500 Hz)
+        high_trans = (freqs > 4200.0) & (freqs <= 5500.0)
+        gain[high_trans] = 0.5 * (1.0 + np.cos(np.pi * (freqs[high_trans] - 4200.0) / 1300.0))
+
+        # Mid/High vocal presence and consonant boost (+4.5 dB between 1.8 kHz and 3.8 kHz)
+        clarity_mask = (freqs >= 1800.0) & (freqs <= 3800.0)
+        gain[clarity_mask] *= 1.68
+
+        # 4. Inverse FFT
+        filtered_fft = fft_vals * gain
+        filtered = np.fft.irfft(filtered_fft, n=n)
+
+        # 5. Soft Vocal AGC: lifts distant voices up to 4.5x while preventing digital clipping
+        peak = np.max(np.abs(filtered))
+        if peak > 10.0:
+            target_peak = 22000.0
+            scale = min(target_peak / peak, 4.5)
+            filtered = filtered * scale
+
+        return np.clip(filtered, -32767.0, 32767.0).astype(np.int16)
+    except Exception:
+        return audio_16k
+
+# listens to the room for 0.55 seconds to measure background ambient noise, skipping initial 200ms hardware surge
 def calibrate_speech_threshold():
     with suppress_c_stderr():
         audio = sd.rec(
@@ -712,7 +770,13 @@ def calibrate_speech_threshold():
             dtype="int16",
         )
         sd.wait()
-    ambient_rms = min(audio_rms(audio.reshape(-1)), MAX_CALIBRATION_AMBIENT_RMS)
+    raw = audio.reshape(-1)
+    # Skip the first 200ms hardware/USB electrical surge
+    skip_samples = int(0.20 * HW_SAMPLE_RATE)
+    steady = raw[skip_samples:] if len(raw) > skip_samples else raw
+    # Apply vocal tunnel isolation to ambient noise so baseline reflects human vocal band
+    isolated_ambient = apply_vocal_tunnel_filter(steady)
+    ambient_rms = min(audio_rms(isolated_ambient), MAX_CALIBRATION_AMBIENT_RMS)
     return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
 
 # records microphone audio until the user stops speaking using vad and silence timers
@@ -835,6 +899,9 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                 callback=callback,
             )
         with stream_ctx:
+            # Drain initial USB hardware startup buffer/transient pop (~120ms)
+            time.sleep(0.12)
+            clear_audio_queue()
             completed = _recording_loop()
             if not completed:
                 return None
@@ -842,17 +909,20 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
     if not frames:
         return None
 
-    audio = np.concatenate(frames)
-    duration = audio.size / SAMPLE_RATE
+    raw_audio = np.concatenate(frames)
+    duration = raw_audio.size / SAMPLE_RATE
 
     if duration < MIN_RECORD_SECONDS:
         return None
 
-    # Energy check: reject faint background mumbling that slipped through
-    if audio_rms(audio) < (start_threshold * 0.85):
+    # Apply vertical vocal tunnel DSP filter: removes muffled boom, boosts treble & consonant clarity
+    enhanced_audio = apply_vocal_tunnel_filter(raw_audio)
+
+    # Energy check: reject faint background clicks that slipped through
+    if audio_rms(enhanced_audio) < (start_threshold * 0.70):
         return None
 
-    return audio
+    return enhanced_audio
 
 # runs an external command quietly without dumping text onto the terminal screen
 def run_quiet(command, timeout=15.0):
@@ -1076,6 +1146,17 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int) -> bool:
     if len(data.shape) == 1:
         data = np.ascontiguousarray(data, dtype=np.float32)
 
+    # Prepend 150ms of silence lead-in and 50ms trailing silence so Bluetooth DAC / PipeWire stream onset never truncates the first word
+    lead_silence_samples = int(samplerate * 0.15)
+    tail_silence_samples = int(samplerate * 0.05)
+    silence_parts = []
+    if lead_silence_samples > 0:
+        silence_parts.append(np.zeros(lead_silence_samples, dtype=np.float32))
+    silence_parts.append(data)
+    if tail_silence_samples > 0:
+        silence_parts.append(np.zeros(tail_silence_samples, dtype=np.float32))
+    data = np.concatenate(silence_parts)
+
     # Priority 0: Native Linux PipeWire streaming (routes directly to active Bluetooth/USB/HDMI sink)
     if sys.platform.startswith("linux") and shutil.which("pw-play"):
         try:
@@ -1261,6 +1342,7 @@ def transcribe_audio(audio: np.ndarray):
             file=("audio.wav", buf.getvalue()),
             model="whisper-large-v3-turbo",
             language="en",
+            prompt="Neurolis, humanoid robot, Auckland House School for Boys, Swapnil, Shivam, exhibition, sensors, follow, approach, spin, camera, expressions, standby.",
             temperature=0,
             response_format="json",
         )
@@ -1918,17 +2000,17 @@ def handle_user_text(text: str) -> bool:
         speak(reply, custom_state="happy", custom_status="APOLOGY ACCEPTED // HAPPY", hold_state_seconds=3.5)
         return False
 
-    # 4b. Fast-Path: Standalone casual acknowledgments ("okay", "got it", "cool") -> 0ms, 0 tokens
-    if is_standalone_acknowledgment(text):
-        reply = get_non_repeating_phrase(ACKNOWLEDGMENT_RESPONSES)
+    # 4b. Fast-Path: Casual compliments / praise ("cool", "very cool", "impressed", "spot on", "great job") -> 0ms, 0 tokens
+    if is_casual_compliment(text):
+        reply = get_non_repeating_phrase(COMPLIMENT_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
         speak(reply)
         return False
 
-    # 4c. Fast-Path: Casual compliments / praise ("very cool", "impressed", "spot on", "great job") -> 0ms, 0 tokens
-    if is_casual_compliment(text):
-        reply = get_non_repeating_phrase(COMPLIMENT_RESPONSES)
+    # 4c. Fast-Path: Standalone casual acknowledgments ("okay", "got it", "alright") -> 0ms, 0 tokens
+    if is_standalone_acknowledgment(text):
+        reply = get_non_repeating_phrase(ACKNOWLEDGMENT_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
         speak(reply)

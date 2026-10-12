@@ -278,7 +278,7 @@ class MotorController:
 
         # 2. Linux native globbing prioritising /dev/ttyACM* then /dev/ttyUSB*
         if sys.platform.startswith("linux"):
-            for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"]:
+            for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*", "/dev/serial/by-path/*"]:
                 try:
                     matches = sorted(glob.glob(pat))
                     if matches:
