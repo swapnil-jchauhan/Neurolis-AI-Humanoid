@@ -39,6 +39,27 @@ if sys.platform.startswith("linux"):
     except Exception:
         pass
 
+import contextlib
+@contextlib.contextmanager
+def suppress_c_stderr():
+    """Silences C-level stderr (fd 2) during PortAudio/ALSA operations on Linux."""
+    if not sys.platform.startswith("linux"):
+        yield
+        return
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        stderr_fd = 2
+        old_stderr = os.dup(stderr_fd)
+        os.dup2(devnull_fd, stderr_fd)
+        os.close(devnull_fd)
+        try:
+            yield
+        finally:
+            os.dup2(old_stderr, stderr_fd)
+            os.close(old_stderr)
+    except Exception:
+        yield
+
 # crisp system font family selection across windows and linux / raspberry pi
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "DejaVu Sans"
 
@@ -253,20 +274,36 @@ class BootAudioPlayer:
             self.is_fading = False
             self.pos = 0
 
-            # Fallback to standard 44.1kHz if float32 48kHz is unsupported on Linux/Pi audio sinks
-            try:
-                self.stream = sd.OutputStream(
-                    samplerate=self.samplerate,
-                    channels=self.channels,
-                    callback=self._audio_callback,
-                )
-            except Exception:
-                self.stream = sd.OutputStream(
-                    samplerate=44100,
-                    channels=min(2, self.channels),
-                    callback=self._audio_callback,
-                )
-            self.stream.start()
+            # Fallback to standard 44.1kHz / device='default' if float32 48kHz is unsupported on Linux/Pi audio sinks
+            with suppress_c_stderr():
+                for dev in ["default", "sysdefault", None]:
+                    try:
+                        self.stream = sd.OutputStream(
+                            samplerate=self.samplerate,
+                            channels=self.channels,
+                            device=dev,
+                            callback=self._audio_callback,
+                        )
+                        break
+                    except Exception:
+                        pass
+                if self.stream is None:
+                    for dev in ["default", "sysdefault", None]:
+                        try:
+                            self.stream = sd.OutputStream(
+                                samplerate=44100,
+                                channels=min(2, self.channels),
+                                device=dev,
+                                callback=self._audio_callback,
+                            )
+                            break
+                        except Exception:
+                            pass
+            if self.stream is not None:
+                with suppress_c_stderr():
+                    self.stream.start()
+            else:
+                self.is_playing = False
         except Exception:
             self.is_playing = False
 
@@ -603,6 +640,7 @@ class FaceUI:
                 self.status_text = "STANDBY // READY"
                 self.subtitle_speaker = "NEUROLIS"
                 self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+        self._last_static_key = None
         if hasattr(self, "boot_audio_player"):
             self.boot_audio_player.fade_out_and_stop(0.3)
 
@@ -618,6 +656,11 @@ class FaceUI:
 
     # handles touch taps and mouse clicks on the screen (touch-ready for Raspberry Pi 7-inch)
     def _on_screen_press(self, event):
+        if self.root:
+            try:
+                self.root.focus_force()
+            except Exception:
+                pass
         # 1. Skip boot sequence if active
         with self.lock:
             in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
@@ -748,18 +791,9 @@ class FaceUI:
         self.root.configure(bg=self.bg_color)
 
         if self.fullscreen:
-            try:
-                self.root.attributes("-fullscreen", True)
-            except Exception:
-                try:
-                    self.root.wm_attributes("-fullscreen", 1)
-                except Exception:
-                    pass
+            self._apply_fullscreen_state()
 
         self.root.bind("<Escape>", lambda e: self.stop())
-        self.root.bind("f", lambda e: self._toggle_fullscreen())
-        self.root.bind("<F11>", lambda e: self._toggle_fullscreen())
-        self.root.bind("<Button-1>", self._on_screen_press)
         self.root.bind("<Key>", self._on_key)
 
         self.canvas = tk.Canvas(
@@ -776,10 +810,40 @@ class FaceUI:
         self._animate_loop()
         self.root.mainloop()
 
-    # hit 'f' or 'F11' on the keyboard to toggle between windowed and borderless fullscreen
-    def _toggle_fullscreen(self):
-        if self.root:
-            self.fullscreen = not self.fullscreen
+    def _apply_fullscreen_state(self):
+        """
+        Applies fullscreen mode smoothly across platforms:
+        - On Linux (Raspberry Pi OS / labwc / Wayland): Uses borderless geometry (sw-1 x sh)
+          which avoids the wlroots/labwc DRM KMS direct-scanout pageflip deadlock that causes
+          severe 1 FPS freezing on Xwayland.
+        - On Windows: Uses native Win32 DWM borderless fullscreen.
+        """
+        if not self.root:
+            return
+        self._last_static_key = None
+        is_linux = sys.platform.startswith("linux")
+        if is_linux:
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            if self.fullscreen:
+                self.root.withdraw()
+                self.root.overrideredirect(True)
+                self.root.deiconify()
+                # sw - 1 prevents broken Xwayland KMS direct scanout while filling 99.95% of the display seamlessly
+                self.root.geometry(f"{sw - 1}x{sh}+0+0")
+                self.root.update_idletasks()
+                self.root.lift()
+                self.root.focus_force()
+            else:
+                cx = max(0, (sw - self.width) // 2)
+                cy = max(0, (sh - self.height) // 2)
+                self.root.withdraw()
+                self.root.overrideredirect(False)
+                self.root.deiconify()
+                self.root.geometry(f"{self.width}x{self.height}+{cx}+{cy}")
+                self.root.update_idletasks()
+                self.root.focus_force()
+        else:
             try:
                 self.root.attributes("-fullscreen", self.fullscreen)
             except Exception:
@@ -787,6 +851,12 @@ class FaceUI:
                     self.root.wm_attributes("-fullscreen", 1 if self.fullscreen else 0)
                 except Exception:
                     pass
+
+    # hit 'f' or 'F11' on the keyboard to toggle between windowed and borderless fullscreen
+    def _toggle_fullscreen(self):
+        if self.root:
+            self.fullscreen = not self.fullscreen
+            self._apply_fullscreen_state()
 
     # thread-safe function that listen.py calls to switch expressions (happy, sad, etc)
     def set_state(self, state: str, status_msg: Optional[str] = None):
@@ -918,13 +988,13 @@ class FaceUI:
         self.anim_phase += dt * 3.2
         self.thinking_angle += dt * 4.5
 
-    # the heartbeat that updates physics and repaints the canvas (33ms on Linux/Pi, 16ms on Windows)
+    # the heartbeat that updates physics and repaints the canvas (40ms / 25 FPS on Linux/Pi, 16ms on Windows)
     def _animate_loop(self):
         if not self.running or self.canvas is None:
             return
         is_linux = sys.platform.startswith("linux")
-        interval_ms = 33 if is_linux else 16
-        dt = 0.033 if is_linux else 0.016
+        interval_ms = 40 if is_linux else 16
+        dt = 0.040 if is_linux else 0.016
         self._update_physics(dt)
         self._render()
         if self.root and self.running:
@@ -932,6 +1002,10 @@ class FaceUI:
 
     # helper math to draw smooth rounded rectangles for eyes and cards
     def _create_rounded_rect(self, x1, y1, x2, y2, radius, **kwargs):
+        if radius <= 0:
+            return self.canvas.create_rectangle(x1, y1, x2, y2, **kwargs)
+        if (x2 - x1) <= radius * 2.2 and (y2 - y1) <= radius * 2.2:
+            return self.canvas.create_oval(x1, y1, x2, y2, **kwargs)
         points = [
             x1 + radius, y1, x2 - radius, y1, x2, y1,
             x2, y1 + radius, x2, y2 - radius, x2, y2,
@@ -944,9 +1018,17 @@ class FaceUI:
     def _render(self):
         if not self.canvas:
             return
-        self.canvas.delete("all")
         w = self.canvas.winfo_width() or self.width
         h = self.canvas.winfo_height() or self.height
+
+        # Dynamically scale face geometry when canvas dimensions change (1024x600 native or 1080p fullscreen)
+        if getattr(self, "_last_geo_size", None) != (w, h):
+            self._last_geo_size = (w, h)
+            self.ui_scale = (w / 1024.0) * 1.15
+            self.eye_w = int(160 * self.ui_scale)
+            self.eye_h = int(165 * self.ui_scale)
+            self.eye_spacing = int(260 * self.ui_scale)
+            self.corner_radius = int(42 * self.ui_scale)
 
         # Position face in upper region so subtitles sit comfortably in lower region
         center_x = w / 2.0
@@ -963,6 +1045,7 @@ class FaceUI:
         now = time.time()
         # phase 1: oobe welcome greeting ("Hi there!")
         if cur_state == ExpressionState.BOOT_GREETING:
+            self._last_static_key = None
             elapsed = now - self.boot_start_time
             if elapsed >= 3.8:
                 with self.lock:
@@ -977,6 +1060,7 @@ class FaceUI:
 
         # phase 2: cascading hardware & safety diagnostic checklist
         if cur_state == ExpressionState.BOOT_SEQUENCE:
+            self._last_static_key = None
             seq_elapsed = now - (self.boot_start_time + 3.8)
             with self.lock:
                 diag_done = self.diagnostic_complete
@@ -1047,8 +1131,28 @@ class FaceUI:
             main_color = self.color_eye_main
             glow_color = self.color_eye_glow
 
-        # 1. Ambient Background Grid & Header
-        self._draw_ambient_header(w, h, main_color, cur_state)
+        # Static UI caching: Only redraw buttons, subtitle card, and header when state/text/dimensions change
+        talk_pressed = (now - self._last_talk_press_time) < 0.25
+        standby_pressed = (now - self._last_standby_press_time) < 0.25
+        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed)
+
+        mouth_cy = center_y + self.eye_h * 0.65
+        btn_y = mouth_cy + int(self.eye_h * 0.22)
+
+        if static_key != getattr(self, "_last_static_key", None):
+            self.canvas.delete("all")
+            self._draw_ambient_header(w, h, main_color, cur_state)
+            btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
+            self._cached_btn_h = btn_h
+            sub_top = btn_y + btn_h + int(10 * (h / 600.0))
+            self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color, sub_top)
+            for item in self.canvas.find_all():
+                self.canvas.addtag_withtag("static_ui", item)
+            self._last_static_key = static_key
+        else:
+            self.canvas.delete("dynamic")
+
+        items_before_dynamic = len(self.canvas.find_all())
 
         # 2. Eye Positioning (with gentle suspension dynamics when driving & ocular gaze tracking)
         gaze_scale = self.ui_scale / 1.8
@@ -1096,7 +1200,6 @@ class FaceUI:
             self._draw_standard_eye(right_eye_cx, eye_cy, self.eye_w * w_scale, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
 
         # 5. Reactive Mouth / Center State Animations
-        mouth_cy = center_y + self.eye_h * 0.65
         if cur_state == ExpressionState.VILLAIN:
             self._draw_villain_mouth(center_x, mouth_cy, main_color)
         elif cur_state == ExpressionState.MOVING:
@@ -1121,14 +1224,6 @@ class FaceUI:
         elif cur_state == ExpressionState.IDLE:
             self._draw_idle_mouth(center_x, mouth_cy, main_color)
 
-        # 6. 'TALK TO NEUROLIS' Touch Button (Positioned between mouth and subtitles)
-        btn_y = mouth_cy + int(self.eye_h * 0.22)
-        btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
-
-        # 7. Real-Time Subtitle Card & Status (Shrunk lower pill container)
-        sub_top = btn_y + btn_h + int(10 * (h / 600.0))
-        self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color, sub_top)
-
         # 8. Ghostly CRT Glitch & Static Overlay (when glitch active)
         if self.glitch_active:
             self._draw_glitch_overlay(w, h)
@@ -1141,6 +1236,11 @@ class FaceUI:
                 if random.random() < 0.2:
                     gy = random.uniform(h * 0.15, h * 0.65)
                     self.canvas.create_line(center_x - 140, gy, center_x + 140, gy, fill="#39ff14", width=1)
+
+        # Tag all newly rendered face items as dynamic so they clear on the next frame
+        all_items = self.canvas.find_all()
+        for item in all_items[items_before_dynamic:]:
+            self.canvas.addtag_withtag("dynamic", item)
 
     # draws cybernetic eyebrows that tilt up or down depending on emotional mood
     def _draw_eyebrows(self, lx, rx, base_y, state, color):

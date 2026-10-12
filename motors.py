@@ -265,14 +265,14 @@ class MotorController:
     def start_following(self):
         with self.lock:
             self.nav_mode = NavMode.FOLLOW
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
         print("[Motors] Mode: CONTINUOUS FOLLOW ME.")
 
     # activates come-here mode: robot approaches user until within conversation range (~0.9m)
     def approach_user(self):
         with self.lock:
             self.nav_mode = NavMode.APPROACH
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
             self.target_reached = False
             self._mode_start_time = time.time()
         print("[Motors] Mode: APPROACH USER ('Come Here').")
@@ -296,7 +296,7 @@ class MotorController:
     def start_roaming(self):
         with self.lock:
             self.nav_mode = NavMode.ROAM
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
             self._last_roam_tick = time.time()
         print("[Motors] Mode: AUTONOMOUS ROOM PATROL / ROAM.")
 
@@ -305,7 +305,7 @@ class MotorController:
         """Actively moves in autonomous obstacle-dodging mode while speaking."""
         with self.lock:
             self.nav_mode = NavMode.ROAM
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
         print("[Motors] Mode: DEMONSTRATING AUTONOMOUS 4WD MOVEMENT.")
 
     # backs up safely for duration (default 5.0 seconds) and stops (with active rear obstacle collision check)
@@ -318,7 +318,7 @@ class MotorController:
             return False
         with self.lock:
             self.nav_mode = NavMode.STEP_BACK
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
             self._mode_start_time = time.time()
             self._step_back_duration = float(duration)
         self.drive(-95, 0)
@@ -338,7 +338,7 @@ class MotorController:
             return False
         with self.lock:
             self.nav_mode = NavMode.SPIN
-            self.popup_active = True
+            self.popup_active = bool(self.auto_popup)
             self._mode_start_time = time.time()
             self._spin_dir = spin_dir
             self._spin_duration = float(duration)
@@ -492,6 +492,7 @@ class MotorController:
                     with self.lock:
                         self.latest_raw_frame = frame.copy()
                     self._process_frame(frame)
+                    time.sleep(0.033)  # Frame pacing: ~30 FPS avoids burning 100% CPU on frame polling
                 else:
                     consecutive_read_failures += 1
                     if consecutive_read_failures >= 10:
@@ -635,7 +636,9 @@ class MotorController:
             if is_hardware_camera:
                 # 1. High-Accuracy YuNet Face Detection
                 if self.detector is not None:
-                    self.detector.setInputSize((proc_w, proc_h))
+                    if getattr(self, "_detector_input_size", None) != (proc_w, proc_h):
+                        self.detector.setInputSize((proc_w, proc_h))
+                        self._detector_input_size = (proc_w, proc_h)
                     _, faces = self.detector.detect(proc_frame)
                     if faces is not None:
                         for f in faces:
@@ -850,9 +853,10 @@ class MotorController:
 
         self._prev_time = now
 
-        # Draw Live Video Feed HUD if preview is active, popup_active is set, or in active nav mode
+        # Draw Live Video Feed HUD only if preview window is actually active (saves CPU/memory on Linux/Pi 5)
         with self.lock:
-            need_display = self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN])
+            preview_enabled = sys.platform.startswith("win") or bool(os.environ.get("NEUROLIS_DEBUG_HUD"))
+            need_display = preview_enabled and (self.show_preview or self.popup_active or (self.auto_popup and self.nav_mode in [NavMode.FOLLOW, NavMode.APPROACH, NavMode.ROAM, NavMode.STEP_BACK, NavMode.SPIN]))
 
         if need_display:
             if proc_frame is None:
@@ -881,6 +885,10 @@ class MotorController:
 
     # background thread that displays the opencv camera window if desktop preview is on
     def _preview_loop(self):
+        # On Linux / Raspberry Pi 5 with touchscreen Face UI, OpenCV popup HUD is disabled to prevent
+        # XWayland/labwc window conflicts, VRAM thrashing, and UI stutter, unless NEUROLIS_DEBUG_HUD is set.
+        if not sys.platform.startswith("win") and not os.environ.get("NEUROLIS_DEBUG_HUD"):
+            return
         window_open = False
         window_title = "Neurolis AI Vision & Motor HUD"
         while self.running:

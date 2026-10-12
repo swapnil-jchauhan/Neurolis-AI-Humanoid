@@ -13,12 +13,34 @@ import sys
 import tempfile
 import threading
 import time
+import contextlib
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-# Suppress verbose OpenCV warnings and V4L2 probe noise
-os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+# Suppress verbose OpenCV warnings, V4L2 probe noise, and ffmpeg logspam
+os.environ["OPENCV_LOG_LEVEL"] = "OFF"
 os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0"
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+
+@contextlib.contextmanager
+def suppress_c_stderr():
+    """Silences C-level stderr (fd 2) during PortAudio/ALSA probing on Linux."""
+    if not sys.platform.startswith("linux"):
+        yield
+        return
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        stderr_fd = 2
+        old_stderr = os.dup(stderr_fd)
+        os.dup2(devnull_fd, stderr_fd)
+        os.close(devnull_fd)
+        try:
+            yield
+        finally:
+            os.dup2(old_stderr, stderr_fd)
+            os.close(old_stderr)
+    except Exception:
+        yield
 
 import numpy as np
 import sounddevice as sd
@@ -44,6 +66,8 @@ except ImportError:
 
 try:
     import cv2
+    if hasattr(cv2, "utils") and hasattr(cv2.utils, "logging"):
+        cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_SILENT)
 except ImportError:
     cv2 = None
 
@@ -194,30 +218,37 @@ def set_face_gaze(x: float, y: float):
 
 # background thread that constantly syncs the camera face coordinates with the screen eyes
 def _gaze_sync_worker():
+    last_found = False
+    last_gx, last_gy = 0.0, 0.0
+    last_mode = None
     while True:
         if motor_ctrl is not None and face_ui is not None:
             found, gx, gy = motor_ctrl.get_gaze_coordinates()
-            if found:
-                set_face_gaze(gx, gy)
-                if hasattr(face_ui, "set_human_latch"):
-                    face_ui.set_human_latch(True, "HUMAN DETECTED")
-            else:
-                set_face_gaze(0.0, 0.0)
-                if hasattr(face_ui, "set_human_latch"):
-                    face_ui.set_human_latch(False)
+            if found != last_found or (found and (abs(gx - last_gx) > 0.02 or abs(gy - last_gy) > 0.02)):
+                if found:
+                    set_face_gaze(gx, gy)
+                    if hasattr(face_ui, "set_human_latch") and not last_found:
+                        face_ui.set_human_latch(True, "HUMAN DETECTED")
+                else:
+                    set_face_gaze(0.0, 0.0)
+                    if hasattr(face_ui, "set_human_latch") and last_found:
+                        face_ui.set_human_latch(False)
+                last_found = found
+                last_gx, last_gy = gx, gy
 
             # Auto-sync moving wheels expression with active navigation modes
-            if not is_speaking and face_ui.state in ["idle", "moving"]:
-                mode = getattr(motor_ctrl, "nav_mode", "STANDBY")
-                if mode in ["ROAM", "FOLLOW", "APPROACH", "STEP_BACK", "SPIN"]:
-                    if face_ui.state != "moving":
-                        label = f"4WD {mode} ACTIVE"
-                        set_face_state("moving", label)
-                else:
-                    if face_ui.state == "moving":
-                        set_face_state("idle", "STANDBY // READY")
+            mode = getattr(motor_ctrl, "nav_mode", "STANDBY")
+            if mode != last_mode:
+                last_mode = mode
+                if not is_speaking and face_ui.state in ["idle", "moving"]:
+                    if mode in ["ROAM", "FOLLOW", "APPROACH", "STEP_BACK", "SPIN"]:
+                        if face_ui.state != "moving":
+                            set_face_state("moving", f"4WD {mode} ACTIVE")
+                    else:
+                        if face_ui.state == "moving":
+                            set_face_state("idle", "STANDBY // READY")
 
-        time.sleep(0.05)
+        time.sleep(0.06)
 
 threading.Thread(target=_gaze_sync_worker, daemon=True).start()
 
@@ -289,10 +320,37 @@ from intent_rules import (
     is_mean_input_fast_path,
     is_apology_or_compliment,
 )
-SAMPLE_RATE = 16000
+TARGET_SAMPLE_RATE = 16000
+SAMPLE_RATE = TARGET_SAMPLE_RATE          # Target 16kHz for WebRTC VAD and Groq Whisper
 CHANNELS = 1
 FRAME_SECONDS = 0.03
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_SECONDS)
+
+# Probes the input device to find its native hardware sample rate (e.g. 44100Hz on USB webcam mics)
+def probe_hardware_sample_rate() -> int:
+    with suppress_c_stderr():
+        try:
+            sd.check_input_settings(samplerate=TARGET_SAMPLE_RATE, channels=CHANNELS, dtype="int16")
+            return TARGET_SAMPLE_RATE
+        except Exception:
+            pass
+        try:
+            dev_info = sd.query_devices(kind="input")
+            default_sr = int(dev_info.get("default_samplerate", 44100))
+            sd.check_input_settings(samplerate=default_sr, channels=CHANNELS, dtype="int16")
+            return default_sr
+        except Exception:
+            pass
+        for test_sr in [44100, 48000, 32000, 22050, 16000]:
+            try:
+                sd.check_input_settings(samplerate=test_sr, channels=CHANNELS, dtype="int16")
+                return test_sr
+            except Exception:
+                continue
+    return TARGET_SAMPLE_RATE
+
+HW_SAMPLE_RATE = probe_hardware_sample_rate()
+HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
 START_SPEECH_FRAMES = 4            # 120ms to trip speech start (filters out clicks, sighs, breath puffs)
 END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff - snappy and responsive without cutting off speech
@@ -635,17 +693,25 @@ def callback(indata, frames, time_info, status):
     if status:
         # Keep the terminal quiet unless something real happens.
         pass
-    audio_queue.put(indata.copy().reshape(-1))
+    if HW_SAMPLE_RATE == TARGET_SAMPLE_RATE:
+        audio_queue.put(indata.copy().reshape(-1))
+    else:
+        raw = indata.reshape(-1)
+        orig_x = np.linspace(0, 1, len(raw), endpoint=False)
+        target_x = np.linspace(0, 1, FRAME_SAMPLES, endpoint=False)
+        resampled = np.interp(target_x, orig_x, raw).astype(np.int16)
+        audio_queue.put(resampled)
 
 # listens to the room for 0.4 seconds to measure background ambient noise
 def calibrate_speech_threshold():
-    audio = sd.rec(
-        int(AMBIENT_CALIBRATION_SECONDS * SAMPLE_RATE),
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        dtype="int16",
-    )
-    sd.wait()
+    with suppress_c_stderr():
+        audio = sd.rec(
+            int(AMBIENT_CALIBRATION_SECONDS * HW_SAMPLE_RATE),
+            samplerate=HW_SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype="int16",
+        )
+        sd.wait()
     ambient_rms = min(audio_rms(audio.reshape(-1)), MAX_CALIBRATION_AMBIENT_RMS)
     return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
 
@@ -760,13 +826,15 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
         if not completed:
             return None
     else:
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            blocksize=FRAME_SAMPLES,
-            dtype="int16",
-            channels=CHANNELS,
-            callback=callback,
-        ):
+        with suppress_c_stderr():
+            stream_ctx = sd.InputStream(
+                samplerate=HW_SAMPLE_RATE,
+                blocksize=HW_FRAME_SAMPLES,
+                dtype="int16",
+                channels=CHANNELS,
+                callback=callback,
+            )
+        with stream_ctx:
             completed = _recording_loop()
             if not completed:
                 return None
@@ -803,6 +871,8 @@ def run_quiet(command, timeout=15.0):
 # fallback audio player using system command line players like ffplay or powershell
 def play_with_system_player(audio_path: Path, timeout: float = 15.0):
     players = [
+        ("pw-play", ["pw-play", str(audio_path)]),
+        ("paplay", ["paplay", str(audio_path)]),
         ("ffplay", ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(audio_path)]),
         ("mpv", ["mpv", "--no-video", "--really-quiet", str(audio_path)]),
         ("mpg123", ["mpg123", "-q", str(audio_path)]),
@@ -880,15 +950,15 @@ def _split_into_sentences(text: str) -> List[str]:
     return sentences if sentences else [text.strip()]
 
 def _split_for_pipelined_tts(text: str) -> Tuple[str, Optional[str]]:
-    """Splits text into 2 chunks if long enough, ensuring Chunk 1 has >=6 words to guarantee zero-gap playback."""
+    """Splits text into 2 chunks if multi-sentence or >=8 words, so speech starts playing in sub-1.5s."""
     raw = _split_into_sentences(text)
     total_words = len(text.split())
-    if len(raw) <= 1 or total_words < 14:
+    if len(raw) <= 1 or total_words < 8:
         return text.strip(), None
     c1_list = []
     c1_words = 0
     i = 0
-    while i < len(raw) and (c1_words < 6 or i == 0):
+    while i < len(raw) and (c1_words < 4 or i == 0):
         c1_list.append(raw[i])
         c1_words += len(raw[i].split())
         i += 1
@@ -994,13 +1064,73 @@ def _speak_system_fallback(text: str):
     """Instant offline speech fallback: ensures speech never stalls or goes silent."""
     _speak_local_offline_fallback(text)
 
+def play_sounddevice_audio(data: np.ndarray, samplerate: int) -> bool:
+    """
+    Plays audio array reliably across platforms (Raspberry Pi 5 / ALSA / PipeWire / Windows).
+    On Linux/Raspberry Pi 5, prioritizes native PipeWire stream (pw-play) so audio automatically
+    routes to the user's active Bluetooth headphones (e.g. Rockerz 512 ANC), USB Audio, or HDMI.
+    Falls back to sounddevice / ALSA / Windows DirectSound with automatic resampling.
+    """
+    if data is None or len(data) == 0:
+        return False
+    if len(data.shape) == 1:
+        data = np.ascontiguousarray(data, dtype=np.float32)
+
+    # Priority 0: Native Linux PipeWire streaming (routes directly to active Bluetooth/USB/HDMI sink)
+    if sys.platform.startswith("linux") and shutil.which("pw-play"):
+        try:
+            buf = io.BytesIO()
+            sf.write(buf, data, samplerate, format="WAV", subtype="PCM_16")
+            proc = subprocess.Popen(
+                ["pw-play", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            proc.communicate(input=buf.getvalue())
+            if proc.returncode == 0:
+                return True
+        except Exception:
+            pass
+
+    devices_to_try = ["default", "sysdefault", None]
+
+    # Priority 1: Direct playback at native rate via sounddevice
+    for dev in devices_to_try:
+        try:
+            with suppress_c_stderr():
+                sd.play(data, samplerate=samplerate, device=dev)
+                sd.wait()
+            return True
+        except Exception:
+            continue
+
+    # Priority 2: Resample to 44.1kHz (standard rate supported by all ALSA/HDMI/USB DACs)
+    try:
+        target_len = int(len(data) * 44100 / samplerate)
+        x_old = np.linspace(0, 1, len(data))
+        x_new = np.linspace(0, 1, target_len)
+        resampled = np.interp(x_new, x_old, data).astype(np.float32)
+        for dev in devices_to_try:
+            try:
+                with suppress_c_stderr():
+                    sd.play(resampled, samplerate=44100, device=dev)
+                    sd.wait()
+                return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return False
+
 # plays speech audio directly through sounddevice and soundfile with millisecond precision
 def play_audio_file(audio_path: Path, timeout: float = 15.0):
     try:
         data, samplerate = sf.read(str(audio_path), dtype="float32")
-        sd.play(data, samplerate)
-        sd.wait()
-        return True
+        if play_sounddevice_audio(data, samplerate):
+            return True
+        return play_with_system_player(audio_path, timeout=timeout)
     except Exception:
         return play_with_system_player(audio_path, timeout=timeout)
 
@@ -1031,12 +1161,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         if face_ui is not None:
             face_ui.set_subtitles("NEUROLIS", text)
         set_face_state(active_state, active_status)
-        try:
-            sd.play(data, sr)
-            sd.wait()
-        except Exception as e:
-            if not standby_kill_event.is_set():
-                print("[TTS Cache Playback Error]:", e)
+        play_sounddevice_audio(data, sr)
         time.sleep(0.06)
         clear_audio_queue()
         is_speaking = False
@@ -1050,12 +1175,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         if face_ui is not None:
             face_ui.set_subtitles("NEUROLIS", text)
         set_face_state(active_state, active_status)
-        try:
-            sd.play(data, sr)
-            sd.wait()
-        except Exception as e:
-            if not standby_kill_event.is_set():
-                print("[Dynamic TTS Cache Playback Error]:", e)
+        play_sounddevice_audio(data, sr)
         time.sleep(0.06)
         clear_audio_queue()
         is_speaking = False
@@ -1094,28 +1214,26 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
             is_speaking = False
             return
         if data1 is not None:
-            sd.play(data1, sr1)
-
             # While chunk 1 is playing, fetch chunk 2 in parallel
             data2, sr2 = None, None
+            played1 = play_sounddevice_audio(data1, sr1)
+
             if fut2:
                 try:
                     data2, sr2 = fut2.result(timeout=12.0)
                 except Exception:
                     pass
 
-            sd.wait()  # Chunk 1 finishes playing
             if standby_kill_event.is_set():
                 is_speaking = False
                 return
 
             # Seamless gapless transition to chunk 2
             if data2 is not None:
-                sd.play(data2, sr2)
-                sd.wait()
+                play_sounddevice_audio(data2, sr2)
 
             # Cache single-chunk responses for instant replay
-            if chunk2 is None and len(_DYNAMIC_TTS_CACHE) < _MAX_DYNAMIC_CACHE_SIZE:
+            if chunk2 is None and len(_DYNAMIC_TTS_CACHE) < _MAX_DYNAMIC_CACHE_SIZE and played1:
                 _DYNAMIC_TTS_CACHE[text] = (data1, sr1)
         else:
             if not standby_kill_event.is_set():
@@ -1316,7 +1434,9 @@ def capture_vision_frame():
 
 # sends the camera jpeg and question to groq qwen vision model for analysis
 def ask_groq_vision(user_text: str, image_path: Path):
-    if client is None:
+    global client
+    active_client = get_active_client() or client
+    if active_client is None:
         return "My vision brain is not initialized right now."
 
     try:
@@ -2094,7 +2214,11 @@ def handle_user_text(text: str) -> bool:
                 if motor_ctrl is not None:
                     motor_ctrl.stop_all()
                 set_face_state("idle", "HALTED")
-                reply = motor_spoken or "Stopping all movement. Holding position."
+                # Ensure stopping confirmation is natural and never confused with expressions
+                if not motor_spoken or any(w in motor_spoken.lower() for w in ["expression", "face", "sad", "happy", "smile", "teardrop"]):
+                    reply = "Stopping all movement. Holding position."
+                else:
+                    reply = motor_spoken
                 conversation_history.append({"role": "assistant", "content": reply})
                 trim_conversation_history()
                 print("Neurolis:", reply)
@@ -2345,13 +2469,15 @@ def run_conversation_mode(speech_threshold: float):
 
         # keep audio stream warm across all conversation turns so there is zero portaudio driver re-init lag
         try:
-            with sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                blocksize=FRAME_SAMPLES,
-                dtype="int16",
-                channels=CHANNELS,
-                callback=callback,
-            ) as warm_stream:
+            with suppress_c_stderr():
+                warm_stream_ctx = sd.InputStream(
+                    samplerate=HW_SAMPLE_RATE,
+                    blocksize=HW_FRAME_SAMPLES,
+                    dtype="int16",
+                    channels=CHANNELS,
+                    callback=callback,
+                )
+            with warm_stream_ctx as warm_stream:
                 while True:
                     if standby_kill_event.is_set():
                         return
@@ -2415,6 +2541,7 @@ def run_conversation_mode(speech_threshold: float):
                     last_user_activity_at = time.monotonic()
         except Exception as e:
             print("Audio stream session notice:", e)
+            time.sleep(1.0)
     finally:
         is_in_active_conversation = False
         set_face_state("idle", "STANDBY")
@@ -2425,11 +2552,12 @@ def run_conversation_mode(speech_threshold: float):
 # probes the operating system to see if a microphone is plugged in and working
 def check_audio_devices():
     """Probes the system for an active audio input device."""
-    try:
-        sd.query_devices(kind='input')
-        return True
-    except Exception:
-        return False
+    with suppress_c_stderr():
+        try:
+            sd.query_devices(kind='input')
+            return True
+        except Exception:
+            return False
 
 # Check for manual text mode command line flags
 FORCE_TEXT_MODE = any(arg.lower() in ("--text", "-t", "--text-only", "text") for arg in sys.argv[1:])

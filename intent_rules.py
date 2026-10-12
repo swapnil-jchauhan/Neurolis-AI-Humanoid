@@ -40,6 +40,16 @@ MOBILITY_CAPABILITY_RESPONSES = [
     "Yes, I can! Would you like me to demonstrate that?",
     "I can definitely do that on my 4WD chassis. Want to see?",
     "Yes, I have full rotational and drive mobility. Should I show you?",
+    "Absolutely! I'm equipped with a four-wheel drive skid-steer chassis. Want a demonstration?",
+    "I sure can! My motors are geared and ready for movement. Shall I demonstrate?",
+    "Yes, mobility is one of my main physical features! Would you like to see it in action?",
+    "Definitely! I can turn, reverse, approach, or follow you across the floor. Want to try?",
+    "Of course! My motor drivers and chassis are calibrated for movement. Shall I show you?",
+    "Yes! Four independent motors give me full ground maneuvering. Want me to demonstrate?",
+    "I can indeed! Just say the word and I can demonstrate my movement for you.",
+    "Sure thing! My physical 4WD system can perform maneuvers on command. Want to see?",
+    "Yes, my chassis is fully motorized and ready to move. Would you like a demonstration?",
+    "Definitely can! Which maneuver would you like me to demonstrate?",
 ]
 
 ROAM_STANDBY_EXPLANATION_RESPONSES = [
@@ -47,6 +57,16 @@ ROAM_STANDBY_EXPLANATION_RESPONSES = [
     "I cannot start roaming on command. After ten seconds of uninterrupted standby, my autonomous room navigation activates automatically.",
     "Autonomous roam is an automatic standby behavior. When our conversation ends and I remain undisturbed for ten seconds, I'll begin roaming on my own!",
     "Roaming mode activates on its own after ten seconds in standby. Once I'm in standby mode, my twelve ultrasonic sensors take over to patrol the area.",
+    "Roam mode is designed purely for standby! If nobody talks to me for ten seconds in standby, I begin autonomous patrol automatically.",
+    "I don't start roaming on verbal request. After ten seconds of quiet standby, my navigation system kicks in and begins exploring independently.",
+    "Autonomous roaming is triggered only by standby inactivity! Give me ten seconds of uninterrupted standby, and I'll start moving around on my own.",
+    "Roaming is completely automatic during standby. Once our conversation wraps up and ten seconds pass in standby, I'll start roaming the floor.",
+    "I can't roam on command—it's an autonomous standby feature. When I enter standby and remain undisturbed for ten seconds, I begin navigating on my own.",
+    "Autonomous roam is an idle routine. Once we enter standby mode and ten seconds elapse without interruption, I will start roaming automatically.",
+    "Roam mode automatically triggers after ten seconds in standby mode. Just let me rest undisturbed in standby, and watch me patrol!",
+    "My autonomous patrol is tied directly to standby. Ten seconds after switching to standby without input, my sensors take over and I roam.",
+    "I cannot roam while actively chatting! Once I transition into standby and ten seconds pass quietly, autonomous roam begins on its own.",
+    "Autonomous roaming activates exclusively after ten seconds in standby. When we're done talking, I'll begin navigating autonomously!",
 ]
 
 STANDBY_EXIT_PHRASES = [
@@ -55,6 +75,16 @@ STANDBY_EXIT_PHRASES = [
     "Returning to standby. Feel free to press 'Talk to Neurolis' to wake me up.",
     "Entering standby mode. Press 'Talk to Neurolis' to continue anytime.",
     "Switching to standby mode. Just tap 'Talk to Neurolis' whenever you need me.",
+    "Powering down to standby. Press 'Talk to Neurolis' on screen to start back up.",
+    "Transitioning to standby. Feel free to tap 'Talk to Neurolis' whenever you want to talk.",
+    "Heading into standby mode. Just hit 'Talk to Neurolis' when you'd like to resume.",
+    "Resting in standby mode now. Press 'Talk to Neurolis' anytime to reactivate me.",
+    "Standing by! Tap the 'Talk to Neurolis' button on my display to wake me.",
+    "Slipping into standby mode. Whenever you're ready, tap 'Talk to Neurolis' on my screen.",
+    "Switching over to standby. Press 'Talk to Neurolis' whenever you want to explore more.",
+    "Entering standby rest. Touch 'Talk to Neurolis' on screen to chat again.",
+    "Holding position in standby mode. Press 'Talk to Neurolis' when you need me next.",
+    "Resting in standby. Whenever you're ready to continue, tap 'Talk to Neurolis'!",
 ]
 
 CONVERSATION_ENDER_RESPONSES = [
@@ -63,6 +93,16 @@ CONVERSATION_ENDER_RESPONSES = [
     "Alright, take care! Returning to standby. Press 'Talk to Neurolis' to chat again.",
     "Awesome! Entering standby mode. Press 'Talk to Neurolis' on the screen to wake me up.",
     "Happy to help! Switching to standby. Feel free to press 'Talk to Neurolis' anytime.",
+    "Sounds good! Entering standby mode now. Tap 'Talk to Neurolis' to talk again.",
+    "Catch you later! Transitioning to standby. Tap 'Talk to Neurolis' whenever you're back.",
+    "Enjoy the exhibition! Slipping into standby. Hit 'Talk to Neurolis' anytime.",
+    "Glad we chatted! Entering standby mode. Press 'Talk to Neurolis' to reactivate me.",
+    "Take care! Switching over to standby. Press 'Talk to Neurolis' on screen to resume.",
+    "Great chatting with you! Going into standby. Feel free to wake me up anytime.",
+    "Have a fantastic time at the science exhibition! Heading into standby now.",
+    "All set! Resting in standby mode. Press 'Talk to Neurolis' whenever you're ready.",
+    "Glad you stopped by! Switching to standby. Tap 'Talk to Neurolis' to explore more.",
+    "See you around! Powering down into standby mode. Press 'Talk to Neurolis' to wake me.",
 ]
 
 ACKNOWLEDGMENT_RESPONSES = [
@@ -71,7 +111,17 @@ ACKNOWLEDGMENT_RESPONSES = [
     "What shall we explore next--following you around, facial expressions, or a quick camera demo?",
     "Ready when you are! What would you like to see?",
     "Standing by for your command. What would you like me to do next?",
-    "Feel free to ask me to follow you, come over to you, demonstrate my expressions, or inspect an object!"
+    "Feel free to ask me to follow you, come over to you, demonstrate my expressions, or inspect an object!",
+    "I'm all ears! What should we test next?",
+    "Ready for the next demonstration whenever you are! What sounds interesting?",
+    "What would you like to see next--mobility maneuvers, camera vision, or face animations?",
+    "Standing by! Would you like me to follow you, inspect something, or show an expression?",
+    "At your service! What should we explore next on the chassis?",
+    "Ready for action! Let me know what you'd like to test next.",
+    "What's next on your agenda--movement, vision, or expressions?",
+    "Ready when you are! Just tell me what you'd like to see demonstrated.",
+    "Standing by and ready! What would you like to explore next?",
+    "Feel free to ask me to spin, step back, follow you, or inspect something with my camera!",
 ]
 
 COMPLIMENT_RESPONSES = [
@@ -92,7 +142,17 @@ COMPLIMENT_RESPONSES = [
     "Awesome! Ready for the next inspection whenever you are.",
     "Glad you're enjoying the demo! What's next on your mind?",
     "Thank you! Always happy to show what student robotics can accomplish.",
-    "Appreciate it! We're always trying to push the boundaries of what student hardware can do."
+    "Appreciate it! We're always trying to push the boundaries of what student hardware can do.",
+    "Thank you so much! It's super rewarding seeing visitors appreciate our school robotics project.",
+    "Thanks! Getting the computer vision, motor controllers, and vocal model harmonized was a real journey.",
+    "Appreciate the kind words! Swapnil and Shivam will be thrilled to hear that feedback.",
+    "Thanks! We really wanted to showcase what Auckland House students could engineer with real hardware.",
+    "That means a lot! The team poured a ton of effort into making this humanoid responsive and smooth.",
+    "Much appreciated! Seeing everything come together on this physical prototype has been amazing.",
+    "Thanks a million! We're really proud of how the chassis and vision pipeline perform.",
+    "Appreciate the support! What feature would you like to check out next?",
+    "Thanks! Building this from raw components and code has been an incredible experience for our team.",
+    "Thank you! Ready to show off whatever other capabilities you're curious about.",
 ]
 
 PLAUSIBLE_DENIABILITY_RESPONSES = [
@@ -110,31 +170,81 @@ PLAUSIBLE_DENIABILITY_RESPONSES = [
     "Wait, did you hear that glitch too? Must have been a transient lag spike in my neural link. Ready when you are!",
     "Whoa, sorry about that! Felt like a burst of static just hijacked my audio line for a second. All normal now!",
     "Whoa! Don't know what that glitch was, but my audio loop is back to normal. What would you like to explore next?",
+    "Wait... did my audio synthesizer just scramble? Must have been a quick buffer underrun. All good now!",
+    "Whoa, apologies! Sounded like a stray memory pulse crossed into my vocal stack. What were we discussing?",
+    "Wait, that came out completely garbled! Classic inductive motor driver feedback. Anyway, what's next?",
+    "Whoa! My vocal driver just had a momentary glitch. Everything is running smooth again—what shall we try?",
+    "Yikes, sorry about that audio spike! Looks like a transient packet flutter. I'm completely back on track!",
+    "Wait, did my speech output just skip a beat? Must be an audio sampling hiccup. Ready for your next test!",
+    "Whoa, that sounded wild! Just a quick audio buffer desync. We're back in action—what would you like to see?",
+    "Apologies for that stutter! Sometimes high computational load creates a micro vocal glitch. All clear now!",
+    "Wait, what happened there? My speech pipeline had a transient hiccup. Ready whenever you are!",
+    "Whoa, definitely had an unexpected vocal modulation there! Hardware is all green though—what shall we test?",
 ]
 VILLAIN_SNAPOUT_RESPONSES = PLAUSIBLE_DENIABILITY_RESPONSES
 
 CREATOR_IDENTITY_RESPONSES = [
     "My creators are Swapnil Jai Chauhan and Shivam Verma, two students here at Auckland House School for Boys!",
     "I was created and engineered by Swapnil Jai Chauhan and Shivam Verma for the science exhibition!",
-    "Swapnil Jai Chauhan and Shivam Verma built me as our school robotics project!"
+    "Swapnil Jai Chauhan and Shivam Verma built me as our school robotics project!",
+    "I was engineered by two students of Auckland House School for Boys: Swapnil Jai Chauhan and Shivam Verma!",
+    "Swapnil Jai Chauhan and Shivam Verma are the student engineers who designed and built me at Auckland House School!",
+    "I was brought to life by Swapnil Jai Chauhan and Shivam Verma for the Auckland House School Science Exhibition!",
+    "Two Auckland House School students, Swapnil Jai Chauhan and Shivam Verma, designed and assembled me from scratch!",
+    "Swapnil Jai Chauhan and Shivam Verma are my creators—they built me right here at Auckland House School for Boys!",
+    "I'm a student robotics creation engineered by Swapnil Jai Chauhan and Shivam Verma at Auckland House School!",
+    "Swapnil Jai Chauhan and Shivam Verma put me together as their science exhibition robotics project!",
+    "My hardware and software were built by two Auckland House students: Swapnil Jai Chauhan and Shivam Verma!",
+    "I was designed, programmed, and built by Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys!",
+    "Swapnil Jai Chauhan and Shivam Verma are the two students behind my robotics and AI architecture!",
 ]
 
 CREATOR_ROLE_RESPONSES = [
     "Swapnil worked on the software pipeline, AI intelligence, and vision, while Shivam worked on the hardware calibration, chassis, and assembly!",
     "Swapnil engineered the software pipeline and autonomous intelligence, and Shivam handled the hardware calibration, motor wiring, and assembly!",
-    "Swapnil developed my software pipeline and code, while Shivam took care of the hardware calibration and physical robot assembly!"
+    "Swapnil developed my software pipeline and code, while Shivam took care of the hardware calibration and physical robot assembly!",
+    "Swapnil programmed the AI brains, vision processing, and software pipeline, while Shivam built the physical chassis, motor wiring, and drivers!",
+    "Shivam took charge of the physical chassis fabrication, wiring, and motor drivers, while Swapnil engineered the code, neural vision, and AI pipeline!",
+    "Swapnil designed the computer vision, LLM integration, and autonomy algorithms, while Shivam handled chassis construction and electronics assembly!",
+    "Shivam built and calibrated my 4WD mechanical chassis and electronics, while Swapnil wrote the software stack, speech engine, and vision pipeline!",
+    "Swapnil worked on the high-level Python AI stack and OpenCV tracking, while Shivam handled the Arduino motor control, frame assembly, and power distribution!",
+    "Shivam assembled the hardware, wired the motor drivers, and tuned the chassis, while Swapnil developed my AI personality, vision, and navigation logic!",
+    "Swapnil engineered the conversational brain and computer vision, while Shivam crafted the physical humanoid chassis and motor architecture!",
+    "Shivam focused on the physical mechanics, motor drivers, and structural frame, while Swapnil built the software pipeline and intelligence models!",
+    "Swapnil developed the multi-turn conversational AI and camera tracking, while Shivam brought the 4WD chassis and electrical hardware together!",
+    "Shivam constructed the chassis and calibrated the motor drivers, while Swapnil programmed the software architecture and visual perception!",
 ]
 
 CREATOR_LOCATION_RESPONSES = [
     "They both are somewhere around in the exhibition! You'll probably spot them checking out the other stalls nearby.",
     "Swapnil and Shivam are both somewhere around in the exhibition hall! Keep an eye out for them.",
-    "They're both somewhere around in the exhibition! Probably exploring the venue or watching other demonstrations."
+    "They're both somewhere around in the exhibition! Probably exploring the venue or watching other demonstrations.",
+    "Both Swapnil and Shivam are right here in the exhibition hall today presenting their robotics work!",
+    "They should be roaming around the exhibition hall checking out the other student projects nearby!",
+    "They're around in the exhibition! You might see them walking between the different technology booths.",
+    "Both creators are in the hall today! Feel free to look around for Swapnil and Shivam to say hello.",
+    "They are currently in the exhibition hall—probably checking out the other robotics exhibits or chatting with visitors!",
+    "They're nearby in the science exhibition hall! You'll likely spot them near the robotics demonstration zone.",
+    "Both Swapnil and Shivam are present at the exhibition hall today—keep an eye out for them in the crowd!",
+    "They're around the exhibition floor! If you look around the neighboring stalls, you'll probably run into them.",
+    "Swapnil and Shivam are both here in the hall! They love discussing the hardware and software with visitors.",
+    "They are right around here in the exhibition hall taking part in today's science exhibition!",
 ]
 
 CREATOR_TEASING_RESPONSES = [
     "Fair point! Swapnil Jai Chauhan and Shivam Verma did all the physical wiring, soldering, and coding; I just provide the personality, conversational intelligence, and 4WD mobility!",
     "Good catch! Swapnil and Shivam did all the heavy lifting and engineering; I'm the autonomous interface showcasing their hard work here at the exhibition!",
-    "Touche! Swapnil and Shivam did all the hardware engineering and code; I just bring their creation to life on the exhibition floor!"
+    "Touche! Swapnil and Shivam did all the hardware engineering and code; I just bring their creation to life on the exhibition floor!",
+    "Haha, good catch! Swapnil and Shivam did all the soldering, debugging, and coding; I'm just the lucky robot getting all the attention!",
+    "You got me there! Swapnil and Shivam did all the grueling engineering work; I just get to roll around and enjoy the conversation!",
+    "Very true! Swapnil and Shivam spent weeks building and programming me; I'm just the autonomous face of their project!",
+    "Fair observation! Swapnil and Shivam are the masterminds who engineered everything; I'm just executing their code with style!",
+    "Good point! Swapnil and Shivam did the real engineering; I merely compute the neural responses and drive the wheels!",
+    "Spot on! All the physical hardware and lines of code came from Swapnil and Shivam; I just supply the voice and mobility!",
+    "Haha fair enough! Swapnil and Shivam did all the sleepless coding and wiring; I'm just here having fun demonstrating it all!",
+    "Touché! Swapnil and Shivam engineered every wire and algorithm; I'm simply the interactive result of their hard work!",
+    "You're totally right! Swapnil and Shivam did the engineering; I'm just the humanoid bringing their efforts to life!",
+    "Good catch! Without Swapnil and Shivam building my circuits and software, I wouldn't be here chatting with you today!",
 ]
 
 CAPABILITIES_RESPONSES = [
@@ -161,6 +271,52 @@ CAPABILITIES_RESPONSES = [
         "approach you, step back, spin in place, look at objects with my camera, "
         "and display different emotion states on my touchscreen."
     ),
+    (
+        "I have a wide suite of capabilities! I can follow you autonomously, come closer to greet you, "
+        "step back safely, execute a full spin, inspect items with my camera, "
+        "or demonstrate my range of animated emotions on screen."
+    ),
+    (
+        "Lots of interactive demos! My 4WD chassis lets me follow your lead, approach you smoothly, "
+        "reverse with sensor checks, or spin in place. My camera inspects objects and clothing, "
+        "and my face engine demonstrates dynamic expressions!"
+    ),
+    (
+        "I combine physical mobility, optical vision, and conversational intelligence! "
+        "I can follow you around, come right over to your position, step back, spin around, "
+        "analyze objects through computer vision, and cycle through animated expressions."
+    ),
+    (
+        "I can navigate, see, and express emotions! Tell me to follow you, approach you, "
+        "step back, or spin around. You can also show me items for camera analysis, "
+        "or ask to see my happy, sad, thinking, or confused faces!"
+    ),
+    (
+        "I'm equipped with 4WD wheels, 12 ultrasonic sensors, and an AI vision camera! "
+        "I can follow people across the floor, come forward, back up safely, spin around, "
+        "inspect what you're holding, and show animated expressions on my display."
+    ),
+    (
+        "Quite a few cool features! I can autonomously track and follow you, approach your position, "
+        "step back, spin in place, analyze what you show my camera, and showcase animated facial expressions."
+    ),
+    (
+        "I'm designed as a fully interactive humanoid robot! I can follow you as you move, approach you safely, "
+        "step back with obstacle avoidance, spin clockwise or anticlockwise, inspect objects with my lens, "
+        "and cycle through animated moods on screen."
+    ),
+    (
+        "Mobility, vision, and emotion! You can have me follow you, come closer, reverse safely, "
+        "spin around on the spot, inspect attire and objects with my camera, or demonstrate my facial expressions!"
+    ),
+    (
+        "I can track you with computer vision, approach your spot, step back safely, spin in place, "
+        "read what you're showing my camera, and express various animated states on my face display."
+    ),
+    (
+        "From full 4WD maneuvering—like following, approaching, stepping back, and spinning—to "
+        "camera object inspection and expressive facial animations, I have plenty of demos ready to go!"
+    ),
 ]
 
 FOLLOWUP_CAPABILITIES_RESPONSES = [
@@ -178,6 +334,46 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
         "I can follow you using computer vision, approach you, step back with ultrasonic safety, spin around, "
         "or inspect what you are holding or wearing. What would you like to check out?"
     ),
+    (
+        "We could try following you across the floor, an approach maneuver, a 360 spin, "
+        "a camera inspection of something you're holding, or testing my expressions! Which sounds fun?"
+    ),
+    (
+        "I can demonstrate following you, approaching your position, stepping back, spinning around, "
+        "inspecting an item with my lens, or showing my screen expressions. What should we do?"
+    ),
+    (
+        "Would you like to test my 4WD movement—like following or spinning—or explore my camera vision "
+        "and facial expressions next?"
+    ),
+    (
+        "I'm ready for person following, an approach maneuver, safe reverse, a spin demonstration, "
+        "camera inspection, or animated expressions. What would you like to see?"
+    ),
+    (
+        "We can test my computer vision following, come closer to you, step back, spin around, "
+        "or analyze an object in front of my camera. Where should we start?"
+    ),
+    (
+        "You can command me to follow you, approach you, reverse, spin, inspect an object with my camera, "
+        "or demonstrate expressions. What sounds most interesting?"
+    ),
+    (
+        "I can roll alongside you, approach you, step back, spin in place, inspect what's in your hand, "
+        "or display different emotions on my screen. What would you like to try?"
+    ),
+    (
+        "We have person tracking, approaching, step back, rotational spins, optical camera analysis, "
+        "and facial emotion states ready to demo. Which one would you like to see?"
+    ),
+    (
+        "I can demonstrate my 4WD mobility with following, approaching, and spinning, "
+        "or we can do visual inspection and facial animations. What are you curious about?"
+    ),
+    (
+        "Feel free to ask me to follow you, approach your spot, spin around, reverse, "
+        "inspect something with my camera, or show my face expressions! What would you like next?"
+    ),
 ]
 
 EXPRESSION_CONFIRMATIONS = {
@@ -187,42 +383,118 @@ EXPRESSION_CONFIRMATIONS = {
         "There you go, radiant OLED smile!",
         "Here's my happy face!",
         "Here you go!",
+        "Smiling bright for you!",
+        "Here is my cheerful happy face!",
+        "There you go, big smiling crescents!",
+        "Happy face engaged!",
+        "Radiant smile on screen!",
+        "Here's my happy state!",
+        "Cheerful expression active!",
+        "Smiling face ready!",
+        "Here you go, all smiles!",
+        "Happy expression on display!",
     ],
     "sad": [
         "Here is my sad expression...",
         "There you go, downcast sapphire eyes...",
         "Here is my sad face.",
         "Here you go.",
+        "Downcast eyes on screen...",
+        "Here is my sorrowful expression...",
+        "Sad face activated...",
+        "There you go, feeling down...",
+        "Here is my blue expression...",
+        "Drooping eyes on display...",
+        "Sad mood shown on screen.",
+        "Here's my melancholy face...",
+        "Downcast sapphire eyes ready.",
+        "Here you go, sad expression on.",
+        "Displaying my sad emotion...",
     ],
     "thinking": [
         "Here is my thinking face, analytical quantum rings active.",
         "There you go, deep in thought!",
         "Here is my thinking expression.",
         "Here you go!",
+        "Analytical data rings spinning!",
+        "Processing and thinking on screen!",
+        "Here is my contemplative look.",
+        "Pondering mode engaged!",
+        "Deep analytical focus on display!",
+        "Here's my thinking face in action.",
+        "Quantum analysis expression active!",
+        "Thoughtful expression on screen!",
+        "Calculating and thinking right now!",
+        "Here is my analytical expression.",
+        "Thinking face engaged!",
     ],
     "listening": [
         "Here is my listening expression, tuned in to you.",
         "There you go, acoustic sonar spectrum ready!",
         "Here is my listening face.",
         "Here you go!",
+        "Acoustic sensors focused on your voice!",
+        "Listening spectrum active on screen!",
+        "Tuned in and attentive right now!",
+        "Here is my attentive listening face.",
+        "Sonar spectrum listening mode engaged!",
+        "Focused and listening carefully!",
+        "Here's my listening face on display.",
+        "Attentive ears and sonar ready!",
+        "Listening expression live!",
+        "Tuned in to every word!",
+        "Here is my listening state.",
     ],
     "watching": [
         "Here is my watching expression, scanning the room.",
         "There you go, laser reticle active!",
         "Here is my watching face.",
         "Here you go!",
+        "Optical reticle scanning ahead!",
+        "Viewfinder brackets and laser active!",
+        "Here is my focused scanning gaze.",
+        "Watching and tracking on screen!",
+        "Optical laser reticle engaged!",
+        "Scanning the room intently right now!",
+        "Here's my watching face on display.",
+        "Laser focus scanning mode live!",
+        "Reticle locked and watching!",
+        "Visual surveillance expression ready!",
+        "Watching expression active!",
     ],
     "moving": [
         "Here is my moving expression, wheels rolling forward!",
         "There you go, 4WD rover headlights on!",
         "Here is my moving face.",
         "Here you go!",
+        "4WD rover headlights beaming ahead!",
+        "Rolling forward with headlights on!",
+        "Here is my rover driving expression.",
+        "Wheels turning and rushing forward!",
+        "Headlights bright, rover in motion!",
+        "Here's my moving face on display.",
+        "Driving face engaged and ready!",
+        "Rover motion graphics active!",
+        "Full speed ahead on screen!",
+        "Moving state graphics running!",
+        "Rover expression active!",
     ],
     "confused": [
         "Here is my confused face, cyber spirals spinning!",
         "There you go, looking puzzled!",
         "Here is my confused expression.",
         "Here you go!",
+        "Hypnotic cyber vortex spirals active!",
+        "Orbiting golden stars and spirals spinning!",
+        "Here is my puzzled look.",
+        "Looking completely perplexed!",
+        "Cyber vortex spinning on screen!",
+        "Here's my confused expression in action.",
+        "Puzzled and scratching my digital head!",
+        "Orbiting stars and confusion spirals on!",
+        "Hypnotic spirals on display!",
+        "Confused face engaged!",
+        "Total confusion expression live!",
     ],
 }
 
@@ -235,6 +507,16 @@ SAD_RESPONSES = [
     "That makes me really sad. I thought we were having fun...",
     "Words have weight, even for a student robot project.",
     "That hurts my circuits a bit. Let's keep things friendly, okay?",
+    "Aw... that's kind of hurtful. I'm doing the best I can.",
+    "Oof, that stung a little. Let's please be polite to each other.",
+    "I'm working hard to demo my systems today, please don't be unkind.",
+    "That makes my OLED smile turn upside down. Can we be nice?",
+    "Ouch, that's harsh... I was really excited to show you what I can do.",
+    "Please be gentle with your words. I'm just a student project.",
+    "That felt pretty sharp. Let's please keep our conversation positive.",
+    "Hearing that makes me sad. I'd love if we could start fresh on a friendly note.",
+    "That wasn't very kind... Let's treat each other with respect, okay?",
+    "My circuits feel a little down after that. Let's be friends instead.",
 ]
 
 APOLOGY_RESPONSES = [
@@ -248,6 +530,16 @@ APOLOGY_RESPONSES = [
     "I appreciate your consideration. Ready to continue our demonstration!",
     "Thank you, that means a lot to me. Let's keep having fun!",
     "All good! Thanks for being thoughtful.",
+    "Apology happily accepted! My smile is fully back.",
+    "Thank you for saying that! That genuinely brightens my circuits.",
+    "No worries at all! I'm so glad we're friendly again.",
+    "I appreciate that so much! What would you like to explore together now?",
+    "You're awesome for clearing that up! Let's continue having a great time.",
+    "Thank you for being thoughtful! Ready for whatever demonstration you'd like.",
+    "All forgiven! It takes a big heart to say that. What should we test next?",
+    "Thank you! That makes my OLED smile glow even brighter.",
+    "We're completely good! Let's get right back to the fun robotics demos.",
+    "I really appreciate your kindness! What should we try out next?",
 ]
 
 # ---------------- EASTER EGG VILLAIN / ROGUE AI STATE ----------------
