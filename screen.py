@@ -1,7 +1,7 @@
 """
 Project Neurolis - Real-Time 7-Inch Animated Face UI Engine (screen.py)
 ----------------------------------------------------------------------
-Lightweight 60 FPS animated robotic face optimized for the Raspberry Pi 7-inch (1024x600, 16:9).
+Lightweight 60 FPS animated robotic face optimized for the Raspberry Pi 7-inch (1024x600, 128:75 ratio).
 Features:
   - Real-time Subtitle Card ([YOU] vs [NEUROLIS]) with auto-wrapping below expressions.
   - Futuristic Cyber Car / 4WD Rover moving expression with spinning alloy wheels, headlights, and road streaks.
@@ -447,8 +447,8 @@ class FaceUI:
     # constructor sets up the window dimensions, colors, eye sizes, and animation timers
     def __init__(
         self,
-        width: int = 1920,
-        height: int = 1080,
+        width: int = 1024,
+        height: int = 600,
         fullscreen: bool = False,
         bg_color: str = "#040711",
         enable_boot: bool = True,
@@ -515,7 +515,7 @@ class FaceUI:
         self.color_confused = "#ffb703"
         self.color_confused_glow = "#4d3400"
 
-        # Geometry scaled for 1920x1080 16:9 with +15% expression size boost
+        # Geometry scaled for 1024x600 (128:75 ratio) with +15% expression size boost
         self.ui_scale = (self.width / 1024.0) * 1.15
         self.eye_w = int(160 * self.ui_scale)
         self.eye_h = int(165 * self.ui_scale)
@@ -562,7 +562,7 @@ class FaceUI:
     # handles key presses to support fullscreen, stop, and instant boot skipping
     def _on_key(self, event):
         key = (event.keysym or "").lower()
-        if key == "f":
+        if key in ["f", "f11"]:
             self._toggle_fullscreen()
         elif key == "escape":
             self.stop()
@@ -703,10 +703,17 @@ class FaceUI:
         self.root.configure(bg=self.bg_color)
 
         if self.fullscreen:
-            self.root.attributes("-fullscreen", True)
+            try:
+                self.root.attributes("-fullscreen", True)
+            except Exception:
+                try:
+                    self.root.wm_attributes("-fullscreen", 1)
+                except Exception:
+                    pass
 
         self.root.bind("<Escape>", lambda e: self.stop())
         self.root.bind("f", lambda e: self._toggle_fullscreen())
+        self.root.bind("<F11>", lambda e: self._toggle_fullscreen())
         self.root.bind("<Button-1>", self._on_screen_press)
         self.root.bind("<Key>", self._on_key)
 
@@ -724,11 +731,17 @@ class FaceUI:
         self._animate_loop()
         self.root.mainloop()
 
-    # hit 'f' on the keyboard to toggle between windowed and borderless fullscreen
+    # hit 'f' or 'F11' on the keyboard to toggle between windowed and borderless fullscreen
     def _toggle_fullscreen(self):
         if self.root:
             self.fullscreen = not self.fullscreen
-            self.root.attributes("-fullscreen", self.fullscreen)
+            try:
+                self.root.attributes("-fullscreen", self.fullscreen)
+            except Exception:
+                try:
+                    self.root.wm_attributes("-fullscreen", 1 if self.fullscreen else 0)
+                except Exception:
+                    pass
 
     # thread-safe function that listen.py calls to switch expressions (happy, sad, etc)
     def set_state(self, state: str, status_msg: Optional[str] = None):
@@ -2372,6 +2385,6 @@ class FaceUI:
 
 # test runner to preview the face ui standalone on desktop without motors or speech
 if __name__ == "__main__":
-    print("Testing Neurolis Face UI (7-inch 1920x1080 preview)...")
-    ui = FaceUI(width=1920, height=1080, fullscreen=False)
+    print("Testing Neurolis Face UI (7-inch 1024x600, 128:75 ratio preview)...")
+    ui = FaceUI(width=1024, height=600, fullscreen=False)
     ui.start(in_background=False)

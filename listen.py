@@ -54,7 +54,7 @@ except ImportError:
 
 try:
     import screen
-    face_ui = screen.FaceUI(width=1920, height=1080, fullscreen=False)
+    face_ui = screen.FaceUI(width=1024, height=600, fullscreen=False)
     face_ui.start(in_background=True)
 except Exception as e:
     face_ui = None
