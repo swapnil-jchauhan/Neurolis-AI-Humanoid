@@ -15,6 +15,7 @@ import math
 import os
 import platform
 import random
+import shutil
 import sys
 import threading
 import time
@@ -373,13 +374,19 @@ class HardwareInspector:
 
     # checks if a physical webcam or usb camera is plugged in and accessible
     def check_camera(self):
-        # first check if motor controller already opened camera
-        if self.motor_controller is not None and getattr(self.motor_controller, "cap", None) is not None:
-            cap = self.motor_controller.cap
-            if cap is not None and cap.isOpened():
+        # first check if motor controller already opened camera or is initializing
+        if self.motor_controller is not None:
+            for _ in range(10):
+                cap = getattr(self.motor_controller, "cap", None)
+                latest_frame = getattr(self.motor_controller, "latest_raw_frame", None)
+                if (cap is not None and cap.isOpened()) or latest_frame is not None:
+                    return True, "✓", "Connected"
+                time.sleep(0.05)
+            if getattr(self.motor_controller, "cap", None) is not None or getattr(self.motor_controller, "running", False):
                 return True, "✓", "Connected"
+            return False, "✗", "Not Detected"
 
-        # live test probe on device 0
+        # live test probe on device 0 (only if motor controller is not present)
         try:
             import cv2
             cap = cv2.VideoCapture(0)
@@ -392,6 +399,11 @@ class HardwareInspector:
 
     # checks if audio input microphone is plugged in and recognized
     def check_mic(self):
+        # 1. PipeWire capture check on Linux (e.g. phone mic via pw-record)
+        if sys.platform.startswith("linux") and shutil.which("pw-record"):
+            return True, "✓", "Connected"
+
+        # 2. ALSA / sounddevice hardware input check
         try:
             import sounddevice as sd
             dev = sd.query_devices(kind="input")
@@ -606,13 +618,16 @@ class FaceUI:
         self.eye_spacing = int(260 * self.ui_scale)
         self.corner_radius = int(42 * self.ui_scale)
 
-        # Touchscreen 'TALK TO NEUROLIS' & 'STAND-BY' Button attributes & callbacks
+        # Touchscreen 'TALK TO NEUROLIS', 'STAND-BY' & 'SEND ARROW' Button attributes & callbacks
         self.on_talk_click = None
         self.on_standby_click = None
+        self.on_send_click = None
         self.talk_btn_bbox = None
         self.standby_btn_bbox = None
+        self.send_btn_bbox = None
         self._last_talk_press_time = 0.0
         self._last_standby_press_time = 0.0
+        self._last_send_press_time = 0.0
 
         # Optical Human Latch tracking attributes
         self.target_latched = False
@@ -704,6 +719,21 @@ class FaceUI:
                 except Exception as e:
                     print(f"[Screen] Talk button callback error: {e}")
             return
+
+        # Check if Send Arrow button was clicked during LISTENING
+        if not is_standby and self.send_btn_bbox is not None:
+            snx1, sny1, snx2, sny2 = self.send_btn_bbox
+            if snx1 <= event.x <= snx2 and sny1 <= event.y <= sny2:
+                with self.lock:
+                    is_listening = (self.state == ExpressionState.LISTENING)
+                if is_listening:
+                    self._last_send_press_time = time.time()
+                    if self.on_send_click is not None:
+                        try:
+                            self.on_send_click()
+                        except Exception as e:
+                            print(f"[Screen] Send button callback error: {e}")
+                    return
 
         # 3. Check touch tap on STAND-BY button (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
         if self.standby_btn_bbox is not None and not is_standby:
@@ -1134,7 +1164,8 @@ class FaceUI:
         # Static UI caching: Only redraw buttons, subtitle card, and header when state/text/dimensions change
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
-        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed)
+        send_pressed = (now - self._last_send_press_time) < 0.25
+        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed, send_pressed)
 
         mouth_cy = center_y + self.eye_h * 0.65
         btn_y = mouth_cy + int(self.eye_h * 0.22)
@@ -2068,13 +2099,17 @@ class FaceUI:
 
         talk_w = int(340 * scale_x)
         standby_w = int(160 * scale_x)
-        total_w = talk_w + gap + standby_w
+        send_gap = int(10 * scale_x)
+        send_w = int(44 * scale_x)  # compact icon-only button matching button height
+        total_w = talk_w + gap + standby_w + send_gap + send_w
 
-        # Perfectly center the combined dual-button bar on cx
+        # Perfectly center the combined multi-button bar on cx
         bx1 = cx - total_w / 2.0
         bx2 = bx1 + talk_w
         sbx1 = bx2 + gap
         sbx2 = sbx1 + standby_w
+        snx1 = sbx2 + send_gap
+        snx2 = snx1 + send_w
 
         by1 = btn_y
         by2 = btn_y + btn_h
@@ -2082,13 +2117,16 @@ class FaceUI:
         # Store bounding boxes for touchscreen tap & mouse click handling
         self.talk_btn_bbox = (bx1, by1, bx2, by2)
         self.standby_btn_bbox = (sbx1, by1, sbx2, by2)
+        self.send_btn_bbox = (snx1, by1, snx2, by2)
 
         is_roam = ("ROAM" in (self.status_text or "").upper())
         talk_active = (state == ExpressionState.IDLE) or is_roam
         standby_active = (state != ExpressionState.IDLE)
+        send_active = (state == ExpressionState.LISTENING)
         now = time.time()
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
+        send_pressed = (now - self._last_send_press_time) < 0.25
 
         glow_pad = int(5 * scale_y)
         inset = int(4 * scale_y)
@@ -2203,6 +2241,56 @@ class FaceUI:
             fill=standby_text_col,
             font=(FONT_FAMILY, font_size, "bold")
         )
+
+        # ---------------- 3. SEND ARROW ICON BUTTON ----------------
+        sncx = (snx1 + snx2) / 2.0
+        sncy = (by1 + by2) / 2.0
+        ar = int(9 * scale_y)
+
+        if send_active:
+            # During LISTENING: Active glowing cyan/mint pill with bright vector send arrow
+            btn_bg = "#003254" if send_pressed else "#001b2e"
+            btn_border = "#00ffaa"
+            btn_glow = "#003b33"
+            arrow_col = "#ffffff" if send_pressed else "#00ffaa"
+
+            # Ambient glow behind button
+            self._create_rounded_rect(
+                snx1 - glow_pad, by1 - glow_pad,
+                snx2 + glow_pad, by2 + glow_pad,
+                radius=radius + glow_pad, fill=btn_glow, outline=""
+            )
+            # Main button rounded pill
+            self._create_rounded_rect(
+                snx1, by1, snx2, by2,
+                radius=radius, fill=btn_bg, outline=btn_border, width=2
+            )
+            # Inner high-tech specular bevel
+            self._create_rounded_rect(
+                snx1 + inset, by1 + inset, snx2 - inset, by2 - inset,
+                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
+            )
+            # Sleek forward send arrow / dart vector polygon
+            self.canvas.create_polygon(
+                sncx - ar * 0.8, sncy - ar * 0.85,
+                sncx + ar * 0.95, sncy,
+                sncx - ar * 0.8, sncy + ar * 0.85,
+                sncx - ar * 0.35, sncy,
+                fill=arrow_col, outline=""
+            )
+        else:
+            # Standby / non-listening state: Muted dark charcoal with slate arrow (unclickable)
+            self._create_rounded_rect(
+                snx1, by1, snx2, by2,
+                radius=radius, fill="#0c1219", outline="#222f3e", width=2
+            )
+            self.canvas.create_polygon(
+                sncx - ar * 0.8, sncy - ar * 0.85,
+                sncx + ar * 0.95, sncy,
+                sncx - ar * 0.8, sncy + ar * 0.85,
+                sncx - ar * 0.35, sncy,
+                fill="#475e7a", outline=""
+            )
 
         return float(btn_h)
 

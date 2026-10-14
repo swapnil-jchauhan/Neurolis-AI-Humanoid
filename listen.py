@@ -101,6 +101,7 @@ is_in_active_conversation = False
 is_inspecting = False
 last_user_activity_at = time.monotonic()
 standby_kill_event = threading.Event()
+finish_speech_event = threading.Event()
 STANDBY_KILL_MESSAGE = "Going back to stand by on user command, press Talk to Neurolis to activate me"
 
 # ---------------- STANDBY ROAM SENTRY ENGINE (TESLA BOT LEVEL) ----------------
@@ -377,20 +378,20 @@ HW_SAMPLE_RATE = probe_hardware_sample_rate()
 HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
 START_SPEECH_FRAMES = 3            # 90ms to trip speech start (calibrated: 3 consecutive 30ms frames)
-END_SILENCE_SECONDS = 0.85         # 850ms silence cutoff - allows natural pauses and fumbling without premature cutoff
+END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff (15 frames) - prompt turnaround without clipping words
 CONVERSATION_TIMEOUT_SECONDS = 35  # 35s follow-up window (comfortable time to converse without premature standby)
-MAX_RECORD_SECONDS = 25
-MIN_RECORD_SECONDS = 0.50          # Requires at least 500ms audio to avoid phantom acoustic pops
+MAX_RECORD_SECONDS = 12.0          # 12.0s hard record cap (prevents long hangs while giving ample time)
+MIN_RECORD_SECONDS = 0.40          # Requires at least 400ms audio to avoid phantom acoustic pops
 POST_REPLY_COOLDOWN_SECONDS = 0.04
 AMBIENT_CALIBRATION_SECONDS = 1.5
 MAX_CALIBRATION_AMBIENT_RMS = 1200  # High ceiling so loud room noise/murmur is accurately measured
-SPEECH_THRESHOLD_MULTIPLIER = 1.50
+SPEECH_THRESHOLD_MULTIPLIER = 1.45
 CONTINUE_SPEECH_THRESHOLD_RATIO = 0.70
-MIN_SPEECH_RMS_THRESHOLD = 400.0     # Baseline RMS threshold (calibrated for Samsung Galaxy A15 5G via AudioSource)
-VAD_AGGRESSIVENESS = 2             # WebRTC VAD mode 2: balanced noise rejection & speech continuity
+MIN_SPEECH_RMS_THRESHOLD = 80.0    # Baseline RMS floor (sensitive in quiet rooms, scales automatically in loud rooms)
+VAD_AGGRESSIVENESS = 3             # WebRTC VAD mode 3: strictest noise rejection, prevents silence speech triggers
 CURRENT_AMBIENT_RMS = 250.0
-CURRENT_SPEECH_THRESHOLD = 400.0
-CURRENT_CONTINUE_THRESHOLD = 300.0
+CURRENT_SPEECH_THRESHOLD = 500.0
+CURRENT_CONTINUE_THRESHOLD = 380.0
 
 def set_hardware_gain(gain_pct: int):
     """Sets system capture gain via wpctl / pactl on default audio source (and ALSA fallback)."""
@@ -423,14 +424,19 @@ def set_hardware_gain(gain_pct: int):
 
 # Load dynamic mic calibration from mic_config.json if available
 MIC_CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
-LOW_CUTOFF_HZ = 40.0
-HIGH_CUTOFF_HZ = 5800.0
-TREBLE_BOOST = 1.65
+LOW_CUTOFF_HZ = 85.0
+HIGH_CUTOFF_HZ = 4500.0
+TREBLE_BOOST = 1.40
 BG_SUPPRESS_DB = 24.0
 AGC_MAX_SCALE = 1.50
+FAN_REJECTION_RATIO = 0.85
+CLICK_REJECTION_RATIO = 0.35
+PROXIMITY_CREST_MIN = 1.50
+_last_mic_config_mtime = 0.0
 
 if MIC_CONFIG_FILE.exists():
     try:
+        _last_mic_config_mtime = MIC_CONFIG_FILE.stat().st_mtime
         with open(MIC_CONFIG_FILE, "r") as _f:
             _mic_cfg = json.load(_f)
             MIN_SPEECH_RMS_THRESHOLD = float(_mic_cfg.get("min_speech_rms", MIN_SPEECH_RMS_THRESHOLD))
@@ -445,6 +451,9 @@ if MIC_CONFIG_FILE.exists():
             TREBLE_BOOST = float(_mic_cfg.get("treble_boost", TREBLE_BOOST))
             BG_SUPPRESS_DB = float(_mic_cfg.get("bg_suppress_db", BG_SUPPRESS_DB))
             AGC_MAX_SCALE = float(_mic_cfg.get("agc_max_scale", AGC_MAX_SCALE))
+            FAN_REJECTION_RATIO = float(_mic_cfg.get("fan_rejection_ratio", FAN_REJECTION_RATIO))
+            CLICK_REJECTION_RATIO = float(_mic_cfg.get("click_rejection_ratio", CLICK_REJECTION_RATIO))
+            PROXIMITY_CREST_MIN = float(_mic_cfg.get("proximity_crest_min", PROXIMITY_CREST_MIN))
             CURRENT_AMBIENT_RMS = float(_mic_cfg.get("ambient_p90_rms", CURRENT_AMBIENT_RMS))
             CURRENT_SPEECH_THRESHOLD = float(_mic_cfg.get("calibrated_start_rms", CURRENT_SPEECH_THRESHOLD))
             CURRENT_CONTINUE_THRESHOLD = float(_mic_cfg.get("calibrated_continue_rms", CURRENT_CONTINUE_THRESHOLD))
@@ -767,6 +776,71 @@ def audio_rms(audio: np.ndarray):
         return 0.0
     return float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
 
+def filter_frame_bandpass(chunk: np.ndarray) -> np.ndarray:
+    """Fast FFT bandpass filter (cutting < LOW_CUTOFF_HZ and > HIGH_CUTOFF_HZ, default 85Hz-4500Hz)
+    for human voice fundamentals and formants. Applied per 30ms frame before RMS and VAD.
+    """
+    if chunk is None or len(chunk) < 64:
+        return chunk
+    try:
+        samples = chunk.astype(np.float32)
+        n = len(samples)
+        fft_vals = np.fft.rfft(samples)
+        freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
+        gain = np.ones_like(freqs, dtype=np.float32)
+
+        low_cut = float(LOW_CUTOFF_HZ) if LOW_CUTOFF_HZ > 0 else 85.0
+        high_cut = float(HIGH_CUTOFF_HZ) if HIGH_CUTOFF_HZ > 0 else 4500.0
+
+        sub_mask = freqs < low_cut
+        gain[sub_mask] = np.clip((freqs[sub_mask] / max(1.0, low_cut)) ** 2, 0.0, 1.0)
+
+        high_mask = freqs > high_cut
+        gain[high_mask] = np.clip((high_cut / freqs[high_mask]) ** 4, 0.0, 1.0)
+
+        filtered = np.fft.irfft(fft_vals * gain, n=n)
+        return np.clip(filtered, -32768.0, 32767.0).astype(np.int16)
+    except Exception:
+        return chunk
+
+def reload_mic_config_if_modified():
+    """Hot-reloads mic_config.json parameters if modified by tune_mic.py."""
+    global _last_mic_config_mtime, MIN_SPEECH_RMS_THRESHOLD, SPEECH_THRESHOLD_MULTIPLIER
+    global CONTINUE_SPEECH_THRESHOLD_RATIO, START_SPEECH_FRAMES, END_SILENCE_SECONDS
+    global VAD_AGGRESSIVENESS, LOW_CUTOFF_HZ, HIGH_CUTOFF_HZ, TREBLE_BOOST, BG_SUPPRESS_DB
+    global AGC_MAX_SCALE, FAN_REJECTION_RATIO, CLICK_REJECTION_RATIO, PROXIMITY_CREST_MIN
+    global CURRENT_AMBIENT_RMS, CURRENT_SPEECH_THRESHOLD, CURRENT_CONTINUE_THRESHOLD
+    if not MIC_CONFIG_FILE.exists():
+        return
+    try:
+        mtime = MIC_CONFIG_FILE.stat().st_mtime
+        if mtime != _last_mic_config_mtime:
+            _last_mic_config_mtime = mtime
+            with open(MIC_CONFIG_FILE, "r") as f:
+                cfg = json.load(f)
+            MIN_SPEECH_RMS_THRESHOLD = float(cfg.get("min_speech_rms", MIN_SPEECH_RMS_THRESHOLD))
+            SPEECH_THRESHOLD_MULTIPLIER = float(cfg.get("speech_multiplier", SPEECH_THRESHOLD_MULTIPLIER))
+            CONTINUE_SPEECH_THRESHOLD_RATIO = float(cfg.get("continue_ratio", CONTINUE_SPEECH_THRESHOLD_RATIO))
+            START_SPEECH_FRAMES = int(cfg.get("start_frames", START_SPEECH_FRAMES))
+            END_SILENCE_SECONDS = float(cfg.get("end_silence_sec", END_SILENCE_SECONDS))
+            VAD_AGGRESSIVENESS = int(cfg.get("vad_mode", VAD_AGGRESSIVENESS))
+            LOW_CUTOFF_HZ = float(cfg.get("low_cutoff_hz", LOW_CUTOFF_HZ))
+            HIGH_CUTOFF_HZ = float(cfg.get("high_cutoff_hz", HIGH_CUTOFF_HZ))
+            TREBLE_BOOST = float(cfg.get("treble_boost", TREBLE_BOOST))
+            BG_SUPPRESS_DB = float(cfg.get("bg_suppress_db", BG_SUPPRESS_DB))
+            AGC_MAX_SCALE = float(cfg.get("agc_max_scale", AGC_MAX_SCALE))
+            FAN_REJECTION_RATIO = float(cfg.get("fan_rejection_ratio", FAN_REJECTION_RATIO))
+            CLICK_REJECTION_RATIO = float(cfg.get("click_rejection_ratio", CLICK_REJECTION_RATIO))
+            PROXIMITY_CREST_MIN = float(cfg.get("proximity_crest_min", PROXIMITY_CREST_MIN))
+            CURRENT_AMBIENT_RMS = float(cfg.get("ambient_p90_rms", CURRENT_AMBIENT_RMS))
+            CURRENT_SPEECH_THRESHOLD = float(cfg.get("calibrated_start_rms", CURRENT_SPEECH_THRESHOLD))
+            CURRENT_CONTINUE_THRESHOLD = float(cfg.get("calibrated_continue_rms", CURRENT_CONTINUE_THRESHOLD))
+            hw_gain = cfg.get("hardware_gain_pct")
+            if hw_gain is not None:
+                set_hardware_gain(int(hw_gain))
+    except Exception as e:
+        print(f"[Config] Hot-reload error: {e}")
+
 class PipeWireInputStream:
     """Zero-latency PipeWire 16kHz mono audio input stream.
     Directly captures from PipeWire default source (e.g. phone mic via AudioSource)
@@ -815,6 +889,8 @@ class PipeWireInputStream:
                 raw = self.proc.stdout.read(chunk_bytes)
                 if not raw or len(raw) < chunk_bytes:
                     break
+                if is_speaking:
+                    continue
                 samples = np.frombuffer(raw, dtype=np.int16).reshape(-1, self.channels)
                 self.callback(samples, self.blocksize, None, None)
             except Exception:
@@ -937,11 +1013,15 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
                 ]
                 amb_median = float(np.median(frame_rmses))
                 amb_p75 = float(np.percentile(frame_rmses, 75))
-                amb_baseline = min(amb_median * 1.25, amb_p75)
+                amb_p90 = float(np.percentile(frame_rmses, 90))
+                amb_ceiling = max(amb_p90, amb_median * 1.35)
+                amb_baseline = amb_median
             else:
                 amb_baseline = float(audio_rms(samples))
+                amb_ceiling = amb_baseline * 1.25
         except Exception:
             amb_baseline = 250.0
+            amb_ceiling = 350.0
     else:
         try:
             with suppress_c_stderr():
@@ -964,15 +1044,20 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
                 ]
                 amb_median = float(np.median(frame_rmses))
                 amb_p75 = float(np.percentile(frame_rmses, 75))
-                amb_baseline = min(amb_median * 1.25, amb_p75)
+                amb_p90 = float(np.percentile(frame_rmses, 90))
+                amb_ceiling = max(amb_p90, amb_median * 1.35)
+                amb_baseline = amb_median
             else:
                 amb_baseline = float(audio_rms(samples))
+                amb_ceiling = amb_baseline * 1.25
         except Exception:
             amb_baseline = 250.0
+            amb_ceiling = 350.0
 
     amb_baseline = min(max(amb_baseline, 10.0), MAX_CALIBRATION_AMBIENT_RMS)
-    start_thresh = max(amb_baseline * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
-    continue_thresh = max(start_thresh * CONTINUE_SPEECH_THRESHOLD_RATIO, amb_baseline * 1.15)
+    amb_ceiling = min(max(amb_ceiling, 15.0), MAX_CALIBRATION_AMBIENT_RMS * 1.25)
+    start_thresh = max(amb_ceiling * 1.45, amb_baseline * 1.65, MIN_SPEECH_RMS_THRESHOLD)
+    continue_thresh = max(amb_ceiling * 1.15, amb_baseline * 1.30, MIN_SPEECH_RMS_THRESHOLD * 0.70)
 
     CURRENT_AMBIENT_RMS = amb_baseline
     CURRENT_SPEECH_THRESHOLD = start_thresh
@@ -984,7 +1069,7 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
                 cfg_data = json.load(_f)
         else:
             cfg_data = {}
-        cfg_data["ambient_p90_rms"] = round(amb_baseline, 1)
+        cfg_data["ambient_p90_rms"] = round(amb_ceiling, 1)
         cfg_data["calibrated_start_rms"] = round(start_thresh, 1)
         cfg_data["calibrated_continue_rms"] = round(continue_thresh, 1)
         with open(MIC_CONFIG_FILE, "w") as _f:
@@ -992,12 +1077,12 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
     except Exception:
         pass
 
-    print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
+    print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS (Ceiling: {amb_ceiling:.1f} RMS) | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
     return start_thresh
 
 # records microphone audio until the user stops speaking using vad and silence timers
 def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None):
-    clear_audio_queue()
+    finish_speech_event.clear()
     pre_speech_frames = max(1, int(PRE_SPEECH_SECONDS / FRAME_SECONDS))
     end_silence_frames = max(1, int(END_SILENCE_SECONDS / FRAME_SECONDS))
     preroll = deque(maxlen=pre_speech_frames)
@@ -1007,21 +1092,31 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
     speech_streak = 0
     started = False
     start_time = None
+    manual_send_triggered = False
+    peak_speech_rms = 0.0
+    ambient_rms_window = deque(maxlen=50)
+    live_ambient_ceiling = float(CURRENT_AMBIENT_RMS * 1.25)
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS) if webrtcvad is not None else None
     start_threshold = max(speech_threshold, MIN_SPEECH_RMS_THRESHOLD)
-    continue_threshold = max(
-        start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-        CURRENT_AMBIENT_RMS * 1.15,
-        MIN_SPEECH_RMS_THRESHOLD * 0.70,
-    )
+    continue_threshold = max(CURRENT_CONTINUE_THRESHOLD, start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO)
+    dynamic_continue_threshold = continue_threshold
 
     def _recording_loop():
-        nonlocal started, start_time, start_votes, silence_votes, speech_streak, start_threshold, continue_threshold, frames
+        nonlocal started, start_time, start_votes, silence_votes, speech_streak, start_threshold, dynamic_continue_threshold, frames, manual_send_triggered, peak_speech_rms, live_ambient_ceiling
         wait_started_at = time.monotonic()
+        loop_frame_count = 0
 
         while True:
             if standby_kill_event.is_set():
                 return False
+            if finish_speech_event.is_set():
+                finish_speech_event.clear()
+                manual_send_triggered = True
+                if not started and len(preroll) > 0:
+                    frames = list(preroll)
+                    started = True
+                break
+
             now = time.monotonic()
 
             if not started:
@@ -1037,37 +1132,42 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             except queue.Empty:
                 continue
 
+            if finish_speech_event.is_set():
+                finish_speech_event.clear()
+                manual_send_triggered = True
+                if not started and len(preroll) > 0:
+                    frames = list(preroll)
+                    started = True
+                break
+
+            loop_frame_count += 1
             chunk = chunk.astype(np.int16, copy=False)
-            chunk_rms = audio_rms(chunk)
+            filtered_chunk = filter_frame_bandpass(chunk)
+            chunk_rms = audio_rms(filtered_chunk)
             vad_speech = False
 
             if vad is not None:
                 try:
-                    vad_speech = vad.is_speech(chunk.tobytes(), SAMPLE_RATE)
+                    vad_speech = vad.is_speech(filtered_chunk.tobytes(), SAMPLE_RATE)
                 except Exception:
                     vad_speech = False
 
-            if vad is None:
-                is_speech = chunk_rms >= start_threshold if not started else chunk_rms >= continue_threshold
-            elif not started:
-                is_speech = vad_speech and (chunk_rms >= start_threshold)
-            else:
-                is_speech = vad_speech and (chunk_rms >= continue_threshold)
-
             if not started:
-                # keep adapting before speech starts so stationary background noise is tuned out
-                if not vad_speech and chunk_rms < start_threshold:
-                    ambient_threshold = max(
-                        chunk_rms * SPEECH_THRESHOLD_MULTIPLIER,
-                        MIN_SPEECH_RMS_THRESHOLD,
-                    )
-                    start_threshold = (start_threshold * 0.95) + (ambient_threshold * 0.05)
-                    continue_threshold = max(
-                        start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-                        chunk_rms * 1.15,
-                        CURRENT_AMBIENT_RMS * 1.15,
-                        MIN_SPEECH_RMS_THRESHOLD * 0.70,
-                    )
+                # Discard transient startup click/vibration in first 3 frames (90ms)
+                if loop_frame_count <= 3:
+                    ambient_rms_window.append(chunk_rms)
+                    preroll.append(chunk)
+                    continue
+
+                # 1. Track rolling ambient noise floor both upward and downward before speech starts
+                if chunk_rms < start_threshold * 1.10:
+                    ambient_rms_window.append(chunk_rms)
+                if len(ambient_rms_window) >= 10:
+                    live_ambient_ceiling = float(np.percentile(ambient_rms_window, 90))
+                    start_threshold = max(live_ambient_ceiling * 1.45, speech_threshold)
+                    dynamic_continue_threshold = max(live_ambient_ceiling * 1.15, continue_threshold)
+
+                is_speech = (chunk_rms >= start_threshold) if vad is None else (vad_speech and (chunk_rms >= start_threshold))
 
                 preroll.append(chunk)
 
@@ -1079,32 +1179,56 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                         start_time = time.monotonic()
                         silence_votes = 0
                         speech_streak = 0
+                        peak_speech_rms = float(chunk_rms)
                         if motor_ctrl is not None and getattr(motor_ctrl, "is_roaming", False):
                             motor_ctrl.stop_all()  # instant halt of autonomous roaming on voice (<5ms)!
                         reset_standby_cooldown()
-                        set_face_state("listening", "LISTENING...")
+                        set_face_state("listening", "HEARING YOU...")
                 else:
                     start_votes = 0
 
                 continue
 
+            # Speech has started (started == True)
+            peak_speech_rms = max(peak_speech_rms * 0.995, float(chunk_rms))
+
+            # Dynamic continuation threshold stays safely above ambient noise ceiling
+            # Never penalize soft syllables or consonants with an excessive peak fraction
+            dynamic_continue_threshold = max(
+                continue_threshold,
+                live_ambient_ceiling * 1.15,
+                min(peak_speech_rms * 0.18, start_threshold * 0.75)
+            )
+
+            is_speech = (chunk_rms >= dynamic_continue_threshold) if vad is None else (vad_speech and (chunk_rms >= dynamic_continue_threshold))
+
             frames.append(chunk)
 
+            # Silence counting: any genuine speech resets silence counter immediately
             if is_speech:
                 speech_streak += 1
-                if speech_streak >= 2:
-                    silence_votes = 0  # reset silence timer only when active voice is sustained
+                if speech_streak >= 2 or chunk_rms >= start_threshold:
+                    silence_votes = 0  # Speech reset
+                else:
+                    silence_votes = max(0, silence_votes - 1)
             else:
                 speech_streak = 0
                 silence_votes += 1
 
             duration = time.monotonic() - start_time
             if duration >= MIN_RECORD_SECONDS and silence_votes >= end_silence_frames:
+                # Keep ~180ms of natural tail silence so final consonants and words are never chopped off
+                keep_frames = max(4, int(0.18 / FRAME_SECONDS))
+                trim_count = max(0, silence_votes - keep_frames)
+                if trim_count > 0 and len(frames) > trim_count + 8:
+                    frames = frames[:-trim_count]
                 break
 
         return True
 
     if active_stream is not None:
+        # Discard button tap transient pop
+        time.sleep(0.08)
         clear_audio_queue()
         completed = _recording_loop()
         if not completed:
@@ -1120,18 +1244,22 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             if not completed:
                 return None
 
+    if completed and frames:
+        set_face_state("thinking", "THINKING...")
+
     if not frames:
         return None
 
     audio = np.concatenate(frames)
     duration = audio.size / SAMPLE_RATE
 
-    if duration < MIN_RECORD_SECONDS:
-        return None
+    if not manual_send_triggered:
+        if duration < 0.20:
+            return None
 
-    # Energy check: reject faint background mumbling that slipped through
-    if audio_rms(audio) < continue_threshold:
-        return None
+        # Energy check: reject faint background mumbling that slipped through
+        if audio_rms(audio) < (dynamic_continue_threshold * 0.85):
+            return None
 
     return audio
 
@@ -1613,57 +1741,41 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         active_state = custom_state if custom_state else "speaking"
         active_status = custom_status if custom_status else "SPEAKING"
 
-        # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
-        if text in _AUDIO_CACHE:
-            data, sr = _AUDIO_CACHE[text]
-            if face_ui is not None:
-                face_ui.set_subtitles("NEUROLIS", text)
-            set_face_state(active_state, active_status)
-            play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
-            time.sleep(0.06)
-            clear_audio_queue()
-            is_speaking = False
-            if not standby_kill_event.is_set() or allow_during_standby:
-                _restore_face_state_after_speech(custom_state, custom_status)
-            return
-
-        # Check dynamic cache for recently synthesized responses (0ms replay)
-        if text in _DYNAMIC_TTS_CACHE:
-            data, sr = _DYNAMIC_TTS_CACHE[text]
-            if face_ui is not None:
-                face_ui.set_subtitles("NEUROLIS", text)
-            set_face_state(active_state, active_status)
-            play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
-            time.sleep(0.06)
-            clear_audio_queue()
-            is_speaking = False
-            if not standby_kill_event.is_set() or allow_during_standby:
-                _restore_face_state_after_speech(custom_state, custom_status)
-            return
-
-        # Fast offline failover: if Edge-TTS DNS is offline, route directly to local speech with 0ms stall
-        if _edge_tts_dns_offline:
-            if face_ui is not None:
-                face_ui.set_subtitles("NEUROLIS", text)
-            set_face_state(active_state, active_status)
-            if not standby_kill_event.is_set() or allow_during_standby:
-                _speak_local_offline_fallback(text)
-            time.sleep(0.06)
-            clear_audio_queue()
-            is_speaking = False
-            if not standby_kill_event.is_set() or allow_during_standby:
-                _restore_face_state_after_speech(custom_state, custom_status)
-            return
-
-        # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
-        chunk1, chunk2 = _split_for_pipelined_tts(text)
-
-        # Immediately display subtitles and active state on UI with 0ms delay!
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", text)
-        set_face_state(active_state, active_status)
-
         try:
+            # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
+            if text in _AUDIO_CACHE:
+                data, sr = _AUDIO_CACHE[text]
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                set_face_state(active_state, active_status)
+                play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
+                return
+
+            # Check dynamic cache for recently synthesized responses (0ms replay)
+            if text in _DYNAMIC_TTS_CACHE:
+                data, sr = _DYNAMIC_TTS_CACHE[text]
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                set_face_state(active_state, active_status)
+                play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
+                return
+
+            # Fast offline failover: if Edge-TTS DNS is offline, route directly to local speech with 0ms stall
+            if _edge_tts_dns_offline:
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", text)
+                set_face_state(active_state, active_status)
+                if not standby_kill_event.is_set() or allow_during_standby:
+                    _speak_local_offline_fallback(text)
+                return
+
+            # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
+            chunk1, chunk2 = _split_for_pipelined_tts(text)
+
+            # Immediately display subtitles and active state on UI with 0ms delay!
+            if face_ui is not None:
+                face_ui.set_subtitles("NEUROLIS", text)
+            set_face_state(active_state, active_status)
             fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
             fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
 
@@ -1722,7 +1834,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
             if not standby_kill_event.is_set() or allow_during_standby:
                 _speak_system_fallback(text)
         finally:
-            time.sleep(0.06)
+            time.sleep(0.28)
             clear_audio_queue()
             is_speaking = False
             if not standby_kill_event.is_set() or allow_during_standby:
@@ -1731,65 +1843,73 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
 
 def clean_audio_for_transcription(audio: np.ndarray) -> np.ndarray:
-    """Vocal Tunnel DSP filter for Whisper: cuts rumble (<40Hz) and electrical hiss (>5800Hz),
-    applies subtle consonant clarity (1.65x @ 2.2-4.2kHz), and down-gates background noise/murmur (28dB).
-    Preserves 100% vocal pitch fundamentals and warmth.
+    """Whole-utterance Vocal Tunnel DSP filter for Whisper:
+    1. FFT bandpass (85Hz-5500Hz) with 1.4x presence boost (2.0kHz-4.0kHz) across the entire utterance at once,
+       eliminating all 30ms block boundary discontinuities.
+    2. Smooth time-domain envelope downward expander: computes rolling 20ms frame RMS, estimates 90th-percentile
+       speech level (speech_p90), and attenuates frames where RMS < speech_p90 * 0.35 by 0.25x (-12dB).
+    3. Peak normalization once across the whole utterance scaled to 24000.0 / peak capped at AGC_MAX_SCALE.
     """
     if audio is None or len(audio) < 128:
         return audio
     try:
-        frame_sz = 480  # 30ms blocks for clean downward expansion gate during pauses
-        if len(audio) <= frame_sz:
-            return _clean_audio_chunk(audio)
+        samples = audio.astype(np.float32)
+        n = len(samples)
 
-        out_frames = []
-        for i in range(0, len(audio), frame_sz):
-            chunk = audio[i:i + frame_sz]
-            if len(chunk) < 64:
-                out_frames.append(chunk)
-            else:
-                out_frames.append(_clean_audio_chunk(chunk))
-        concat = np.concatenate(out_frames)
-        return np.clip(concat, -32767.0, 32767.0).astype(np.int16)
-    except Exception:
-        return audio
+        # 1. Whole-utterance FFT Bandpass & Presence boost
+        fft_vals = np.fft.rfft(samples)
+        freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
+        gain = np.ones_like(freqs, dtype=np.float32)
 
+        # Cut rumble <85Hz
+        sub_mask = freqs < 85.0
+        gain[sub_mask] = np.clip((freqs[sub_mask] / 85.0) ** 2, 0.0, 1.0)
 
-def _clean_audio_chunk(chunk: np.ndarray) -> np.ndarray:
-    samples = chunk.astype(np.float32)
-    n = len(samples)
-    fft_vals = np.fft.rfft(samples)
-    freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
-    gain = np.ones_like(freqs, dtype=np.float32)
+        # Cut electrical hiss >5500Hz
+        high_mask = freqs > 5500.0
+        gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - 5500.0) / (8000.0 - 5500.0), 0.05, 1.0)
 
-    # 1. Clean sub-bass roll-off (cuts DC hum, preserves vocal warmth)
-    sub_mask = freqs < LOW_CUTOFF_HZ
-    gain[sub_mask] = np.clip((freqs[sub_mask] / max(1.0, LOW_CUTOFF_HZ)) ** 2, 0.0, 1.0)
+        # Consonant presence shelf (2.0kHz to 4.0kHz) for crisp speech
+        clarity_mask = (freqs >= 2000.0) & (freqs <= 4000.0)
+        gain[clarity_mask] *= 1.40
 
-    # 2. Smooth high-cut roll-off (cuts electrical hiss above high_cut)
-    high_mask = freqs > HIGH_CUTOFF_HZ
-    gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - HIGH_CUTOFF_HZ) / (8000.0 - HIGH_CUTOFF_HZ), 0.05, 1.0)
+        filtered = np.fft.irfft(fft_vals * gain, n=n)
 
-    # 3. Consonant presence shelf (2.2kHz to 4.2kHz) for crisp intelligible speech
-    clarity_mask = (freqs >= 2200.0) & (freqs <= 4200.0)
-    gain[clarity_mask] *= TREBLE_BOOST
+        # 2. Smooth time-domain envelope downward expander across 20ms frames
+        frame_len = int(0.020 * SAMPLE_RATE)  # 320 samples
+        if frame_len > 0 and n >= frame_len:
+            num_frames = (n + frame_len - 1) // frame_len
+            frame_rms_list = []
+            for k in range(num_frames):
+                st = k * frame_len
+                en = min(n, (k + 1) * frame_len)
+                frame_rms = float(np.sqrt(np.mean(filtered[st:en] ** 2)))
+                frame_rms_list.append(frame_rms)
 
-    filtered = np.fft.irfft(fft_vals * gain, n=n)
+            speech_p90 = float(np.percentile(frame_rms_list, 90)) if frame_rms_list else 1000.0
+            ambient_floor = float(CURRENT_AMBIENT_RMS) if CURRENT_AMBIENT_RMS > 0 else 180.0
+            thresh = min(speech_p90 * 0.18, ambient_floor * 1.25)
 
-    # 4. Background noise & hiss suppression gate (downward expansion)
-    f_rms = float(np.sqrt(np.mean(filtered ** 2)))
-    min_floor_gain = 10.0 ** (-BG_SUPPRESS_DB / 20.0)
-    if f_rms < MIN_SPEECH_RMS_THRESHOLD:
-        norm = max(0.0, f_rms / max(1.0, MIN_SPEECH_RMS_THRESHOLD))
-        gate_gain = min_floor_gain + (1.0 - min_floor_gain) * (norm ** 2)
-        filtered = filtered * gate_gain
-    else:
-        peak = np.max(np.abs(filtered))
+            frame_gains = np.array([0.35 if r < thresh else 1.0 for r in frame_rms_list], dtype=np.float32)
+            gain_envelope = np.repeat(frame_gains, frame_len)[:n]
+
+            # Smooth envelope across 160-sample window to avoid any abrupt clicks
+            kernel_sz = min(160, len(gain_envelope))
+            if kernel_sz > 1:
+                kernel = np.ones(kernel_sz, dtype=np.float32) / kernel_sz
+                gain_envelope = np.convolve(gain_envelope, kernel, mode="same")
+
+            filtered = filtered * gain_envelope
+
+        # 3. Peak normalization once across the whole utterance
+        peak = float(np.max(np.abs(filtered)))
         if peak > 20.0:
-            scale = min(22000.0 / peak, AGC_MAX_SCALE)
+            scale = min(24000.0 / peak, float(AGC_MAX_SCALE))
             filtered = filtered * scale
 
-    return filtered
+        return np.clip(filtered, -32767.0, 32767.0).astype(np.int16)
+    except Exception:
+        return audio
 
 # sends recorded wav audio to groq whisper to turn speech into english text
 def transcribe_audio(audio: np.ndarray):
@@ -1812,32 +1932,26 @@ def transcribe_audio(audio: np.ndarray):
             response_format="verbose_json",
         )
 
-        raw_text = getattr(transcription, "text", "").strip()
+        # Reject noisy or low-confidence background chatter via individual segment filtering
+        segments = getattr(transcription, "segments", []) or []
+        if segments:
+            valid_segment_texts = []
+            for s in segments:
+                nsp = float(s.get("no_speech_prob", 0.0) if isinstance(s, dict) else getattr(s, "no_speech_prob", 0.0) or 0.0)
+                alp = float(s.get("avg_logprob", 0.0) if isinstance(s, dict) else getattr(s, "avg_logprob", 0.0) or 0.0)
+                seg_text = (s.get("text", "") if isinstance(s, dict) else getattr(s, "text", "") or "").strip()
+                if nsp <= 0.70 and alp >= -1.6 and seg_text:
+                    valid_segment_texts.append(seg_text)
+            raw_text = " ".join(valid_segment_texts).strip() if valid_segment_texts else ""
+        else:
+            raw_text = getattr(transcription, "text", "").strip()
+
+        if not raw_text:
+            return None
+
         # Remove bracketed noise annotations like [music], (laughter), [applause]
         text = re.sub(r"\[.*?\]|\(.*?\)", "", raw_text).strip()
         cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-
-        # Reject noisy or low-confidence hallucinations via Whisper segment telemetry
-        segments = getattr(transcription, "segments", []) or []
-        avg_logprobs = []
-        no_speech_probs = []
-        if segments:
-            for s in segments:
-                nsp = s.get("no_speech_prob", 0.0) if isinstance(s, dict) else getattr(s, "no_speech_prob", 0.0)
-                alp = s.get("avg_logprob", 0.0) if isinstance(s, dict) else getattr(s, "avg_logprob", 0.0)
-                try:
-                    no_speech_probs.append(float(nsp or 0.0))
-                except Exception:
-                    pass
-                try:
-                    avg_logprobs.append(float(alp or 0.0))
-                except Exception:
-                    pass
-
-            if any(nsp > 0.40 for nsp in no_speech_probs):
-                return None
-            if avg_logprobs and (sum(avg_logprobs) / len(avg_logprobs)) < -0.85:
-                return None
 
         # Whisper hallucinations on silence / fan noise / distant background chatter / breathing / acoustic fillers
         hallucinations = {
@@ -3111,6 +3225,10 @@ def run_conversation_mode(speech_threshold: float):
                     if standby_kill_event.is_set():
                         return
 
+                    # Hot-reload mic configuration if modified by tune_mic.py
+                    reload_mic_config_if_modified()
+                    speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
+
                     # Follow Mode Inactivity Immunity: freeze timeout while actively following user
                     if motor_ctrl is not None and getattr(motor_ctrl, "is_following", False):
                         last_valid_input_at = time.monotonic()
@@ -3136,6 +3254,11 @@ def run_conversation_mode(speech_threshold: float):
                             continue
                         if standby_kill_event.is_set():
                             return
+                        # If the conversational follow-up window still has time remaining, don't abort
+                        # prematurely into standby on a momentary lull or rejected acoustic pop!
+                        if time.monotonic() - last_valid_input_at < CONVERSATION_TIMEOUT_SECONDS:
+                            set_face_state("listening", "LISTENING...")
+                            continue
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                         print("Neurolis (Standby):", timeout_msg)
                         speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
@@ -3147,6 +3270,7 @@ def run_conversation_mode(speech_threshold: float):
                     if standby_kill_event.is_set():
                         return
                     if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
+                        set_face_state("listening", "LISTENING...")
                         continue
 
                     print("You:", text)
@@ -3219,13 +3343,14 @@ else:
         print("Booting Neurolis in ZERO-HARDWARE TEST MODE (Interactive CLI Text Input)...")
         print("You can chat with Neurolis and test all robotic behaviors right here in the terminal!")
 
-# calibrate baseline room noise once at boot so hitting enter starts listening instantly in <1ms
+# Measure room noise baseline on boot to calibrate acoustics to the physical room
 cached_speech_threshold = None
 if AUDIO_ENABLED:
     try:
-        cached_speech_threshold = calibrate_speech_threshold()
-    except Exception:
-        cached_speech_threshold = 120.0
+        cached_speech_threshold = calibrate_speech_threshold(duration_sec=1.2)
+    except Exception as _e:
+        print(f"[Acoustic Config] Boot calibration notice: {_e}")
+        cached_speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
 
 # Initialize conversation history and session facts
 reset_session()
@@ -3361,8 +3486,17 @@ if face_ui is not None:
 
         threading.Thread(target=_announce_worker, daemon=True).start()
 
+    def _handle_screen_send_click():
+        """
+        Touchscreen Send Arrow Button Callback:
+        Instantly halts listening, dispatches audio buffer immediately (0ms override)
+        to Whisper transcription without waiting for silence.
+        """
+        finish_speech_event.set()
+
     face_ui.on_talk_click = _handle_screen_talk_click
     face_ui.on_standby_click = _handle_screen_standby_click
+    face_ui.on_send_click = _handle_screen_send_click
 
 
 # main entrypoint: runs either in voice mode with microphone or fallback text mode

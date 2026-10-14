@@ -30,16 +30,16 @@ CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
 
 DEFAULT_CONFIG = {
     "hardware_gain_pct": 60,
-    "vad_mode": 2,
-    "min_speech_rms": 400.0,
-    "speech_multiplier": 1.50,
+    "vad_mode": 3,
+    "min_speech_rms": 80.0,
+    "speech_multiplier": 1.45,
     "continue_ratio": 0.70,
     "start_frames": 3,
-    "end_silence_sec": 0.85,
+    "end_silence_sec": 0.45,
     "pre_emphasis": 0.0,
-    "low_cutoff_hz": 40.0,
-    "high_cutoff_hz": 5800.0,
-    "treble_boost": 1.65,
+    "low_cutoff_hz": 85.0,
+    "high_cutoff_hz": 4500.0,
+    "treble_boost": 1.40,
     "bg_suppress_db": 24.0,
     "agc_target_peak": 22000.0,
     "agc_max_scale": 1.50,
@@ -724,7 +724,7 @@ class MicTunerApp:
                 if vad is not None:
                     try:
                         vad.set_mode(current_vad_mode)
-                        v_speech = vad.is_speech(resampled.tobytes(), 16000)
+                        v_speech = vad.is_speech(filtered_chunk.tobytes(), 16000)
                     except Exception:
                         v_speech = False
 
@@ -739,7 +739,7 @@ class MicTunerApp:
 
                     # Transient click / typing check (>3600Hz and high peakiness)
                     high_e = np.sum(c_fft[c_freqs > 3600.0]**2)
-                    if (high_e / total_e) > click_rej_ratio and crest > 3.5:
+                    if (high_e / total_e) > click_rej_ratio and crest > 4.0:
                         click_detected = True
 
                     # Narrowband fan drone check (requires SINGLE-BIN concentration >75% to avoid tripping on vowels)
@@ -757,11 +757,10 @@ class MicTunerApp:
                 act_thresh = max(self.calibrated_ambient * mult, m_rms)
                 cont_thresh = max(act_thresh * cont_ratio, m_rms * 0.70)
 
-                # Detection decision (VAD + Energy + Proximity Crest Factor - Rejections)
+                # Detection decision (VAD + Energy - Rejections; do not block speech on low crest factor)
                 is_speech_frame = (
                     v_speech
                     and (f_rms >= act_thresh)
-                    and (crest >= crest_min)
                     and (not click_detected)
                     and (not fan_detected)
                 )
@@ -916,18 +915,20 @@ class MicTunerApp:
             if chunks:
                 amb_median = float(np.median(chunks))
                 amb_p75 = float(np.percentile(chunks, 75))
-                amb_baseline = max(10.0, min(amb_median * 1.25, amb_p75))
+                amb_p90 = float(np.percentile(chunks, 90))
+                amb_ceiling = max(amb_p90, amb_median * 1.35)
+                amb_baseline = amb_median
                 with self.data_lock:
                     self.calibrated_ambient = amb_baseline
-                    mult = float(self.cfg.get("speech_multiplier", 1.50))
-                    min_floor = float(self.cfg.get("min_speech_rms", 400.0))
-                    new_thresh = max(amb_baseline * mult, min_floor)
+                    min_floor = float(self.cfg.get("min_speech_rms", 80.0))
+                    new_thresh = max(amb_ceiling * 1.45, amb_baseline * 1.65, min_floor)
+                    new_cont = max(amb_ceiling * 1.15, amb_baseline * 1.30, min_floor * 0.70)
                     self.calibrated_threshold = new_thresh
-                    self.continue_threshold_val = max(new_thresh * float(self.cfg.get("continue_ratio", 0.70)), amb_baseline * 1.15)
+                    self.continue_threshold_val = new_cont
                 self.root.after(0, lambda: self.min_rms_var.set(round(new_thresh, 1)))
-                self.cfg["ambient_p90_rms"] = round(amb_baseline, 1)
+                self.cfg["ambient_p90_rms"] = round(amb_ceiling, 1)
                 self.cfg["calibrated_start_rms"] = round(new_thresh, 1)
-                self.cfg["calibrated_continue_rms"] = round(self.continue_threshold_val, 1)
+                self.cfg["calibrated_continue_rms"] = round(new_cont, 1)
                 save_config(self.cfg)
             self.root.after(0, lambda: self.btn_calibrate.config(text="🎯 Calibrate Room (1.5s)", state="normal"))
 

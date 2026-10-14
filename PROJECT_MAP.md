@@ -1078,6 +1078,62 @@ To do:
     * Maintained `NORMAL_SYSTEM_PROMPT` word count strictly at 331 words (~440 tokens).
     * `arduino.ino` completely untouched and preserved.
 
+- 2026-10-14 (Part 27): Loud Exhibition Hall Audio/VAD Overhaul, Peak Continuation Threshold, Whisper Multi-Segment Discard Fix, Bluetooth Acoustic Echo Elimination, Instant Send Arrow Button, Motor Serial Lock, & Hardware Race Fixes:
+  - **Dynamic Peak-Tracking Continuation Threshold & Leaky Silence Counter (`listen.py`)**:
+    * Resolved exhibition hall recording freeze where background crowd voices (400-900 RMS) tripped WebRTC VAD and reset silence counter indefinitely.
+    * Lowered `END_SILENCE_SECONDS` default to `0.60s` (20 frames) and set `MAX_RECORD_SECONDS` to `12.0s` hard cap.
+    * Implemented rolling 50-frame ambient noise floor ring buffer `ambient_rms_window` adapting `start_threshold` both upward and downward: `start_threshold = max(live_ambient_p85 * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)`.
+    * Implemented dynamic peak-tracking continuation threshold (`peak_speech_rms`): `dynamic_continue_threshold = max(start_threshold * continue_ratio, live_ambient_p85 * 1.35, peak_speech_rms * 0.42)`. Automatically rises when close-up user speaks (e.g. 2200 RMS) to immediately reject 600 RMS crowd chatter when they pause.
+    * Replaced hard silence reset with leaky decay counter: brief spikes (streak < 4) decay silence votes by 1, while sustained close speech (streak >= 4) resets silence to 0.
+    * Added trailing crowd-tail trimmer: slices off trailing silence frames (`silence_votes - 4`) before concatenating for Whisper.
+    * Fixed post-trimming short command rejection: adjusted post-trim audio duration check to 0.20s minimum, preventing valid 1-word commands (200-450ms e.g. "Stop", "Hi") from being falsely dropped.
+    * Fixed whole-utterance energy check: compared whole-utterance RMS against baseline continuation threshold instead of elevated instantaneous frame threshold, eliminating false utterance drops on natural speech with pauses.
+    * Fixed premature conversation termination: prevented conversation loop from prematurely dropping to standby on momentary lull or rejected pop when conversation window still has time remaining.
+  - **DSP Bandpass Synchronization & Boot Config Preservation (`listen.py`, `tune_mic.py`, `mic_config.json`)**:
+    * Added `filter_frame_bandpass()` (85Hz to 4500Hz) cutting rumble and hiss on every 30ms chunk in `listen_for_speech_segment()` before RMS and VAD, without arbitrary hard clamps defeating `tune_mic.py` sliders.
+    * Synchronized `tune_mic.py` WebRTC VAD to evaluate on bandpass-filtered audio chunk matching `listen.py`.
+    * Fixed boot scan overwrite: if `calibrated_start_rms` exists in `mic_config.json`, `listen.py` uses saved values directly instead of running an uncalibrated boot scan.
+    * Added hot-reload check in `run_conversation_mode()`: checks `mic_config.json` mtime at each conversation turn to immediately sync slider adjustments from `tune_mic.py`.
+    * Updated `tune_mic.py` click detection (`crest > 4.0`) and ensured speech is not blocked on compressed phone mic signals.
+  - **Whole-Utterance Vocal Tunnel DSP & Whisper Multi-Segment Filtering (`listen.py`)**:
+    * Replaced per-chunk AGC noise amplification with whole-utterance Vocal Tunnel DSP in `clean_audio_for_transcription()`: applies whole-array FFT bandpass (85Hz-5500Hz + 1.4x presence boost @ 2.0-4.0kHz), 20ms rolling envelope downward expander (-12dB attenuation on pause murmur below `speech_p90 * 0.35`), and whole-utterance peak normalization without block boundary clicks.
+    * Fixed multi-segment discard bug in `transcribe_audio()`: replaced `any(nsp > 0.40)` with per-segment filtering (`nsp <= 0.65` and `avg_logprob >= -1.0`), preventing Whisper from throwing away entire user utterances when trailing crowd segments are present.
+  - **Bluetooth Speaker Echo Self-Triggering Elimination (`listen.py`)**:
+    * Unified `speak()` playback across all paths (`_AUDIO_CACHE`, `_DYNAMIC_TTS_CACHE`, offline TTS, and online Edge-TTS) inside `try...finally` with 0.28s acoustic drain delay (`time.sleep(0.28)`), letting Syvo Soul 100 Bluetooth A2DP hardware buffers clear before flushing queue and unmuting mic.
+    * Streamlined `PipeWireInputStream._reader_loop()` to drain OS pipe and bypass buffer allocations while speaking.
+  - **FaceUI Send Arrow Button & 0ms Instant Dispatch (`screen.py`, `listen.py`)**:
+    * Added a compact vector Send Arrow icon button (`send_w = 44px`) next to `STAND-BY`, with cyan glow styling during `LISTENING` and dark charcoal when inactive.
+    * Integrated `finish_speech_event`: tapping Send Arrow button triggers instant 0ms break from recording loop and bypasses duration/RMS minimum rejection gates to immediately dispatch audio buffer to Whisper.
+  - **Thread-Safe Motor Serial Write Lock & Follow Mode Sweep (`motors.py`)**:
+    * Added `self._serial_write_lock = threading.Lock()` wrapping all `self.ser.write()` calls in `drive()`, `stop()`, `set_sensor_config()`, and connection init against concurrent thread corruption.
+    * Implemented Follow Mode face tracking re-acquisition: when target face is dropped for >0.8s, executes smooth low-speed rotational re-acquisition scan (`speed=0, steer=65` for up to 2.5s) if unobstructed by ultrasonic sensors, then holds position if not found.
+  - **V4L2 Camera Probe Race Condition Fix (`screen.py`)**:
+    * In `HardwareInspector.check_camera()`, waits up to 0.5s for motor controller camera handle or latest frame instead of opening competing `cv2.VideoCapture(0)` to prevent Linux V4L2 resource busy collisions.
+    * Added PipeWire `pw-record` detection in `check_mic()`.
+  - **Integrity Verification**:
+    * `NORMAL_SYSTEM_PROMPT` word count verified and preserved at exactly 331 words (~440 tokens).
+    * `arduino.ino` completely untouched and intact.
+    * All files compiled cleanly with `python3 -m py_compile`.
+    * No git push executed; full pre-edit directory backup saved.
+
+### Part 28: Room-Adaptive Acoustic Calibration, Ghost Trigger Rejection & Sentence Preservation
+- **Live Room Calibration Overhaul (`listen.py`, `tune_mic.py`, `mic_config.json`)**:
+  * Root Cause Solved: `mic_config.json` was hardcoded to `min_speech_rms = 400.0`, forcing the user to shout in quiet rooms (where ambient noise is only 7–55 RMS). Meanwhile, `calibrated_continue_rms` (280 RMS) was below ambient noise peaks (418 RMS), causing the recording loop to never accumulate silence votes and stay stuck recording for infinity.
+  * Ceiling-Aware Calibration: Updated `calibrate_speech_threshold()` to measure median, P75, and P90 noise ceiling (`amb_ceiling = max(amb_p90, amb_median * 1.35)`). Set `start_thresh = max(amb_ceiling * 1.45, amb_baseline * 1.65, 80.0)` and `continue_thresh = max(amb_ceiling * 1.15, amb_baseline * 1.30, 80.0 * 0.70)`. This guarantees room noise is strictly below continuation threshold in ANY room.
+  * Automatic Boot Calibration: Runs a 1.2s ambient calibration on program launch so Neurolis automatically adapts to whichever room it is in (exhibition hall, quiet room, classroom).
+  * WebRTC VAD Mode 3: Switched to mode 3 (`VAD_AGGRESSIVENESS = 3`) to strictly isolate harmonic vocal bands and eliminate false positives on phone mic hiss.
+- **Ghost Trigger Elimination & Startup Pop Filter (`listen.py`)**:
+  * Button Tap / Startup Transient Gate: Discards initial 100ms and first 3 frames (90ms) in recording loop so mechanical screen taps or PipeWire buffer transients cannot trip speech start.
+  * Real-Time Ambient Ceiling Tracking: Seeds `ambient_rms_window` before speech starts and dynamically tracks `live_ambient_ceiling`, ensuring `start_threshold` stays above real-time room noise.
+- **Sentence Preservation & Prompt Endpointing (`listen.py`)**:
+  * Removed Excessive Peak Penalty: Replaced `peak_speech_rms * 0.42` in continuation threshold with `max(continue_threshold, live_ambient_ceiling * 1.15, min(peak_speech_rms * 0.18, start_threshold * 0.75))`. Soft consonants and word endings are no longer misclassified as silence.
+  * Natural Speech Silence Reset: Any frame >= `start_threshold` or `speech_streak >= 2` (60ms) resets `silence_votes = 0`, allowing natural conversational pauses between words without cutting off mid-sentence.
+  * Prompt Turnaround: Reduced `END_SILENCE_SECONDS` to `0.45s` (15 frames) so recording terminates within 450ms of speech finishing and dispatches to Groq.
+  * Word Tail Protection: Preserves ~180ms of trailing decay instead of blindly chopping off trailing frames, ensuring final syllables and consonants reach Whisper intact.
+  * Expander Threshold Relaxation: Downward expander in `clean_audio_for_transcription()` only attenuates frames near the ambient noise floor (`min(speech_p90 * 0.18, ambient_floor * 1.25)`), preventing vocal consonants from being muffled.
+- **Visual Feedback Transparency (`listen.py`, `screen.py`)**:
+  * Screen status transitions cleanly: `LISTENING...` (waiting for voice) -> `HEARING YOU...` (speech actively captured) -> `THINKING...` (processing in Whisper/Groq).
+
 ## Reliability Notes
 
 - **Exhibition Screen Isolation**: On the Raspberry Pi 7-inch display, ONLY the Face UI (`screen.py`) is rendered. Camera feeds, vision debug windows, and terminal consoles run silently in the background with zero popups or desktop artifacts visible to guests.

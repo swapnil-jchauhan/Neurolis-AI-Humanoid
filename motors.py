@@ -104,6 +104,7 @@ class MotorController:
         self.nav_mode = NavMode.STANDBY  # always start locked at 0
         self.running = False
         self.lock = threading.Lock()
+        self._serial_write_lock = threading.Lock()
 
         # Telemetry
         self.telemetry = TelemetryData()
@@ -218,7 +219,8 @@ class MotorController:
                 with self.lock:
                     self.is_simulated = False
                 try:
-                    self.ser.write(b"CONFIG_SENSORS,12\n")
+                    with self._serial_write_lock:
+                        self.ser.write(b"CONFIG_SENSORS,12\n")
                 except Exception:
                     pass
                 print(f"[Motors] Connected to Arduino Mega on {port} @ 115200 baud (12 Sensors Active).")
@@ -326,6 +328,7 @@ class MotorController:
         with self.lock:
             self.nav_mode = NavMode.FOLLOW
             self.popup_active = bool(self.auto_popup)
+            self.last_seen_time = time.time()
         print("[Motors] Mode: CONTINUOUS FOLLOW ME.")
 
     # activates come-here mode: robot approaches user until within conversation range (~0.9m)
@@ -480,7 +483,8 @@ class MotorController:
 
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
-                self.ser.write(f"DRIVE,{speed},{steer}\n".encode("ascii"))
+                with self._serial_write_lock:
+                    self.ser.write(f"DRIVE,{speed},{steer}\n".encode("ascii"))
             except Exception as e:
                 print(f"[Motors] Serial drive command failed: {e}")
 
@@ -491,7 +495,8 @@ class MotorController:
             self.last_cmd_steer = 0
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
-                self.ser.write(b"STOP\n")
+                with self._serial_write_lock:
+                    self.ser.write(b"STOP\n")
             except Exception as e:
                 print(f"[Motors] Serial stop command failed: {e}")
 
@@ -801,7 +806,8 @@ class MotorController:
 
         else:
             with self.lock:
-                if now - self.last_seen_time > 0.8:
+                dropped_time = now - self.last_seen_time
+                if dropped_time > 0.8:
                     self.target_detected = False
                     self.gaze_x = 0.0
                     self.gaze_y = 0.0
@@ -815,7 +821,20 @@ class MotorController:
                         self.on_target_reached_callback()
                     except Exception as cb_err:
                         print(f"[Motors] Target reached callback error: {cb_err}")
-            elif mode in [NavMode.FOLLOW, NavMode.APPROACH]:
+            elif mode == NavMode.FOLLOW:
+                # Follow Mode Face Tracking Re-acquisition:
+                # When target face is dropped for >0.8s, instead of stalling dead, implement smooth
+                # low-speed rotational re-acquisition scan (speed=0, steer=65 for up to 2.5s) if unobstructed,
+                # then hold position if still not found.
+                if 0.8 < dropped_time <= 3.3:
+                    sectors = self.get_radial_sectors()
+                    if sectors["front_min"] > 25.0 and sectors["lateral_left"] > 20.0 and sectors["lateral_right"] > 20.0:
+                        self.drive(0, 65)
+                    else:
+                        self.stop()
+                else:
+                    self.stop()
+            elif mode == NavMode.APPROACH:
                 self.stop()
 
 
@@ -1120,7 +1139,8 @@ class MotorController:
         """sends command to arduino to configure active sensors (4, 8, 12, or 'AUTO')"""
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
-                self.ser.write(f"CONFIG_SENSORS,{count}\n".encode("ascii"))
+                with self._serial_write_lock:
+                    self.ser.write(f"CONFIG_SENSORS,{count}\n".encode("ascii"))
             except Exception as e:
                 print(f"[Motors] Failed to send sensor config: {e}")
 
