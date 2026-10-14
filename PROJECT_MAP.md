@@ -1134,6 +1134,37 @@ To do:
 - **Visual Feedback Transparency (`listen.py`, `screen.py`)**:
   * Screen status transitions cleanly: `LISTENING...` (waiting for voice) -> `HEARING YOU...` (speech actively captured) -> `THINKING...` (processing in Whisper/Groq).
 
+### Part 29: Endpointer v2, Unified Audio Frontend & Network Hardening
+- **Single Source of Truth (`audio_frontend.py`)**:
+  * Created `audio_frontend.py` providing the shared `Endpointer` state machine, FFT bandpass (`bandpass_frame`), whole-utterance cleaner (`clean_audio_for_transcription`), and thread-safe config persistence (`load_mic_config`, `save_mic_config`).
+  * Fixed Onset Shouting Defect: Replaced 3-consecutive-frame requirement with a 240ms sliding window (`onset_required = 4` out of `onset_window = 8` frames), allowing natural conversational speech to trigger instantly without shouting.
+  * Fixed Mid-Sentence Cutoff & Hang: Replaced fragile leaky `0.42 * peak` counter with time-based hangover endpointing (`last_voiced_idx` index tracking) and dynamic speaker envelope tracking (`speaker_ratio = 0.40`), ensuring turns terminate reliably within 0.55s of silence while ignoring distant crowd murmur.
+  * Fixed Word Tail Trimming: Slices frames strictly by last voiced frame index plus 6 padding frames (`tail_pad_frames = 6`), guaranteeing consonants and word endings are never chopped off.
+  * Post-Capture Acoustic Validation: Replaced whole-utterance mean RMS dilution gate with 90th percentile voiced energy check (`p90(voiced_rms) >= min_onset_rms`), preventing valid soft utterances with pauses from being silently dropped.
+- **Robot Brain Integration (`listen.py`)**:
+  * Swapped `listen_for_speech_segment` to use singleton `Endpointer`.
+  * Implemented startup drain holdoff (`startup_holdoff_sec = 0.45s`) on turn 0 to absorb PipeWire buffer startup pops and touch clicks, and post-TTS echo drain holdoff (`echo_holdoff_sec = 0.55s`) on subsequent turns to prevent Bluetooth speaker echo self-triggers.
+  * Configurable conversation timeouts: 15.0s on first turn (`first_turn_timeout_sec`), 10.0s on followup turns (`followup_timeout_sec`).
+  * Console Instant Send: Pressing Enter during an active conversation immediately calls `finish_speech_event.set()` for 0ms speech dispatch.
+  * Fixed Latent Polite-Phrase Bug: Built `avg_logprobs` list during segment parsing in `transcribe_audio` to eliminate silent `NameError` exceptions.
+  * Shortened Whisper prompt to 4 words (`"Neurolis. Auckland House School."`) to stop hallucinating names on background crowd noise.
+  * Preserved saved calibration on boot: loads saved `calibrated_start_rms` without wiping tuner configuration.
+  * Added CLI diagnostic suite: `--latency-test` (loopback latency measurement), `--diag` (3-phase noise/voice telemetry scan), and `--replay <file.wav>` (offline regression test runner).
+- **Tuning Studio Synchronization (`tune_mic.py`)**:
+  * Unified `MicTunerApp` with `audio_frontend.Endpointer`: audio callback directly feeds `self.endpointer.feed(resampled)`, ensuring 100% parity with `listen.py`.
+  * Synchronized all UI sliders 1:1 to Endpointer v2 configuration parameters (`hardware_gain_pct`, `vad_mode`, `onset_snr_db`, `continue_snr_db`, `min_onset_rms`, `max_onset_rms`, `speaker_ratio`, `end_silence_sec`, `low_cutoff_hz`, `high_cutoff_hz`, `treble_boost`, `agc_max_scale`, `startup_holdoff_sec`, `echo_holdoff_sec`, `first_turn_timeout_sec`, `followup_timeout_sec`).
+  * Real-time telemetry HUD: live RMS, dynamic floor, onset and continuation thresholds, silence hangover counter, VAD candidate streak, and state banner.
+  * Asynchronous voice sample recording and replay with `clean_audio_for_transcription`.
+- **Network & Latency Hardening (`api_pool.py`)**:
+  * Groq Client `max_retries = 0`: Removed internal client retries that previously multiplied across the 14-key pool causing multi-minute freezes on network drops.
+  * Wall-clock timeouts: Set `GROQ_AUDIO_TIMEOUT = 7.0s` and `GROQ_PER_CALL_TIMEOUT = 4.0s`.
+  * Rapid Failover: Fails fast on 2 consecutive network timeout/connection errors rather than stalling across all 14 keys; immediate rotation on HTTP 429 quota exhaustion.
+- **Integrity Verification**:
+  * `NORMAL_SYSTEM_PROMPT` word count verified and preserved strictly at 331 words.
+  * `arduino.ino` completely untouched and intact.
+  * All files cleanly compiled with `python3 -m py_compile`.
+  * Offline audio regression replay passed with `ACCEPT` on test files.
+
 ## Reliability Notes
 
 - **Exhibition Screen Isolation**: On the Raspberry Pi 7-inch display, ONLY the Face UI (`screen.py`) is rendered. Camera feeds, vision debug windows, and terminal consoles run silently in the background with zero popups or desktop artifacts visible to guests.

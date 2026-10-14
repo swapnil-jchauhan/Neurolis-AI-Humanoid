@@ -26,46 +26,22 @@ except ImportError:
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
-
-DEFAULT_CONFIG = {
-    "hardware_gain_pct": 60,
-    "vad_mode": 3,
-    "min_speech_rms": 80.0,
-    "speech_multiplier": 1.45,
-    "continue_ratio": 0.70,
-    "start_frames": 3,
-    "end_silence_sec": 0.45,
-    "pre_emphasis": 0.0,
-    "low_cutoff_hz": 85.0,
-    "high_cutoff_hz": 4500.0,
-    "treble_boost": 1.40,
-    "bg_suppress_db": 24.0,
-    "agc_target_peak": 22000.0,
-    "agc_max_scale": 1.50,
-    "fan_rejection_ratio": 0.85,
-    "click_rejection_ratio": 0.35,
-    "proximity_crest_min": 1.50
-}
+from audio_frontend import (
+    Endpointer,
+    load_mic_config,
+    save_mic_config,
+    bandpass_frame,
+    clean_audio_for_transcription,
+    audio_rms,
+    DEFAULT_CONFIG,
+    CONFIG_FILE,
+)
 
 def load_saved_config() -> dict:
-    cfg = dict(DEFAULT_CONFIG)
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                loaded = json.load(f)
-                cfg.update(loaded)
-        except Exception as e:
-            print(f"[Config] Error loading {CONFIG_FILE}: {e}")
-    return cfg
+    return load_mic_config(CONFIG_FILE)
 
 def save_config(cfg: dict):
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(cfg, f, indent=2)
-        print(f"[Config] Saved parameters to {CONFIG_FILE}")
-    except Exception as e:
-        print(f"[Config] Failed to save {CONFIG_FILE}: {e}")
+    save_mic_config(cfg, CONFIG_FILE)
 
 def set_hardware_gain(gain_pct: int):
     """Sets system capture gain via wpctl / pactl on default audio source (and ALSA fallback)."""
@@ -219,6 +195,8 @@ class MicTunerApp:
 
         self.cfg = load_saved_config()
         self.audio_cfg = AudioConfigManager(self.cfg)
+        self.endpointer = Endpointer(self.cfg)
+        self.endpointer.begin_turn(holdoff_sec=0.0)
         self.is_running = True
 
         # Live audio monitoring pipeline
@@ -232,13 +210,16 @@ class MicTunerApp:
         self.filtered_rms = 0.0
         self.crest_factor = 1.0
         self.vad_speech = False
-        self.is_click = False
-        self.is_fan = False
-        self.is_speaking = False
-        self.start_streak = 0
-        self.calibrated_ambient = 25.0
-        self.calibrated_threshold = float(self.cfg.get("min_speech_rms", 820.0))
-        self.continue_threshold_val = float(self.cfg.get("min_speech_rms", 820.0)) * float(self.cfg.get("continue_ratio", 0.50))
+        self.endpointer_state = Endpointer.STATE_WAITING
+        self.live_silence_sec = 0.0
+        self.live_floor = 50.0
+        self.live_onset_thr = float(self.cfg.get("min_onset_rms", 220.0))
+        self.live_cont_thr = float(self.cfg.get("min_continue_rms", 150.0))
+        self.onset_candidates = 0
+        self.onset_required = int(self.cfg.get("onset_required", 4))
+        self.voiced_count = 0
+        self.last_transition = ""
+        self.last_transition_time = 0.0
 
         # Test sample recording
         self.is_recording_sample = False
@@ -357,139 +338,144 @@ class MicTunerApp:
         self.tunnel_val_lbl = tk.Label(canvas_grid, text="RMS: 0", bg="#151c27", fg="#00e676", font=("Helvetica", 8), width=12, anchor="w")
         self.tunnel_val_lbl.grid(row=1, column=2, padx=4)
 
-        # Filter Telemetry Indicators (Click reject, Fan reject, VAD, Crest)
+        # Telemetry Indicators (Floor, Onset, Continue, VAD, Silence, Crest)
         info_row = tk.Frame(meter_frame, bg="#151c27")
         info_row.pack(fill="x", padx=8, pady=(1, 3))
-        self.ambient_lbl = tk.Label(info_row, text="Ambient: 25.0", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
+        self.ambient_lbl = tk.Label(info_row, text="Floor: 50.0", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
         self.ambient_lbl.pack(side="left", padx=3)
-        self.thresh_lbl = tk.Label(info_row, text="Trigger: 820.0", bg="#151c27", fg="#ff9100", font=("Helvetica", 8))
+        self.thresh_lbl = tk.Label(info_row, text="Onset: 220.0", bg="#151c27", fg="#ff9100", font=("Helvetica", 8))
         self.thresh_lbl.pack(side="left", padx=6)
-        self.cont_lbl = tk.Label(info_row, text="Continue: 574.0", bg="#151c27", fg="#ffeb3b", font=("Helvetica", 8))
+        self.cont_lbl = tk.Label(info_row, text="Continue: 150.0", bg="#151c27", fg="#ffeb3b", font=("Helvetica", 8))
         self.cont_lbl.pack(side="left", padx=6)
-        self.vad_vote_lbl = tk.Label(info_row, text="VAD: NO", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
+        self.vad_vote_lbl = tk.Label(info_row, text="VAD: NO (0/4)", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
         self.vad_vote_lbl.pack(side="left", padx=6)
+        self.silence_lbl = tk.Label(info_row, text="Silence: 0.00s", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
+        self.silence_lbl.pack(side="left", padx=6)
         self.crest_lbl = tk.Label(info_row, text="Crest: 1.0x", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
         self.crest_lbl.pack(side="left", padx=6)
-        self.click_lbl = tk.Label(info_row, text="Click: OFF", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
-        self.click_lbl.pack(side="left", padx=6)
-        self.fan_lbl = tk.Label(info_row, text="Fan Drone: OFF", bg="#151c27", fg="#8090a0", font=("Helvetica", 8))
-        self.fan_lbl.pack(side="left", padx=6)
 
         # Main Controls Frame
         controls_container = tk.Frame(self.root, bg="#0f141c")
         controls_container.pack(side="top", fill="both", expand=True, padx=12, pady=2)
 
-        # Left Column: Sensitivity, VAD & Proximity Guards
-        col_left = tk.LabelFrame(controls_container, text=" Acoustic Rejection, Proximity & VAD ", bg="#151c27", fg="#00d4ff", font=("Helvetica", 9, "bold"))
+        # Left Column: Endpointer v2 Acoustic Onset & VAD Sensitivity
+        col_left = tk.LabelFrame(controls_container, text=" Endpointer v2 Acoustic Onset & VAD ", bg="#151c27", fg="#00d4ff", font=("Helvetica", 9, "bold"))
         col_left.pack(side="left", fill="both", expand=True, padx=(0, 4))
 
         # Hardware Mic Gain Slider
-        self.gain_var = tk.IntVar(value=self.cfg["hardware_gain_pct"])
+        self.gain_var = tk.IntVar(value=int(self.cfg.get("hardware_gain_pct", 60)))
         self._create_slider(
             col_left, "hardware_gain_pct", "Hardware Mic Gain (%)", self.gain_var, 10, 100, 1,
-            "System audio capture volume (wpctl/pactl). 61% calibrated for phone mic.", self._on_gain_change
+            "System audio capture volume (wpctl/pactl). 60% default for phone mic.", self._on_gain_change
         )
 
         # WebRTC VAD Aggressiveness Mode (0 to 3)
-        self.vad_var = tk.IntVar(value=self.cfg["vad_mode"])
+        self.vad_var = tk.IntVar(value=int(self.cfg.get("vad_mode", 2)))
         self._create_slider(
             col_left, "vad_mode", "WebRTC VAD Aggressiveness", self.vad_var, 0, 3, 1,
-            "Mode 3 strictly isolates vocal harmonic bands"
+            "Mode 2-3 isolates vocal formants while rejecting ambient crowd rumble"
         )
 
-        # Minimum Speech RMS Cutoff
-        self.min_rms_var = tk.DoubleVar(value=self.cfg["min_speech_rms"])
+        # Onset SNR Gate (dB)
+        self.onset_snr_var = tk.DoubleVar(value=float(self.cfg.get("onset_snr_db", 6.0)))
         self._create_slider(
-            col_left, "min_speech_rms", "Min Speech RMS Baseline", self.min_rms_var, 40.0, 2000.0, 10.0,
-            "Absolute noise floor cutoff (rejects fan / distant background chatter)"
+            col_left, "onset_snr_db", "Speech Onset SNR Gate (dB over floor)", self.onset_snr_var, 2.0, 16.0, 0.5,
+            "Decibels above measured room floor required to trigger recording"
         )
 
-        # Speech Threshold Multiplier
-        self.mult_var = tk.DoubleVar(value=self.cfg["speech_multiplier"])
+        # Continue SNR Gate (dB)
+        self.cont_snr_var = tk.DoubleVar(value=float(self.cfg.get("continue_snr_db", 3.5)))
         self._create_slider(
-            col_left, "speech_multiplier", "Speech Multiplier (over ambient)", self.mult_var, 1.10, 3.50, 0.05,
-            "Headroom above measured room noise"
+            col_left, "continue_snr_db", "Speech Continue SNR Gate (dB over floor)", self.cont_snr_var, 1.0, 10.0, 0.5,
+            "Decibels above floor needed to sustain recording during speech"
         )
 
-        # Continuation Threshold Ratio
-        self.continue_ratio_var = tk.DoubleVar(value=self.cfg.get("continue_ratio", 0.50))
+        # Min Speech RMS Baseline (Absolute Floor)
+        self.min_onset_var = tk.DoubleVar(value=float(self.cfg.get("min_onset_rms", 220.0)))
         self._create_slider(
-            col_left, "continue_ratio", "Speech Continuation Ratio", self.continue_ratio_var, 0.30, 0.85, 0.05,
-            "Ratio of active voice RMS required to keep recording (cuts off background noise)"
+            col_left, "min_onset_rms", "Min Speech RMS Floor", self.min_onset_var, 50.0, 1000.0, 10.0,
+            "Absolute minimum vocal energy required to trigger speech onset"
         )
 
-        # Required Start Frames (Streak)
-        self.frames_var = tk.IntVar(value=self.cfg["start_frames"])
+        # Max Speech RMS Clamp
+        self.max_onset_var = tk.DoubleVar(value=float(self.cfg.get("max_onset_rms", 1300.0)))
         self._create_slider(
-            col_left, "start_frames", "Start Speech Streak (Frames)", self.frames_var, 2, 8, 1,
-            "Consecutive 30ms frames before activating (filters short pops)"
+            col_left, "max_onset_rms", "Max Speech RMS Clamp", self.max_onset_var, 500.0, 3500.0, 50.0,
+            "Upper limit clamp on onset threshold in extremely loud exhibition halls"
+        )
+
+        # Dynamic Speaker Envelope Ratio
+        self.speaker_ratio_var = tk.DoubleVar(value=float(self.cfg.get("speaker_ratio", 0.40)))
+        self._create_slider(
+            col_left, "speaker_ratio", "Dynamic Speaker Envelope Ratio", self.speaker_ratio_var, 0.20, 0.70, 0.05,
+            "Ratio of close speaker's voice power to maintain continue threshold"
         )
 
         # End Silence Cutoff Seconds
-        self.end_silence_var = tk.DoubleVar(value=self.cfg.get("end_silence_sec", 0.45))
+        self.end_silence_var = tk.DoubleVar(value=float(self.cfg.get("end_silence_sec", 0.55)))
         self._create_slider(
-            col_left, "end_silence_sec", "End Silence Cutoff (Seconds)", self.end_silence_var, 0.30, 0.80, 0.05,
-            "Silence duration before finalizing speech (stops recording promptly)"
-        )
-
-        # Proximity Crest Factor Minimum
-        self.crest_var = tk.DoubleVar(value=self.cfg.get("proximity_crest_min", 2.20))
-        self._create_slider(
-            col_left, "proximity_crest_min", "Proximity Crest Factor Gate (Min Peak/RMS)", self.crest_var, 1.5, 4.0, 0.1,
-            "Rejects diffuse distant room echo; close speech exhibits sharp peak-to-RMS"
+            col_left, "end_silence_sec", "End Silence Cutoff (Seconds)", self.end_silence_var, 0.30, 1.20, 0.05,
+            "Continuous silence hangover before cutting off speech and sending to Whisper"
         )
 
         # Right Column: Vocal Tunnel DSP & Audio Monitoring
-        col_right = tk.LabelFrame(controls_container, text=" Vocal Tunnel DSP & Live Monitoring ", bg="#151c27", fg="#00d4ff", font=("Helvetica", 9, "bold"))
+        col_right = tk.LabelFrame(controls_container, text=" Vocal Tunnel DSP & Engine Timers ", bg="#151c27", fg="#00d4ff", font=("Helvetica", 9, "bold"))
         col_right.pack(side="right", fill="both", expand=True, padx=(4, 0))
 
         # Low-Cut Filter Frequency
-        self.low_cut_var = tk.DoubleVar(value=self.cfg.get("low_cutoff_hz", 40.0))
+        self.low_cut_var = tk.DoubleVar(value=float(self.cfg.get("low_cutoff_hz", 85.0)))
         self._create_slider(
             col_right, "low_cutoff_hz", "Low-Cut Bass Roll-off (Hz)", self.low_cut_var, 40.0, 250.0, 5.0,
-            "Cuts sub-bass rumble & 50Hz/60Hz AC hum while preserving full bass vocal warmth (80Hz+)"
+            "Cuts sub-bass rumble & AC hum while preserving vocal warmth (85Hz+)"
         )
 
         # High-Cut Filter Frequency
-        self.high_cut_var = tk.DoubleVar(value=self.cfg.get("high_cutoff_hz", 5800.0))
+        self.high_cut_var = tk.DoubleVar(value=float(self.cfg.get("high_cutoff_hz", 4500.0)))
         self._create_slider(
-            col_right, "high_cutoff_hz", "High-Cut Filter (Hz)", self.high_cut_var, 3500.0, 7500.0, 100.0,
-            "Strips electrical hiss above 5.8kHz while preserving clear speech formants"
+            col_right, "high_cutoff_hz", "High-Cut Filter (Hz)", self.high_cut_var, 3000.0, 7500.0, 100.0,
+            "Strips electrical hiss above 4.5kHz while preserving speech formants"
         )
 
         # Treble Formant Clarity Boost
-        self.treble_var = tk.DoubleVar(value=self.cfg.get("treble_boost", 1.65))
+        self.treble_var = tk.DoubleVar(value=float(self.cfg.get("treble_boost", 1.35)))
         self._create_slider(
             col_right, "treble_boost", "Treble / Consonant Clarity Boost (x)", self.treble_var, 1.0, 2.5, 0.05,
-            "Subtle presence boost (2.2kHz-4.2kHz) for crisp consonant clarity without harsh stinging"
-        )
-
-        # Background Noise Suppression Gate (dB)
-        self.bg_suppress_var = tk.DoubleVar(value=self.cfg.get("bg_suppress_db", 28.0))
-        self._create_slider(
-            col_right, "bg_suppress_db", "Background Noise Suppression (dB)", self.bg_suppress_var, 6.0, 36.0, 2.0,
-            "Attenuates background hiss, distant hums, and murmur during pauses"
+            "Subtle presence boost (2.0kHz-4.0kHz) for crisp consonant clarity"
         )
 
         # Dynamic Vocal AGC Max Scale
-        self.agc_var = tk.DoubleVar(value=self.cfg.get("agc_max_scale", 1.50))
+        self.agc_var = tk.DoubleVar(value=float(self.cfg.get("agc_max_scale", 1.80)))
         self._create_slider(
-            col_right, "agc_max_scale", "AGC Distance Amplifier (Max)", self.agc_var, 1.0, 3.0, 0.1,
-            "Smoothly amplifies speech level (active only during speech, disabled during pauses)"
+            col_right, "agc_max_scale", "AGC Max Scale (Whole Utterance)", self.agc_var, 1.0, 3.0, 0.1,
+            "Peak normalization ceiling applied once across whole utterance"
         )
 
-        # Narrowband Fan Drone Rejection Threshold
-        self.fan_rej_var = tk.DoubleVar(value=self.cfg["fan_rejection_ratio"])
+        # Startup Drain Holdoff (Seconds)
+        self.startup_holdoff_var = tk.DoubleVar(value=float(self.cfg.get("startup_holdoff_sec", 0.45)))
         self._create_slider(
-            col_right, "fan_rejection_ratio", "Fan Drone Power Threshold", self.fan_rej_var, 0.50, 0.98, 0.05,
-            "Suppresses continuous single-tone motor/fan whine"
+            col_right, "startup_holdoff_sec", "Startup Buffer Drain Holdoff (s)", self.startup_holdoff_var, 0.10, 1.00, 0.05,
+            "Discards initial PipeWire buffer startup pops or touch screen thumps"
         )
 
-        # Keyboard / Click Rejection Threshold
-        self.click_rej_var = tk.DoubleVar(value=self.cfg["click_rejection_ratio"])
+        # Post-TTS Speaker Echo Drain Holdoff (Seconds)
+        self.echo_holdoff_var = tk.DoubleVar(value=float(self.cfg.get("echo_holdoff_sec", 0.55)))
         self._create_slider(
-            col_right, "click_rejection_ratio", "Click/Typing Rejection Ratio", self.click_rej_var, 0.10, 0.50, 0.02,
-            "Rejects sharp transient clicks and key presses (>3.6kHz power)"
+            col_right, "echo_holdoff_sec", "Speaker Echo Drain Holdoff (s)", self.echo_holdoff_var, 0.20, 1.50, 0.05,
+            "Discards Bluetooth speaker latency echo after Neurolis finishes speaking"
+        )
+
+        # First Turn Timeout (Seconds)
+        self.first_turn_var = tk.DoubleVar(value=float(self.cfg.get("first_turn_timeout_sec", 15.0)))
+        self._create_slider(
+            col_right, "first_turn_timeout_sec", "First Turn Timeout (s)", self.first_turn_var, 5.0, 30.0, 1.0,
+            "Timeout waiting for visitor's initial greeting before returning to standby"
+        )
+
+        # Followup Turn Timeout (Seconds)
+        self.followup_var = tk.DoubleVar(value=float(self.cfg.get("followup_timeout_sec", 10.0)))
+        self._create_slider(
+            col_right, "followup_timeout_sec", "Followup Turn Timeout (s)", self.followup_var, 4.0, 20.0, 1.0,
+            "Timeout waiting for followup question after robot answers"
         )
 
         # Action Buttons (Live Audio Monitor, Record Sample, Play Back) - 2x2 Responsive Grid
@@ -542,6 +528,14 @@ class MicTunerApp:
             val_lbl.config(text=formatted)
             # Atomically update thread-safe cache
             self.audio_cfg.set(param_key, parsed)
+            self.cfg[param_key] = parsed
+            if hasattr(self, "endpointer") and self.endpointer is not None:
+                self.endpointer.cfg[param_key] = parsed
+                if param_key == "vad_mode" and self.endpointer.vad is not None:
+                    try:
+                        self.endpointer.vad.set_mode(int(parsed))
+                    except Exception:
+                        pass
             if callback:
                 callback(parsed)
 
@@ -589,87 +583,16 @@ class MicTunerApp:
     def apply_filter(self, audio_16k: np.ndarray, enable_agc: bool = True) -> np.ndarray:
         if audio_16k is None or len(audio_16k) == 0:
             return audio_16k
-        try:
-            # If single frame (e.g. 30ms / 480 samples)
-            if len(audio_16k) <= 480:
-                res = self._apply_filter_chunk(audio_16k, enable_agc=enable_agc)
-                return np.clip(res, -32767.0, 32767.0).astype(np.int16)
-
-            # For multi-frame audio (e.g. 3-second recorded sample), process in 480-sample blocks
-            # so downward expansion cleanly gates out background noise during pauses
-            frame_sz = 480
-            out_frames = []
-            for i in range(0, len(audio_16k), frame_sz):
-                chunk = audio_16k[i:i+frame_sz]
-                if len(chunk) < 64:
-                    out_frames.append(chunk)
-                else:
-                    out_frames.append(self._apply_filter_chunk(chunk, enable_agc=enable_agc))
-            concat = np.concatenate(out_frames)
-            return np.clip(concat, -32767.0, 32767.0).astype(np.int16)
-        except Exception:
-            return audio_16k
-
-    def _apply_filter_chunk(self, chunk_16k: np.ndarray, enable_agc: bool = True) -> np.ndarray:
-        samples = chunk_16k.astype(np.float32)
-        alpha = float(self.audio_cfg.get("pre_emphasis", 0.0))
-        if alpha > 0.01:
-            emp = np.empty_like(samples)
-            emp[0] = samples[0]
-            emp[1:] = samples[1:] - alpha * samples[:-1]
-        else:
-            emp = samples
-
-        n = len(emp)
-        fft_vals = np.fft.rfft(emp)
-        freqs = np.fft.rfftfreq(n, d=1.0 / 16000.0)
-
-        low_cut = float(self.audio_cfg.get("low_cutoff_hz", 40.0))
-        high_cut = float(self.audio_cfg.get("high_cutoff_hz", 5800.0))
-        treble = float(self.audio_cfg.get("treble_boost", 1.65))
-        agc_max = float(self.audio_cfg.get("agc_max_scale", 1.50))
-        bg_suppress_db = float(self.audio_cfg.get("bg_suppress_db", 28.0))
-        act_thresh = float(self.audio_cfg.get("min_speech_rms", 820.0))
-
-        gain = np.ones_like(freqs, dtype=np.float32)
-
-        # 1. Clean sub-bass roll-off (cuts 50Hz/60Hz AC hum & rumble, fully preserves 80Hz+ male fundamental)
-        sub_mask = freqs < low_cut
-        gain[sub_mask] = np.clip((freqs[sub_mask] / max(1.0, low_cut)) ** 2, 0.0, 1.0)
-
-        # 2. Smooth high-cut roll-off (cuts high-frequency electrical hiss above high_cut)
-        high_mask = freqs > high_cut
-        gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - high_cut) / (8000.0 - high_cut), 0.05, 1.0)
-
-        # 3. Gentle consonant clarity shelf (2.2kHz to 4.2kHz) for crisp intelligible speech without stinging
-        clarity_mask = (freqs >= 2200.0) & (freqs <= 4200.0)
-        gain[clarity_mask] *= treble
-
-        filtered_fft = fft_vals * gain
-        filtered = np.fft.irfft(filtered_fft, n=n)
-
-        # 4. Background noise & hiss suppression gate (downward expansion)
-        f_rms = float(np.sqrt(np.mean(filtered ** 2)))
-        min_floor_gain = 10.0 ** (-bg_suppress_db / 20.0)
-
-        if f_rms < act_thresh:
-            # Below speech threshold: smooth soft-knee attenuation of background room murmur and hiss
-            normalized = max(0.0, f_rms / max(1.0, act_thresh))
-            gate_gain = min_floor_gain + (1.0 - min_floor_gain) * (normalized ** 2)
-            filtered = filtered * gate_gain
-        elif enable_agc:
-            # Speech active: gentle AGC (only boosts speech, never amplifies noise)
-            peak = np.max(np.abs(filtered))
-            if peak > 20.0:
-                scale = min(22000.0 / peak, agc_max)
-                filtered = filtered * scale
-
-        return filtered
+        low_hz = float(self.audio_cfg.get("low_cutoff_hz", 85.0))
+        high_hz = float(self.audio_cfg.get("high_cutoff_hz", 4500.0))
+        if len(audio_16k) <= 480:
+            return bandpass_frame(audio_16k, sample_rate=16000, low_hz=low_hz, high_hz=high_hz)
+        floor = getattr(self, "live_floor", 50.0)
+        agc_scale = float(self.audio_cfg.get("agc_max_scale", 1.80))
+        return clean_audio_for_transcription(audio_16k, floor_rms=floor, sample_rate=16000, agc_max_scale=agc_scale)
 
     def _start_audio_stream(self):
         """Audio callback thread computes metrics directly, avoiding queue buildup and UI freezes."""
-        vad = webrtcvad.Vad(3) if webrtcvad is not None else None
-
         def _audio_callback(indata, frames, time_info, status):
             if not self.is_running:
                 return
@@ -686,104 +609,49 @@ class MicTunerApp:
                 if self.is_recording_sample:
                     self.sample_buffer.append(resampled)
 
-                # Raw RMS
-                r_rms = float(np.sqrt(np.mean(resampled.astype(np.float32) ** 2)))
-
-                # Filtered chunk without AGC (reflects true acoustic speech power)
-                filtered_chunk = self.apply_filter(resampled, enable_agc=False)
-                f_rms = float(np.sqrt(np.mean(filtered_chunk.astype(np.float32) ** 2)))
-
-                # Proximity Crest Factor (Peak / RMS)
+                # Raw RMS and crest factor
+                r_rms = audio_rms(resampled)
                 peak_abs = float(np.max(np.abs(resampled)))
-                crest = peak_abs / (f_rms + 1e-4)
+                crest = peak_abs / (r_rms + 1e-4)
+
+                # Feed directly to unified Endpointer v2 state machine!
+                transition = self.endpointer.feed(resampled)
+                now = time.monotonic()
+                if transition == "ONSET":
+                    self.last_transition = "ONSET"
+                    self.last_transition_time = now
+                elif transition == "END":
+                    self.last_transition = f"END ({self.endpointer.done_reason})"
+                    self.last_transition_time = now
+                    # Auto re-arm waiting turn in tuner studio after 0.8s so user can test repeatedly
+                    threading.Timer(0.8, lambda: self.endpointer.begin_turn(holdoff_sec=0.0)).start()
 
                 # Live Audio Monitor stream write
                 if self.is_monitoring:
                     with self.monitor_lock:
                         if self.monitor_proc is not None and self.monitor_proc.stdin:
                             try:
-                                # Apply AGC for monitoring so user hears boosted clarity
-                                mon_chunk = self.apply_filter(resampled, enable_agc=True)
+                                low_h = float(self.audio_cfg.get("low_cutoff_hz", 85.0))
+                                high_h = float(self.audio_cfg.get("high_cutoff_hz", 4500.0))
+                                mon_chunk = bandpass_frame(resampled, 16000, low_h, high_h)
                                 self.monitor_proc.stdin.write(mon_chunk.tobytes())
                                 self.monitor_proc.stdin.flush()
                             except Exception:
                                 pass
 
-                # Read parameters safely from audio_cfg
-                current_vad_mode = int(self.audio_cfg.get("vad_mode", 3))
-                click_rej_ratio = float(self.audio_cfg.get("click_rejection_ratio", 0.35))
-                fan_rej_ratio = float(self.audio_cfg.get("fan_rejection_ratio", 0.85))
-                mult = float(self.audio_cfg.get("speech_multiplier", 2.65))
-                m_rms = float(self.audio_cfg.get("min_speech_rms", 820.0))
-                cont_ratio = float(self.audio_cfg.get("continue_ratio", 0.50))
-                start_frames_req = int(self.audio_cfg.get("start_frames", 3))
-                crest_min = float(self.audio_cfg.get("proximity_crest_min", 2.20))
-
-                # WebRTC VAD
-                v_speech = False
-                if vad is not None:
-                    try:
-                        vad.set_mode(current_vad_mode)
-                        v_speech = vad.is_speech(filtered_chunk.tobytes(), 16000)
-                    except Exception:
-                        v_speech = False
-
-                # Acoustic feature analysis (Click and Fan detection)
-                click_detected = False
-                fan_detected = False
-                try:
-                    c_f32 = resampled.astype(np.float32)
-                    c_fft = np.abs(np.fft.rfft(c_f32))
-                    c_freqs = np.fft.rfftfreq(len(c_f32), 1.0 / 16000.0)
-                    total_e = np.sum(c_fft**2) + 1e-6
-
-                    # Transient click / typing check (>3600Hz and high peakiness)
-                    high_e = np.sum(c_fft[c_freqs > 3600.0]**2)
-                    if (high_e / total_e) > click_rej_ratio and crest > 4.0:
-                        click_detected = True
-
-                    # Narrowband fan drone check (requires SINGLE-BIN concentration >75% to avoid tripping on vowels)
-                    fan_mask = (c_freqs >= 320.0) & (c_freqs <= 650.0)
-                    fan_fft = c_fft[fan_mask]
-                    if len(fan_fft) > 0:
-                        fan_e = np.sum(fan_fft**2)
-                        peak_bin = np.max(fan_fft**2)
-                        if (fan_e / total_e) > fan_rej_ratio and (peak_bin / (fan_e + 1e-6)) > 0.70:
-                            fan_detected = True
-                except Exception:
-                    pass
-
-                # Active threshold calculation
-                act_thresh = max(self.calibrated_ambient * mult, m_rms)
-                cont_thresh = max(act_thresh * cont_ratio, m_rms * 0.70)
-
-                # Detection decision (VAD + Energy - Rejections; do not block speech on low crest factor)
-                is_speech_frame = (
-                    v_speech
-                    and (f_rms >= act_thresh)
-                    and (not click_detected)
-                    and (not fan_detected)
-                )
-
-                # Streak management
-                if is_speech_frame:
-                    self.start_streak += 1
-                else:
-                    self.start_streak = max(0, self.start_streak - 1)
-
-                is_trig = (self.start_streak >= start_frames_req)
-
                 # Publish to GUI atomically
                 with self.data_lock:
                     self.raw_rms = r_rms
-                    self.filtered_rms = f_rms
+                    self.filtered_rms = self.endpointer.live_rms
                     self.crest_factor = crest
-                    self.vad_speech = v_speech
-                    self.is_click = click_detected
-                    self.is_fan = fan_detected
-                    self.is_speaking = is_trig
-                    self.calibrated_threshold = act_thresh
-                    self.continue_threshold_val = cont_thresh
+                    self.vad_speech = self.endpointer.live_vad
+                    self.endpointer_state = self.endpointer.state
+                    self.live_silence_sec = self.endpointer.live_silence_sec
+                    self.live_floor = self.endpointer.live_floor
+                    self.live_onset_thr = self.endpointer.live_onset_thr
+                    self.live_cont_thr = self.endpointer.live_cont_thr
+                    self.onset_candidates = sum(self.endpointer.onset_hist)
+                    self.voiced_count = self.endpointer.voiced_count
             except Exception:
                 pass
 
@@ -837,15 +705,15 @@ class MicTunerApp:
                 f_rms = self.filtered_rms
                 crest = self.crest_factor
                 v_speech = self.vad_speech
-                is_click = self.is_click
-                is_fan = self.is_fan
-                is_speaking = self.is_speaking
-                act_thresh = self.calibrated_threshold
-                cont_thresh = self.continue_threshold_val
-                ambient = self.calibrated_ambient
-                streak = self.start_streak
+                ep_state = self.endpointer_state
+                silence_sec = self.live_silence_sec
+                floor = self.live_floor
+                act_thresh = self.live_onset_thr
+                cont_thresh = self.live_cont_thr
+                cand_cnt = self.onset_candidates
+                voiced_cnt = self.voiced_count
 
-            start_streak_required = int(self.audio_cfg.get("start_frames", 3))
+            onset_req = int(self.audio_cfg.get("onset_required", 4))
 
             # Update VU meter displays (Scale 0 to 2500 RMS for phone mic & high-clarity headroom)
             max_meter = 2500.0
@@ -861,39 +729,55 @@ class MicTunerApp:
 
             self.raw_val_lbl.config(text=f"RMS: {r_rms:5.1f}")
             self.tunnel_val_lbl.config(text=f"RMS: {f_rms:5.1f}")
-            self.ambient_lbl.config(text=f"Ambient: {ambient:.1f}")
-            self.thresh_lbl.config(text=f"Trigger: {act_thresh:.1f}")
+            self.ambient_lbl.config(text=f"Floor: {floor:.1f}")
+            self.thresh_lbl.config(text=f"Onset: {act_thresh:.1f}")
             self.cont_lbl.config(text=f"Continue: {cont_thresh:.1f}")
             self.crest_lbl.config(text=f"Crest: {crest:.1f}x")
             self.vad_vote_lbl.config(
-                text=f"VAD: {'YES' if v_speech else 'NO'} ({streak}/{start_streak_required})",
+                text=f"VAD: {'YES' if v_speech else 'NO'} ({cand_cnt}/{onset_req})",
                 fg="#00e676" if v_speech else "#8090a0"
             )
-            self.click_lbl.config(
-                text=f"Click: {'REJECTED' if is_click else 'OFF'}",
-                fg="#ff1744" if is_click else "#8090a0"
-            )
-            self.fan_lbl.config(
-                text=f"Fan Drone: {'SUPPRESSED' if is_fan else 'OFF'}",
-                fg="#ff9100" if is_fan else "#8090a0"
+            self.silence_lbl.config(
+                text=f"Silence: {silence_sec:.2f}s",
+                fg="#ffeb3b" if ep_state == Endpointer.STATE_RECORDING else "#8090a0"
             )
 
-            # Update banner state
-            if is_speaking:
+            # Update banner state based on endpointer_state
+            if ep_state == Endpointer.STATE_RECORDING:
                 self.status_canvas.config(bg="#1b5e20")
-                self.status_canvas.itemconfigure(self.status_text_id, text="🟢 HUMAN SPEECH DETECTED (TRIGGERED)", fill="#ffffff")
-            elif is_click:
-                self.status_canvas.config(bg="#37474f")
-                self.status_canvas.itemconfigure(self.status_text_id, text="⚡ TRANSIENT CLICK / KEYBOARD SOUND REJECTED", fill="#ff8a80")
-            elif is_fan:
-                self.status_canvas.config(bg="#263238")
-                self.status_canvas.itemconfigure(self.status_text_id, text="🌀 CONTINUOUS FAN DRONE SUPPRESSED", fill="#ffd180")
+                self.status_canvas.itemconfigure(
+                    self.status_text_id,
+                    text=f"🟢 VOICE LOCKED // RECORDING (Voiced: {voiced_cnt} frames | Silence: {silence_sec:.2f}s)",
+                    fill="#ffffff"
+                )
+            elif ep_state == Endpointer.STATE_DONE:
+                self.status_canvas.config(bg="#004d40")
+                self.status_canvas.itemconfigure(
+                    self.status_text_id,
+                    text=f"✅ UTTERANCE CAPTURED ({self.last_transition})",
+                    fill="#a7ffeb"
+                )
+            elif ep_state == Endpointer.STATE_HOLDOFF:
+                self.status_canvas.config(bg="#0d233a")
+                self.status_canvas.itemconfigure(
+                    self.status_text_id,
+                    text="⏳ DRAINING STARTUP / ECHO BUFFER...",
+                    fill="#80d8ff"
+                )
             elif v_speech:
                 self.status_canvas.config(bg="#e65100")
-                self.status_canvas.itemconfigure(self.status_text_id, text="🟡 VAD ACTIVE (BUILDING STREAK OR BELOW THRESHOLD)", fill="#ffffff")
+                self.status_canvas.itemconfigure(
+                    self.status_text_id,
+                    text=f"🟡 VAD SPEECH ACTIVE ({cand_cnt}/{onset_req} onset frames)",
+                    fill="#ffffff"
+                )
             else:
                 self.status_canvas.config(bg="#1a2332")
-                self.status_canvas.itemconfigure(self.status_text_id, text="⚪ LISTENING FOR HUMAN VOICE (UP CLOSE)...", fill="#8090a0")
+                self.status_canvas.itemconfigure(
+                    self.status_text_id,
+                    text=f"⚪ WAITING FOR SPEECH (Floor: {floor:.1f} RMS | Need {act_thresh:.1f} RMS)",
+                    fill="#8090a0"
+                )
         except Exception:
             pass
 
@@ -914,20 +798,25 @@ class MicTunerApp:
                 time.sleep(0.03)
             if chunks:
                 amb_median = float(np.median(chunks))
-                amb_p75 = float(np.percentile(chunks, 75))
                 amb_p90 = float(np.percentile(chunks, 90))
-                amb_ceiling = max(amb_p90, amb_median * 1.35)
-                amb_baseline = amb_median
                 with self.data_lock:
-                    self.calibrated_ambient = amb_baseline
-                    min_floor = float(self.cfg.get("min_speech_rms", 80.0))
-                    new_thresh = max(amb_ceiling * 1.45, amb_baseline * 1.65, min_floor)
-                    new_cont = max(amb_ceiling * 1.15, amb_baseline * 1.30, min_floor * 0.70)
-                    self.calibrated_threshold = new_thresh
-                    self.continue_threshold_val = new_cont
-                self.root.after(0, lambda: self.min_rms_var.set(round(new_thresh, 1)))
-                self.cfg["ambient_p90_rms"] = round(amb_ceiling, 1)
-                self.cfg["calibrated_start_rms"] = round(new_thresh, 1)
+                    self.live_floor = amb_median
+                if hasattr(self, "endpointer") and self.endpointer is not None:
+                    self.endpointer.floor_win.clear()
+                    for _ in range(20):
+                        self.endpointer.floor_win.append(amb_median)
+
+                onset_snr = float(self.audio_cfg.get("onset_snr_db", 6.0))
+                min_onset = float(self.audio_cfg.get("min_onset_rms", 220.0))
+                max_onset = float(self.audio_cfg.get("max_onset_rms", 1300.0))
+                new_onset = float(np.clip(amb_median * (10.0 ** (onset_snr / 20.0)), min_onset, max_onset))
+
+                cont_snr = float(self.audio_cfg.get("continue_snr_db", 3.5))
+                min_cont = float(self.audio_cfg.get("min_continue_rms", 150.0))
+                new_cont = max(amb_median * (10.0 ** (cont_snr / 20.0)), min_cont)
+
+                self.cfg["ambient_p90_rms"] = round(amb_p90, 1)
+                self.cfg["calibrated_start_rms"] = round(new_onset, 1)
                 self.cfg["calibrated_continue_rms"] = round(new_cont, 1)
                 save_config(self.cfg)
             self.root.after(0, lambda: self.btn_calibrate.config(text="🎯 Calibrate Room (1.5s)", state="normal"))
@@ -959,7 +848,9 @@ class MicTunerApp:
         if not hasattr(self, "recorded_sample_raw") or self.recorded_sample_raw is None or len(self.recorded_sample_raw) == 0:
             messagebox.showinfo("No Sample", "Please record a 3-second voice sample first.")
             return
-        filtered = self.apply_filter(self.recorded_sample_raw, enable_agc=True)
+        floor = getattr(self, "live_floor", 50.0)
+        agc_scale = float(self.audio_cfg.get("agc_max_scale", 1.80))
+        filtered = clean_audio_for_transcription(self.recorded_sample_raw, floor_rms=floor, sample_rate=16000, agc_max_scale=agc_scale)
         self._play_audio(filtered)
 
     def _play_audio(self, pcm_16k: np.ndarray):
@@ -986,41 +877,46 @@ class MicTunerApp:
         save_config(self.cfg)
         messagebox.showinfo(
             "Saved Successfully",
-            f"Mic & Multi-Layer VAD calibration saved to mic_config.json!\n\n"
-            f"• Hardware Gain: {self.cfg['hardware_gain_pct']}%\n"
-            f"• VAD Mode: {self.cfg['vad_mode']}\n"
-            f"• Min RMS Baseline: {self.cfg['min_speech_rms']:.1f}\n"
-            f"• Speech Multiplier: {self.cfg['speech_multiplier']:.2f}x\n"
-            f"• Continue Ratio: {self.cfg.get('continue_ratio', 0.50):.2f}\n"
-            f"• Proximity Crest Min: {self.cfg.get('proximity_crest_min', 2.0):.1f}x\n"
-            f"• Low-Cut Bass Roll-off: {self.cfg['low_cutoff_hz']:.0f} Hz\n"
-            f"• High-Cut Hiss Roll-off: {self.cfg['high_cutoff_hz']:.0f} Hz\n"
-            f"• Treble Formant Boost: {self.cfg['treble_boost']:.2f}x\n"
-            f"• Noise Suppression Gate: {self.cfg.get('bg_suppress_db', 20.0):.0f} dB\n"
-            f"• Distance AGC Max: {self.cfg['agc_max_scale']:.1f}x\n\n"
-            f"listen.py will automatically use these live values."
+            f"Endpointer v2 & DSP configuration saved to mic_config.json!\n\n"
+            f"• Hardware Gain: {self.cfg.get('hardware_gain_pct', 60)}%\n"
+            f"• VAD Mode: {self.cfg.get('vad_mode', 2)}\n"
+            f"• Onset SNR: {self.cfg.get('onset_snr_db', 6.0)} dB\n"
+            f"• Continue SNR: {self.cfg.get('continue_snr_db', 3.5)} dB\n"
+            f"• Min Onset RMS: {self.cfg.get('min_onset_rms', 220.0):.1f}\n"
+            f"• Max Onset RMS: {self.cfg.get('max_onset_rms', 1300.0):.1f}\n"
+            f"• Dynamic Speaker Ratio: {self.cfg.get('speaker_ratio', 0.40):.2f}\n"
+            f"• End Silence Cutoff: {self.cfg.get('end_silence_sec', 0.55):.2f}s\n"
+            f"• Startup Holdoff: {self.cfg.get('startup_holdoff_sec', 0.45):.2f}s\n"
+            f"• Echo Holdoff: {self.cfg.get('echo_holdoff_sec', 0.55):.2f}s\n"
+            f"• Bandpass: {self.cfg.get('low_cutoff_hz', 85.0):.0f}Hz - {self.cfg.get('high_cutoff_hz', 4500.0):.0f}Hz\n"
+            f"• Treble Boost: {self.cfg.get('treble_boost', 1.35):.2f}x\n"
+            f"• AGC Max Scale: {self.cfg.get('agc_max_scale', 1.80):.2f}x\n\n"
+            f"listen.py automatically reloads these values on every conversation turn."
         )
 
     def _reset_defaults(self):
         for k, v in DEFAULT_CONFIG.items():
             self.cfg[k] = v
             self.audio_cfg.set(k, v)
+            if hasattr(self, "endpointer") and self.endpointer is not None:
+                self.endpointer.cfg[k] = v
 
-        self.gain_var.set(self.cfg["hardware_gain_pct"])
-        self.vad_var.set(self.cfg["vad_mode"])
-        self.min_rms_var.set(self.cfg["min_speech_rms"])
-        self.mult_var.set(self.cfg["speech_multiplier"])
-        self.continue_ratio_var.set(self.cfg["continue_ratio"])
-        self.frames_var.set(self.cfg["start_frames"])
-        self.end_silence_var.set(self.cfg["end_silence_sec"])
-        self.crest_var.set(self.cfg["proximity_crest_min"])
-        self.low_cut_var.set(self.cfg["low_cutoff_hz"])
-        self.high_cut_var.set(self.cfg["high_cutoff_hz"])
-        self.treble_var.set(self.cfg["treble_boost"])
-        self.bg_suppress_var.set(self.cfg.get("bg_suppress_db", 20.0))
-        self.agc_var.set(self.cfg["agc_max_scale"])
-        self.fan_rej_var.set(self.cfg["fan_rejection_ratio"])
-        self.click_rej_var.set(self.cfg["click_rejection_ratio"])
+        if hasattr(self, "gain_var"): self.gain_var.set(self.cfg["hardware_gain_pct"])
+        if hasattr(self, "vad_var"): self.vad_var.set(self.cfg["vad_mode"])
+        if hasattr(self, "onset_snr_var"): self.onset_snr_var.set(self.cfg["onset_snr_db"])
+        if hasattr(self, "cont_snr_var"): self.cont_snr_var.set(self.cfg["continue_snr_db"])
+        if hasattr(self, "min_onset_var"): self.min_onset_var.set(self.cfg["min_onset_rms"])
+        if hasattr(self, "max_onset_var"): self.max_onset_var.set(self.cfg["max_onset_rms"])
+        if hasattr(self, "speaker_ratio_var"): self.speaker_ratio_var.set(self.cfg["speaker_ratio"])
+        if hasattr(self, "end_silence_var"): self.end_silence_var.set(self.cfg["end_silence_sec"])
+        if hasattr(self, "low_cut_var"): self.low_cut_var.set(self.cfg["low_cutoff_hz"])
+        if hasattr(self, "high_cut_var"): self.high_cut_var.set(self.cfg["high_cutoff_hz"])
+        if hasattr(self, "treble_var"): self.treble_var.set(self.cfg["treble_boost"])
+        if hasattr(self, "agc_var"): self.agc_var.set(self.cfg["agc_max_scale"])
+        if hasattr(self, "startup_holdoff_var"): self.startup_holdoff_var.set(self.cfg["startup_holdoff_sec"])
+        if hasattr(self, "echo_holdoff_var"): self.echo_holdoff_var.set(self.cfg["echo_holdoff_sec"])
+        if hasattr(self, "first_turn_var"): self.first_turn_var.set(self.cfg["first_turn_timeout_sec"])
+        if hasattr(self, "followup_var"): self.followup_var.set(self.cfg["followup_timeout_sec"])
 
         set_hardware_gain(self.cfg["hardware_gain_pct"])
         save_config(self.cfg)

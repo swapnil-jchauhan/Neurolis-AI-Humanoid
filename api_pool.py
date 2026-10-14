@@ -81,14 +81,14 @@ for _var in _candidates:
             break
 
 # ---------------- CLIENT POOL INITIALIZATION ----------------
-GROQ_PER_CALL_TIMEOUT = 2.8
-GROQ_AUDIO_TIMEOUT = 5.0
+GROQ_PER_CALL_TIMEOUT = 4.0
+GROQ_AUDIO_TIMEOUT = 7.0
 
 groq_clients: List[any] = []
 if HAS_GROQ:
     for _idx, _k in enumerate(GROQ_API_KEYS):
         try:
-            groq_clients.append(Groq(api_key=_k, timeout=GROQ_PER_CALL_TIMEOUT))
+            groq_clients.append(Groq(api_key=_k, timeout=GROQ_PER_CALL_TIMEOUT, max_retries=0))
         except Exception as e:
             print(f"[Brain] Groq client #{_idx + 1} init notice: {e}")
 
@@ -285,7 +285,10 @@ def is_key_status_inquiry(text: str) -> bool:
 def groq_call_with_retry(api_call_fn, *args, **kwargs):
     """
     Executes a Groq API call with automatic round-robin retry and failover across the key pool.
-    Aborts immediately if the standby kill switch event is set.
+    - Set max_retries=0 on client to prevent SDK internal retry multiplication.
+    - Fast failover: Max 2 attempts on network drop / timeout before failing fast.
+    - Quota exhaustion (HTTP 429): Rotates through the pool.
+    - Standby kill switch: Aborts immediately.
     """
     global client, _active_client_idx, resting_keys
     if not groq_clients:
@@ -297,6 +300,7 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
     # Round-robin through all available keys in the pool continuously
     max_key_attempts = max(len(groq_clients), 2)
     last_exception = None
+    network_error_streak = 0
 
     for attempt in range(max_key_attempts):
         if _standby_kill_event is not None and _standby_kill_event.is_set():
@@ -319,11 +323,14 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
 
             # True quota exhaustion (HTTP 429 rate limit)
             if "429" in err_str or "rate limit" in err_str or "tokens per day" in err_str or "tpd" in err_str:
+                network_error_streak = 0
                 rotate_groq_key(reason="Daily quota exhausted (HTTP 429)", is_quota_exhausted=True)
-            elif "timeout" in err_str or "timed out" in err_str:
-                rotate_groq_key(reason="Network timeout")
-            elif "connection" in err_str or "network" in err_str:
-                rotate_groq_key(reason="Network connection issue")
+            elif "timeout" in err_str or "timed out" in err_str or "connection" in err_str or "network" in err_str:
+                network_error_streak += 1
+                rotate_groq_key(reason="Network timeout / connection issue")
+                if network_error_streak >= 2:
+                    # Fail fast: internet connection is down or degraded; do not stall for 14 keys
+                    break
             else:
                 rotate_groq_key(reason=f"API error: {e}")
 

@@ -48,6 +48,14 @@ import sounddevice as sd
 import soundfile as sf
 import wave
 from groq import Groq
+from audio_frontend import (
+    Endpointer,
+    load_mic_config,
+    save_mic_config,
+    audio_rms as frontend_audio_rms,
+    bandpass_frame as frontend_bandpass_frame,
+    clean_audio_for_transcription as frontend_clean_audio,
+)
 
 # writes audio data to a 16-bit wav file using python's built-in wave module so we don't need any external c dlls
 def write_wav(target, samplerate: int, data: np.ndarray):
@@ -776,32 +784,25 @@ def audio_rms(audio: np.ndarray):
         return 0.0
     return float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
 
+_endpointer: Optional[Endpointer] = None
+
+def get_endpointer() -> Endpointer:
+    """Returns the singleton Endpointer v2 instance initialized with mic_config.json."""
+    global _endpointer
+    if _endpointer is None:
+        cfg = load_mic_config(MIC_CONFIG_FILE)
+        seed = float(CURRENT_AMBIENT_RMS) if CURRENT_AMBIENT_RMS > 0 else 50.0
+        _endpointer = Endpointer(cfg=cfg, seed_floor=seed)
+    return _endpointer
+
 def filter_frame_bandpass(chunk: np.ndarray) -> np.ndarray:
-    """Fast FFT bandpass filter (cutting < LOW_CUTOFF_HZ and > HIGH_CUTOFF_HZ, default 85Hz-4500Hz)
-    for human voice fundamentals and formants. Applied per 30ms frame before RMS and VAD.
-    """
-    if chunk is None or len(chunk) < 64:
-        return chunk
-    try:
-        samples = chunk.astype(np.float32)
-        n = len(samples)
-        fft_vals = np.fft.rfft(samples)
-        freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
-        gain = np.ones_like(freqs, dtype=np.float32)
-
-        low_cut = float(LOW_CUTOFF_HZ) if LOW_CUTOFF_HZ > 0 else 85.0
-        high_cut = float(HIGH_CUTOFF_HZ) if HIGH_CUTOFF_HZ > 0 else 4500.0
-
-        sub_mask = freqs < low_cut
-        gain[sub_mask] = np.clip((freqs[sub_mask] / max(1.0, low_cut)) ** 2, 0.0, 1.0)
-
-        high_mask = freqs > high_cut
-        gain[high_mask] = np.clip((high_cut / freqs[high_mask]) ** 4, 0.0, 1.0)
-
-        filtered = np.fft.irfft(fft_vals * gain, n=n)
-        return np.clip(filtered, -32768.0, 32767.0).astype(np.int16)
-    except Exception:
-        return chunk
+    """Fast FFT bandpass filter (85Hz-4500Hz) isolating vocal fundamentals and formants."""
+    return frontend_bandpass_frame(
+        chunk,
+        sample_rate=SAMPLE_RATE,
+        low_hz=float(LOW_CUTOFF_HZ),
+        high_hz=float(HIGH_CUTOFF_HZ),
+    )
 
 def reload_mic_config_if_modified():
     """Hot-reloads mic_config.json parameters if modified by tune_mic.py."""
@@ -816,8 +817,7 @@ def reload_mic_config_if_modified():
         mtime = MIC_CONFIG_FILE.stat().st_mtime
         if mtime != _last_mic_config_mtime:
             _last_mic_config_mtime = mtime
-            with open(MIC_CONFIG_FILE, "r") as f:
-                cfg = json.load(f)
+            cfg = load_mic_config(MIC_CONFIG_FILE)
             MIN_SPEECH_RMS_THRESHOLD = float(cfg.get("min_speech_rms", MIN_SPEECH_RMS_THRESHOLD))
             SPEECH_THRESHOLD_MULTIPLIER = float(cfg.get("speech_multiplier", SPEECH_THRESHOLD_MULTIPLIER))
             CONTINUE_SPEECH_THRESHOLD_RATIO = float(cfg.get("continue_ratio", CONTINUE_SPEECH_THRESHOLD_RATIO))
@@ -838,6 +838,13 @@ def reload_mic_config_if_modified():
             hw_gain = cfg.get("hardware_gain_pct")
             if hw_gain is not None:
                 set_hardware_gain(int(hw_gain))
+            if _endpointer is not None:
+                _endpointer.cfg.update(cfg)
+                if "vad_mode" in cfg and _endpointer.vad is not None:
+                    try:
+                        _endpointer.vad.set_mode(int(cfg["vad_mode"]))
+                    except Exception:
+                        pass
     except Exception as e:
         print(f"[Config] Hot-reload error: {e}")
 
@@ -1080,188 +1087,85 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
     print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS (Ceiling: {amb_ceiling:.1f} RMS) | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
     return start_thresh
 
-# records microphone audio until the user stops speaking using vad and silence timers
-def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None):
+# records microphone audio using the unified Endpointer v2 state machine
+def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None, holdoff_sec: Optional[float] = None) -> Optional[np.ndarray]:
+    """Records microphone audio using Endpointer v2 state machine.
+    Handles startup holdoff, sliding-window onset detection, time-based hangover,
+    exact index tail trimming, and manual send override without false triggers.
+    """
+    global CURRENT_AMBIENT_RMS, CURRENT_SPEECH_THRESHOLD, CURRENT_CONTINUE_THRESHOLD
     finish_speech_event.clear()
-    pre_speech_frames = max(1, int(PRE_SPEECH_SECONDS / FRAME_SECONDS))
-    end_silence_frames = max(1, int(END_SILENCE_SECONDS / FRAME_SECONDS))
-    preroll = deque(maxlen=pre_speech_frames)
-    frames = []
-    start_votes = 0
-    silence_votes = 0
-    speech_streak = 0
-    started = False
-    start_time = None
-    manual_send_triggered = False
-    peak_speech_rms = 0.0
-    ambient_rms_window = deque(maxlen=50)
-    live_ambient_ceiling = float(CURRENT_AMBIENT_RMS * 1.25)
-    vad = webrtcvad.Vad(VAD_AGGRESSIVENESS) if webrtcvad is not None else None
-    start_threshold = max(speech_threshold, MIN_SPEECH_RMS_THRESHOLD)
-    continue_threshold = max(CURRENT_CONTINUE_THRESHOLD, start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO)
-    dynamic_continue_threshold = continue_threshold
+    ep = get_endpointer()
+    ep.begin_turn(holdoff_sec=holdoff_sec)
 
-    def _recording_loop():
-        nonlocal started, start_time, start_votes, silence_votes, speech_streak, start_threshold, dynamic_continue_threshold, frames, manual_send_triggered, peak_speech_rms, live_ambient_ceiling
+    completed = False
+
+    def _recording_loop() -> bool:
         wait_started_at = time.monotonic()
-        loop_frame_count = 0
-
         while True:
             if standby_kill_event.is_set():
                 return False
+
             if finish_speech_event.is_set():
                 finish_speech_event.clear()
-                manual_send_triggered = True
-                if not started and len(preroll) > 0:
-                    frames = list(preroll)
-                    started = True
-                break
+                ep.force_send()
+                return True
 
             now = time.monotonic()
-
-            if not started:
+            if ep.state != Endpointer.STATE_RECORDING:
                 remaining = start_timeout_seconds - (now - wait_started_at)
                 if remaining <= 0:
                     return False
-            elif now - start_time >= MAX_RECORD_SECONDS:
-                break
+            elif now - ep.recording_started_at >= float(ep.cfg.get("max_record_sec", 9.0)):
+                ep._finalize(reason="max_record", is_manual=False)
+                return True
 
             try:
-                timeout = FRAME_SECONDS if started else min(FRAME_SECONDS, remaining)
-                chunk = audio_queue.get(timeout=timeout)
+                chunk = audio_queue.get(timeout=0.03)
             except queue.Empty:
                 continue
 
             if finish_speech_event.is_set():
                 finish_speech_event.clear()
-                manual_send_triggered = True
-                if not started and len(preroll) > 0:
-                    frames = list(preroll)
-                    started = True
-                break
+                ep.force_send()
+                return True
 
-            loop_frame_count += 1
+            if standby_kill_event.is_set():
+                return False
+
             chunk = chunk.astype(np.int16, copy=False)
-            filtered_chunk = filter_frame_bandpass(chunk)
-            chunk_rms = audio_rms(filtered_chunk)
-            vad_speech = False
+            evt = ep.feed(chunk)
 
-            if vad is not None:
-                try:
-                    vad_speech = vad.is_speech(filtered_chunk.tobytes(), SAMPLE_RATE)
-                except Exception:
-                    vad_speech = False
-
-            if not started:
-                # Discard transient startup click/vibration in first 3 frames (90ms)
-                if loop_frame_count <= 3:
-                    ambient_rms_window.append(chunk_rms)
-                    preroll.append(chunk)
-                    continue
-
-                # 1. Track rolling ambient noise floor both upward and downward before speech starts
-                if chunk_rms < start_threshold * 1.10:
-                    ambient_rms_window.append(chunk_rms)
-                if len(ambient_rms_window) >= 10:
-                    live_ambient_ceiling = float(np.percentile(ambient_rms_window, 90))
-                    start_threshold = max(live_ambient_ceiling * 1.45, speech_threshold)
-                    dynamic_continue_threshold = max(live_ambient_ceiling * 1.15, continue_threshold)
-
-                is_speech = (chunk_rms >= start_threshold) if vad is None else (vad_speech and (chunk_rms >= start_threshold))
-
-                preroll.append(chunk)
-
-                if is_speech:
-                    start_votes += 1
-                    if start_votes >= START_SPEECH_FRAMES:
-                        frames = list(preroll)
-                        started = True
-                        start_time = time.monotonic()
-                        silence_votes = 0
-                        speech_streak = 0
-                        peak_speech_rms = float(chunk_rms)
-                        if motor_ctrl is not None and getattr(motor_ctrl, "is_roaming", False):
-                            motor_ctrl.stop_all()  # instant halt of autonomous roaming on voice (<5ms)!
-                        reset_standby_cooldown()
-                        set_face_state("listening", "HEARING YOU...")
-                else:
-                    start_votes = 0
-
-                continue
-
-            # Speech has started (started == True)
-            peak_speech_rms = max(peak_speech_rms * 0.995, float(chunk_rms))
-
-            # Dynamic continuation threshold stays safely above ambient noise ceiling
-            # Never penalize soft syllables or consonants with an excessive peak fraction
-            dynamic_continue_threshold = max(
-                continue_threshold,
-                live_ambient_ceiling * 1.15,
-                min(peak_speech_rms * 0.18, start_threshold * 0.75)
-            )
-
-            is_speech = (chunk_rms >= dynamic_continue_threshold) if vad is None else (vad_speech and (chunk_rms >= dynamic_continue_threshold))
-
-            frames.append(chunk)
-
-            # Silence counting: any genuine speech resets silence counter immediately
-            if is_speech:
-                speech_streak += 1
-                if speech_streak >= 2 or chunk_rms >= start_threshold:
-                    silence_votes = 0  # Speech reset
-                else:
-                    silence_votes = max(0, silence_votes - 1)
-            else:
-                speech_streak = 0
-                silence_votes += 1
-
-            duration = time.monotonic() - start_time
-            if duration >= MIN_RECORD_SECONDS and silence_votes >= end_silence_frames:
-                # Keep ~180ms of natural tail silence so final consonants and words are never chopped off
-                keep_frames = max(4, int(0.18 / FRAME_SECONDS))
-                trim_count = max(0, silence_votes - keep_frames)
-                if trim_count > 0 and len(frames) > trim_count + 8:
-                    frames = frames[:-trim_count]
-                break
-
-        return True
+            if evt == "ONSET":
+                if motor_ctrl is not None and getattr(motor_ctrl, "is_roaming", False):
+                    motor_ctrl.stop_all()
+                reset_standby_cooldown()
+                set_face_state("listening", "VOICE LOCKED // RECORDING...")
+            elif evt == "END":
+                return True
 
     if active_stream is not None:
-        # Discard button tap transient pop
-        time.sleep(0.08)
         clear_audio_queue()
         completed = _recording_loop()
-        if not completed:
-            return None
     else:
         with suppress_c_stderr():
             stream_ctx = get_audio_input_stream(callback=callback)
         with stream_ctx:
-            # Drain initial USB hardware startup buffer/transient pop (~120ms)
-            time.sleep(0.12)
             clear_audio_queue()
             completed = _recording_loop()
-            if not completed:
-                return None
 
-    if completed and frames:
-        set_face_state("thinking", "THINKING...")
-
-    if not frames:
+    if not completed:
         return None
 
-    audio = np.concatenate(frames)
-    duration = audio.size / SAMPLE_RATE
+    audio, info = ep.result()
+    if audio is not None and audio.size > 0:
+        set_face_state("thinking", "THINKING...")
+        CURRENT_AMBIENT_RMS = ep.live_floor
+        CURRENT_SPEECH_THRESHOLD = ep.live_onset_thr
+        CURRENT_CONTINUE_THRESHOLD = ep.live_cont_thr
+        return audio
 
-    if not manual_send_triggered:
-        if duration < 0.20:
-            return None
-
-        # Energy check: reject faint background mumbling that slipped through
-        if audio_rms(audio) < (dynamic_continue_threshold * 0.85):
-            return None
-
-    return audio
+    return None
 
 # runs an external command quietly without dumping text onto the terminal screen
 def run_quiet(command, timeout=15.0):
@@ -1843,73 +1747,13 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
 
 def clean_audio_for_transcription(audio: np.ndarray) -> np.ndarray:
-    """Whole-utterance Vocal Tunnel DSP filter for Whisper:
-    1. FFT bandpass (85Hz-5500Hz) with 1.4x presence boost (2.0kHz-4.0kHz) across the entire utterance at once,
-       eliminating all 30ms block boundary discontinuities.
-    2. Smooth time-domain envelope downward expander: computes rolling 20ms frame RMS, estimates 90th-percentile
-       speech level (speech_p90), and attenuates frames where RMS < speech_p90 * 0.35 by 0.25x (-12dB).
-    3. Peak normalization once across the whole utterance scaled to 24000.0 / peak capped at AGC_MAX_SCALE.
-    """
-    if audio is None or len(audio) < 128:
-        return audio
-    try:
-        samples = audio.astype(np.float32)
-        n = len(samples)
-
-        # 1. Whole-utterance FFT Bandpass & Presence boost
-        fft_vals = np.fft.rfft(samples)
-        freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
-        gain = np.ones_like(freqs, dtype=np.float32)
-
-        # Cut rumble <85Hz
-        sub_mask = freqs < 85.0
-        gain[sub_mask] = np.clip((freqs[sub_mask] / 85.0) ** 2, 0.0, 1.0)
-
-        # Cut electrical hiss >5500Hz
-        high_mask = freqs > 5500.0
-        gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - 5500.0) / (8000.0 - 5500.0), 0.05, 1.0)
-
-        # Consonant presence shelf (2.0kHz to 4.0kHz) for crisp speech
-        clarity_mask = (freqs >= 2000.0) & (freqs <= 4000.0)
-        gain[clarity_mask] *= 1.40
-
-        filtered = np.fft.irfft(fft_vals * gain, n=n)
-
-        # 2. Smooth time-domain envelope downward expander across 20ms frames
-        frame_len = int(0.020 * SAMPLE_RATE)  # 320 samples
-        if frame_len > 0 and n >= frame_len:
-            num_frames = (n + frame_len - 1) // frame_len
-            frame_rms_list = []
-            for k in range(num_frames):
-                st = k * frame_len
-                en = min(n, (k + 1) * frame_len)
-                frame_rms = float(np.sqrt(np.mean(filtered[st:en] ** 2)))
-                frame_rms_list.append(frame_rms)
-
-            speech_p90 = float(np.percentile(frame_rms_list, 90)) if frame_rms_list else 1000.0
-            ambient_floor = float(CURRENT_AMBIENT_RMS) if CURRENT_AMBIENT_RMS > 0 else 180.0
-            thresh = min(speech_p90 * 0.18, ambient_floor * 1.25)
-
-            frame_gains = np.array([0.35 if r < thresh else 1.0 for r in frame_rms_list], dtype=np.float32)
-            gain_envelope = np.repeat(frame_gains, frame_len)[:n]
-
-            # Smooth envelope across 160-sample window to avoid any abrupt clicks
-            kernel_sz = min(160, len(gain_envelope))
-            if kernel_sz > 1:
-                kernel = np.ones(kernel_sz, dtype=np.float32) / kernel_sz
-                gain_envelope = np.convolve(gain_envelope, kernel, mode="same")
-
-            filtered = filtered * gain_envelope
-
-        # 3. Peak normalization once across the whole utterance
-        peak = float(np.max(np.abs(filtered)))
-        if peak > 20.0:
-            scale = min(24000.0 / peak, float(AGC_MAX_SCALE))
-            filtered = filtered * scale
-
-        return np.clip(filtered, -32767.0, 32767.0).astype(np.int16)
-    except Exception:
-        return audio
+    """Whole-utterance Vocal Tunnel DSP filter for Whisper via audio_frontend."""
+    return frontend_clean_audio(
+        audio,
+        floor_rms=float(CURRENT_AMBIENT_RMS),
+        sample_rate=SAMPLE_RATE,
+        agc_max_scale=float(AGC_MAX_SCALE),
+    )
 
 # sends recorded wav audio to groq whisper to turn speech into english text
 def transcribe_audio(audio: np.ndarray):
@@ -1927,18 +1771,20 @@ def transcribe_audio(audio: np.ndarray):
             file=("audio.wav", buf.getvalue()),
             model="whisper-large-v3-turbo",
             language="en",
-            prompt="Neurolis, humanoid robot, Auckland House School for Boys, Swapnil, Shivam, exhibition, sensors, follow, approach, spin, camera, expressions, standby.",
+            prompt="Neurolis. Auckland House School.",
             temperature=0,
             response_format="verbose_json",
         )
 
         # Reject noisy or low-confidence background chatter via individual segment filtering
         segments = getattr(transcription, "segments", []) or []
+        avg_logprobs = []
         if segments:
             valid_segment_texts = []
             for s in segments:
                 nsp = float(s.get("no_speech_prob", 0.0) if isinstance(s, dict) else getattr(s, "no_speech_prob", 0.0) or 0.0)
                 alp = float(s.get("avg_logprob", 0.0) if isinstance(s, dict) else getattr(s, "avg_logprob", 0.0) or 0.0)
+                avg_logprobs.append(alp)
                 seg_text = (s.get("text", "") if isinstance(s, dict) else getattr(s, "text", "") or "").strip()
                 if nsp <= 0.70 and alp >= -1.6 and seg_text:
                     valid_segment_texts.append(seg_text)
@@ -3221,6 +3067,7 @@ def run_conversation_mode(speech_threshold: float):
             with suppress_c_stderr():
                 warm_stream_ctx = get_audio_input_stream(callback=callback)
             with warm_stream_ctx as warm_stream:
+                turn_idx = 0
                 while True:
                     if standby_kill_event.is_set():
                         return
@@ -3229,11 +3076,19 @@ def run_conversation_mode(speech_threshold: float):
                     reload_mic_config_if_modified()
                     speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
 
+                    cfg = get_endpointer().cfg
+                    if turn_idx == 0:
+                        turn_timeout = float(cfg.get("first_turn_timeout_sec", 15.0))
+                        holdoff_duration = float(cfg.get("startup_holdoff_sec", 0.45))
+                    else:
+                        turn_timeout = float(cfg.get("followup_timeout_sec", 10.0))
+                        holdoff_duration = float(cfg.get("echo_holdoff_sec", 0.55))
+
                     # Follow Mode Inactivity Immunity: freeze timeout while actively following user
                     if motor_ctrl is not None and getattr(motor_ctrl, "is_following", False):
                         last_valid_input_at = time.monotonic()
 
-                    remaining = CONVERSATION_TIMEOUT_SECONDS - (time.monotonic() - last_valid_input_at)
+                    remaining = turn_timeout - (time.monotonic() - last_valid_input_at)
                     if remaining <= 0:
                         if standby_kill_event.is_set():
                             return
@@ -3244,7 +3099,12 @@ def run_conversation_mode(speech_threshold: float):
                         reset_session()
                         return
 
-                    audio = listen_for_speech_segment(speech_threshold, remaining, active_stream=warm_stream)
+                    audio = listen_for_speech_segment(
+                        speech_threshold,
+                        remaining,
+                        active_stream=warm_stream,
+                        holdoff_sec=holdoff_duration,
+                    )
                     if standby_kill_event.is_set():
                         return
                     if audio is None:
@@ -3256,7 +3116,7 @@ def run_conversation_mode(speech_threshold: float):
                             return
                         # If the conversational follow-up window still has time remaining, don't abort
                         # prematurely into standby on a momentary lull or rejected acoustic pop!
-                        if time.monotonic() - last_valid_input_at < CONVERSATION_TIMEOUT_SECONDS:
+                        if time.monotonic() - last_valid_input_at < turn_timeout:
                             set_face_state("listening", "LISTENING...")
                             continue
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
@@ -3272,6 +3132,8 @@ def run_conversation_mode(speech_threshold: float):
                     if not text or len(text) < MIN_TRANSCRIPTION_CHARS:
                         set_face_state("listening", "LISTENING...")
                         continue
+
+                    turn_idx += 1
 
                     print("You:", text)
                     if face_ui is not None:
@@ -3311,6 +3173,254 @@ def check_audio_devices():
         except Exception:
             return False
 
+def run_latency_test():
+    """Measures physical speaker-to-mic loopback latency via 100ms 1kHz beep.
+    Calculates exact echo_holdoff_sec = (latency_ms / 1000.0) + 0.25 and updates mic_config.json.
+    """
+    print("\n=================================================================")
+    print("      PROJECT NEUROLIS - ACOUSTIC LATENCY LOOPBACK TEST")
+    print("=================================================================")
+    sr = 16000
+    beep_len = int(0.100 * sr)  # 100ms
+    t = np.arange(beep_len) / float(sr)
+    beep = (np.sin(2 * np.pi * 1000.0 * t) * 28000.0).astype(np.int16)
+
+    tmp_wav = Path(tempfile.gettempdir()) / f"latency_beep_{int(time.time())}.wav"
+    write_wav(tmp_wav, sr, beep)
+
+    captured_chunks = []
+    def _cap_cb(indata, frames, time_info, status):
+        captured_chunks.append(indata.copy().reshape(-1))
+
+    print("[*] Arming audio input capture...")
+    with suppress_c_stderr():
+        stream_ctx = get_audio_input_stream(callback=_cap_cb)
+    with stream_ctx:
+        time.sleep(0.20)
+        captured_chunks.clear()
+        print("[*] Emitting 100ms 1kHz diagnostic probe pulse on speaker...")
+        played = play_with_system_player(tmp_wav, timeout=3.0)
+        if not played:
+            try:
+                sd.play(beep, samplerate=sr)
+                sd.wait()
+            except Exception:
+                pass
+        time.sleep(1.2)
+
+    try:
+        tmp_wav.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    if not captured_chunks:
+        print("[!] Error: No audio captured during latency probe.")
+        sys.exit(1)
+
+    rec = np.concatenate(captured_chunks)
+    rec_filt = frontend_bandpass_frame(rec, sample_rate=sr, low_hz=800.0, high_hz=1200.0)
+    frame_sz = int(0.010 * sr)  # 10ms energy bins
+    energies = [
+        float(np.mean(rec_filt[k * frame_sz : (k + 1) * frame_sz].astype(np.float32) ** 2))
+        for k in range(len(rec_filt) // frame_sz)
+    ]
+    if not energies:
+        print("[!] Error: Insufficient audio captured.")
+        sys.exit(1)
+
+    peak_bin = int(np.argmax(energies))
+    latency_sec = peak_bin * 0.010
+    latency_ms = latency_sec * 1000.0
+    recommended_holdoff = round(latency_sec + 0.25, 2)
+
+    print(f"\n[+] Measured Speaker-to-Mic Latency: {latency_ms:.1f} ms")
+    print(f"[+] Recommended Echo Holdoff: {recommended_holdoff:.2f} s")
+
+    cfg = load_mic_config(MIC_CONFIG_FILE)
+    cfg["echo_holdoff_sec"] = recommended_holdoff
+    save_mic_config(cfg, MIC_CONFIG_FILE)
+    print(f"[+] Saved echo_holdoff_sec = {recommended_holdoff:.2f} to {MIC_CONFIG_FILE}")
+    print("=================================================================\n")
+    sys.exit(0)
+
+def run_acoustic_diagnostics():
+    """Interactive 3-phase acoustic diagnostic test:
+    Phase 1: 5s silence (measure noise floor p50, p90, crest factor)
+    Phase 2: 6s normal speaking (measure speech p50, p90, SNR)
+    Phase 3: 4s loud voice / hall noise (measure peak, dynamic range)
+    """
+    print("\n=================================================================")
+    print("      PROJECT NEUROLIS - 3-PHASE ACOUSTIC DIAGNOSTICS")
+    print("=================================================================")
+    sr = 16000
+
+    def _record_duration(sec: float, prompt: str):
+        print(f"\n[*] {prompt}")
+        for remaining in range(int(sec), 0, -1):
+            sys.stdout.write(f"\r    Recording in progress: {remaining}s remaining... ")
+            sys.stdout.flush()
+            time.sleep(1.0)
+        sys.stdout.write("\r    Recording finished! Analyzing...              \n")
+        sys.stdout.flush()
+
+    captured_chunks = []
+    def _cap_cb(indata, frames, time_info, status):
+        captured_chunks.append(indata.copy().reshape(-1))
+
+    with suppress_c_stderr():
+        stream_ctx = get_audio_input_stream(callback=_cap_cb)
+    with stream_ctx:
+        time.sleep(0.3)
+        captured_chunks.clear()
+        _record_duration(5.0, "PHASE 1/3: Please remain completely SILENT (mapping ambient noise floor)...")
+        silence_audio = np.concatenate(captured_chunks) if captured_chunks else np.array([], dtype=np.int16)
+
+        captured_chunks.clear()
+        _record_duration(6.0, "PHASE 2/3: Please SPEAK NORMALLY at your typical exhibition distance (5 feet)...")
+        speech_audio = np.concatenate(captured_chunks) if captured_chunks else np.array([], dtype=np.int16)
+
+        captured_chunks.clear()
+        _record_duration(4.0, "PHASE 3/3: Please speak LOUDLY or generate exhibition background noise...")
+        loud_audio = np.concatenate(captured_chunks) if captured_chunks else np.array([], dtype=np.int16)
+
+    def _compute_frame_rms(audio_arr):
+        f_len = int(0.03 * sr)
+        if len(audio_arr) < f_len:
+            return [0.0]
+        return [
+            frontend_audio_rms(frontend_bandpass_frame(audio_arr[k * f_len : (k + 1) * f_len]))
+            for k in range(len(audio_arr) // f_len)
+        ]
+
+    sil_rms = _compute_frame_rms(silence_audio)
+    spk_rms = _compute_frame_rms(speech_audio)
+    loud_rms = _compute_frame_rms(loud_audio)
+
+    floor_p50 = float(np.percentile(sil_rms, 50))
+    floor_p90 = float(np.percentile(sil_rms, 90))
+    speech_p50 = float(np.percentile(spk_rms, 50))
+    speech_p90 = float(np.percentile(spk_rms, 90))
+    loud_peak = float(np.max(loud_rms)) if loud_rms else speech_p90 * 1.5
+
+    snr_db = 20.0 * np.log10(max(speech_p90, 1.0) / max(floor_p50, 1.0))
+    rec_onset_snr = round(min(12.0, max(4.0, snr_db * 0.45)), 1)
+    rec_cont_snr = round(max(2.0, rec_onset_snr * 0.60), 1)
+    rec_min_onset = round(max(180.0, min(800.0, floor_p50 * 1.8)), 1)
+    rec_max_onset = round(max(rec_min_onset * 2.5, loud_peak * 0.9), 1)
+
+    print("\n---------------- ACOUSTIC DIAGNOSTIC REPORT ----------------")
+    print(f"  Ambient Floor (Median):     {floor_p50:.1f} RMS (90th percentile: {floor_p90:.1f} RMS)")
+    print(f"  Speech Energy (Median):     {speech_p50:.1f} RMS (90th percentile: {speech_p90:.1f} RMS)")
+    print(f"  Acoustic Signal-to-Noise:   {snr_db:.1f} dB")
+    print(f"  Peak Acoustic Power:        {loud_peak:.1f} RMS")
+    print("---------------- RECOMMENDED TUNING PARAMETERS -------------")
+    print(f"  onset_snr_db:      {rec_onset_snr} dB")
+    print(f"  continue_snr_db:   {rec_cont_snr} dB")
+    print(f"  min_onset_rms:     {rec_min_onset} RMS")
+    print(f"  max_onset_rms:     {rec_max_onset} RMS")
+    print("------------------------------------------------------------")
+
+    cfg = load_mic_config(MIC_CONFIG_FILE)
+    cfg["onset_snr_db"] = rec_onset_snr
+    cfg["continue_snr_db"] = rec_cont_snr
+    cfg["min_onset_rms"] = rec_min_onset
+    cfg["max_onset_rms"] = rec_max_onset
+    cfg["ambient_p90_rms"] = round(floor_p90, 1)
+    cfg["calibrated_start_rms"] = round(floor_p50 * (10.0 ** (rec_onset_snr / 20.0)), 1)
+    cfg["calibrated_continue_rms"] = round(floor_p50 * (10.0 ** (rec_cont_snr / 20.0)), 1)
+    save_mic_config(cfg, MIC_CONFIG_FILE)
+    print(f"[+] Configuration written to {MIC_CONFIG_FILE}\n")
+    sys.exit(0)
+
+def run_audio_replay(wav_path_str: str):
+    """Replays an existing audio file through Endpointer v2 to test state transitions offline."""
+    print("\n=================================================================")
+    print("      PROJECT NEUROLIS - AUDIO ENDPOINTER REPLAY TEST")
+    print("=================================================================")
+    wav_path = Path(wav_path_str)
+    if not wav_path.exists():
+        print(f"[!] Error: File not found: {wav_path}")
+        sys.exit(1)
+
+    import wave
+    with wave.open(str(wav_path), "rb") as wf:
+        sr = wf.getframerate()
+        n_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        frames_bytes = wf.readframes(wf.getnframes())
+
+    if sampwidth != 2:
+        print(f"[!] Error: Expected 16-bit PCM WAV, got sample width {sampwidth}")
+        sys.exit(1)
+
+    audio_data = np.frombuffer(frames_bytes, dtype=np.int16)
+    if n_channels > 1:
+        audio_data = audio_data.reshape(-1, n_channels)[:, 0]
+
+    if sr != 16000:
+        target_len = int(len(audio_data) * 16000 / sr)
+        orig_x = np.linspace(0, 1, len(audio_data), endpoint=False)
+        target_x = np.linspace(0, 1, target_len, endpoint=False)
+        audio_data = np.interp(target_x, orig_x, audio_data).astype(np.int16)
+        sr = 16000
+
+    cfg = load_mic_config(MIC_CONFIG_FILE)
+    ep = Endpointer(cfg=cfg, seed_floor=50.0)
+    ep.begin_turn(holdoff_sec=0.0)
+
+    chunk_sz = 480  # 30ms
+    num_chunks = len(audio_data) // chunk_sz
+    print(f"[*] Replaying {len(audio_data)/sr:.2f}s audio ({num_chunks} frames @ 30ms)...")
+
+    onset_time = None
+    end_time = None
+
+    for k in range(num_chunks):
+        chunk = audio_data[k * chunk_sz : (k + 1) * chunk_sz]
+        t_sec = k * 0.03
+        evt = ep.feed(chunk)
+        if evt == "ONSET":
+            onset_time = t_sec
+            print(f"  -> [{t_sec:.2f}s] ONSET detected! (RMS={ep.live_rms:.1f}, Floor={ep.live_floor:.1f})")
+        elif evt == "END":
+            end_time = t_sec
+            print(f"  -> [{t_sec:.2f}s] END detected! (Hangover={ep.live_silence_sec:.2f}s, Reason={ep.done_reason})")
+            break
+
+    if ep.state == Endpointer.STATE_RECORDING and not ep.result_info:
+        ep._finalize(reason="end_of_file", is_manual=False)
+    elif ep.state == Endpointer.STATE_WAITING and not ep.result_info:
+        ep.result_info = {"accepted": False, "reason": "no_speech_onset_detected"}
+
+    res_audio, info = ep.result()
+    print("\n---------------- REPLAY EVALUATION RESULT ----------------")
+    print(f"  Accepted:        {info.get('accepted')}")
+    print(f"  Reason:          {info.get('reason')}")
+    print(f"  Onset Time:      {f'{onset_time:.2f}s' if onset_time is not None else 'None'}")
+    print(f"  End Time:        {f'{end_time:.2f}s' if end_time is not None else 'None'}")
+    print(f"  Captured Dur:    {info.get('duration')}s")
+    print(f"  Voiced Frames:   {info.get('voiced_frames')}")
+    print(f"  P90 Voiced RMS:  {info.get('p90_rms')}")
+    print(f"  Live Floor:      {info.get('floor_rms')}")
+    print("----------------------------------------------------------\n")
+    sys.exit(0)
+
+# CLI Argument Handlers
+REPLAY_FILE = None
+for _idx, _arg in enumerate(sys.argv[1:], 1):
+    if _arg.lower() in ("--replay", "-r") and _idx < len(sys.argv) - 1:
+        REPLAY_FILE = sys.argv[_idx + 1]
+        break
+
+if REPLAY_FILE:
+    run_audio_replay(REPLAY_FILE)
+
+if any(arg.lower() in ("--latency-test", "-l", "latency-test") for arg in sys.argv[1:]):
+    run_latency_test()
+
+if any(arg.lower() in ("--diag", "-d", "diag", "--diagnostics") for arg in sys.argv[1:]):
+    run_acoustic_diagnostics()
+
 # Check for manual calibration command line flags
 CALIBRATE_ONLY = any(arg.lower() in ("--calibrate", "-c", "calibrate") for arg in sys.argv[1:])
 if CALIBRATE_ONLY:
@@ -3343,14 +3453,22 @@ else:
         print("Booting Neurolis in ZERO-HARDWARE TEST MODE (Interactive CLI Text Input)...")
         print("You can chat with Neurolis and test all robotic behaviors right here in the terminal!")
 
-# Measure room noise baseline on boot to calibrate acoustics to the physical room
+# Initialize acoustic threshold from saved configuration or ambient baseline
 cached_speech_threshold = None
 if AUDIO_ENABLED:
-    try:
-        cached_speech_threshold = calibrate_speech_threshold(duration_sec=1.2)
-    except Exception as _e:
-        print(f"[Acoustic Config] Boot calibration notice: {_e}")
+    cfg = load_mic_config(MIC_CONFIG_FILE)
+    if "calibrated_start_rms" in cfg and float(cfg["calibrated_start_rms"]) > 0:
+        CURRENT_SPEECH_THRESHOLD = float(cfg["calibrated_start_rms"])
+        CURRENT_CONTINUE_THRESHOLD = float(cfg.get("calibrated_continue_rms", CURRENT_SPEECH_THRESHOLD * 0.7))
+        CURRENT_AMBIENT_RMS = float(cfg.get("ambient_p90_rms", 50.0))
         cached_speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
+        print(f"[Acoustic Baseline] Loaded saved tuning: Start={CURRENT_SPEECH_THRESHOLD:.1f} RMS, Continue={CURRENT_CONTINUE_THRESHOLD:.1f} RMS, Ambient={CURRENT_AMBIENT_RMS:.1f} RMS")
+    else:
+        try:
+            cached_speech_threshold = calibrate_speech_threshold(duration_sec=1.2)
+        except Exception as _e:
+            print(f"[Acoustic Config] Boot calibration notice: {_e}")
+            cached_speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
 
 # Initialize conversation history and session facts
 reset_session()
@@ -3420,7 +3538,12 @@ def _console_input_worker():
                 time.sleep(0.1)
                 continue
             cleaned = line.strip()
-            console_input_queue.put(cleaned if cleaned else "__ENTER__")
+            if not cleaned:
+                if is_in_active_conversation:
+                    finish_speech_event.set()
+                console_input_queue.put("__ENTER__")
+            else:
+                console_input_queue.put(cleaned)
         except Exception:
             time.sleep(0.2)
 

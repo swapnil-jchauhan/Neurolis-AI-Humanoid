@@ -16,7 +16,7 @@
   "fan_rejection_ratio": 0.85,
   "click_rejection_ratio": 0.35,
   "proximity_crest_min": 1.5,
-  "ambient_p90_rms": 208.7,
-  "calibrated_start_rms": 302.6,
-  "calibrated_continue_rms": 240.0
+  "ambient_p90_rms": 17.9,
+  "calibrated_start_rms": 80.0,
+  "calibrated_continue_rms": 56.0
 }
