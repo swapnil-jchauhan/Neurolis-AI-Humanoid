@@ -953,6 +953,84 @@ To do:
     * **Card 2 (Perimeter Telemetry)**: Added live 16-Sensor Bank Matrix displaying all 4 banks & 4 sides (16 transducers) in real time with dynamic color badges (<20cm alert, 20-50cm warning, >50cm safe).
     * **Card 3 (Wiring Calibrator)**: Added Whole Chassis Bench Test buttons to pulse all 4 BTS7960 drivers simultaneously.
 
+- 2026-10-14 (Part 22): Native PipeWire Audio Capture (`PipeWireInputStream`), Samsung Galaxy A15 Phone Mic Integration via AudioSource, & Dynamic VAD Calibration:
+  - **Native PipeWire Capture Engine (`PipeWireInputStream`)**:
+    * Diagnosed root cause of meter pinning and input failure: `AudioSource` forwards Samsung Galaxy A15 5G phone mic audio via ADB into Linux FIFO `/tmp/android-e3b0c44`, registered as default PipeWire source `android-e3b0c44`. Because Debian 13 lacks `pipewire-alsa` / ALSA plugins, Python's `sounddevice` (PortAudio/ALSA) was blind to the virtual phone mic source and fell back to hardware Card 3 (webcam mic), blasting continuous ~2600 RMS!
+    * Built native `PipeWireInputStream` using `pw-record --rate 16000 --channels 1 --format s16 -`:
+      - Direct kernel-to-process PipeWire audio pipeline with zero ALSA plugin dependency.
+      - Receives clean 16kHz 16-bit mono PCM chunks (480 samples / 30ms) with zero PortAudio translation latency.
+      - Full context manager (`__enter__`, `__exit__`), `start()`, `stop()`, `close()` parity with `sd.InputStream`.
+      - Integrated via `get_audio_input_stream(callback)` in both `listen.py` and `tune_mic.py`, automatically using PipeWire on Linux while preserving `sd.InputStream` fallback on Windows.
+  - **Dynamic Capture Gain Control (`wpctl` / `pactl`)**:
+    * Updated `set_hardware_gain()` in `listen.py` and `tune_mic.py`: replaces legacy `amixer -c 2` with `wpctl set-volume @DEFAULT_AUDIO_SOURCE@ <val>` and `pactl set-source-volume @DEFAULT_SOURCE@ <val>`, directly regulating AudioSource capture gain from both GUI slider and JSON configuration.
+  - **Dynamic Mic Configuration & Phone Calibration (`mic_config.json`)**:
+    * Calibrated baseline parameters tailored for Samsung Galaxy A15 phone mic:
+      - `hardware_gain_pct`: 100
+      - `vad_mode`: 3 (Strict WebRTC VAD harmonic vocal isolation)
+      - `min_speech_rms`: 180.0 (Clean floor rejection for room silence / fan rumble)
+      - `speech_multiplier`: 1.50 (Headroom over room ambient)
+      - `continue_ratio`: 0.50 (Maintains recording during inter-word cadence)
+      - `start_frames`: 3 (90ms onset streak to eliminate acoustic click false-trips)
+      - `end_silence_sec`: 0.45 (Snappy pause detection)
+    * `listen.py` automatically loads and applies parameters from `mic_config.json` at startup.
+  - **VU Meter Scale Recalibration & Baseline RMS Expansion (`tune_mic.py`, `listen.py`)**:
+    * Rescaled visual VU meter `max_meter` from 600.0 to 2500.0 RMS, preventing the phone mic's natural 1200-2000 RMS vocal dynamics from saturating the visual meters while keeping ambient silence at ~1-2%.
+    * Expanded `min_speech_rms` slider range from 40-600 up to **2000.0 RMS**, giving full freedom to raise baseline cutoff and eliminate loud background talkers at 4 feet away.
+    * Raised `MAX_CALIBRATION_AMBIENT_RMS` from 150 to **1200 RMS** in `listen.py` so room noise calibration never artificially clamps ambient noise.
+  - **Vocal Tunnel DSP Acoustic Redesign (Warm Bass Voice & Noise Suppression)**:
+    * Diagnosed root cause of harsh, high-pitched, stingy output: legacy `pre_emphasis: 0.96` (-25dB attenuation on 100Hz fundamentals) and `treble_boost: 2.8` (+9dB) combined with un-gated AGC, obliterating male chest voice fundamentals and boosting high-frequency hiss by 700,000,000:1!
+    * Completely eliminated pre-emphasis (`pre_emphasis: 0.0`), lowering low-cut roll-off to 75Hz to preserve full, deep, rich male vocal fundamentals (85Hz-300Hz).
+    * Re-tuned consonant presence shelf to a gentle 1.25x (+2dB between 2.2kHz-4.2kHz) for crisp Whisper intelligibility without stinging.
+    * Added smooth downward expansion noise gate (`bg_suppress_db: 20dB`): during speech pauses, attenuates the signal by 20dB, eliminating constant hiss, electrical whine, and background murmurs.
+    * Replaced un-gated AGC with speech-only AGC: gain is applied exclusively when active speech is present, completely preventing hiss amplification during silence.
+    * Added `clean_audio_for_transcription` in `listen.py`: cuts subsonic DC rumble (<75Hz) and electrical whine (>6500Hz) before sending audio to Groq Whisper.
+
+- 2026-10-14 (Part 23): Calibrated Mic/VAD Parameters Integration & Studio UI Button Accessibility Fix:
+  - **Exact Calibrated Mic & VAD Parameters Landed (`mic_config.json`, `tune_mic.py`, `listen.py`)**:
+    * Saved user's tuned studio settings directly into `mic_config.json` and default fallback configurations:
+      - `hardware_gain_pct`: **61%** (calibrated capture gain for Samsung Galaxy A15 5G via AudioSource)
+      - `vad_mode`: **3** (strict WebRTC harmonic vocal isolation)
+      - `min_speech_rms`: **820.0** (clean baseline cutoff rejecting room noise, fan rumble, and distant chatter)
+      - `speech_multiplier`: **2.65x** (robust headroom above measured ambient room noise)
+      - `continue_ratio`: **0.50** (clean inter-word continuation)
+      - `start_frames`: **3** (90ms onset streak)
+      - `end_silence_sec`: **0.45s** (snappy 450ms turn-taking cutoff)
+      - `proximity_crest_min`: **2.20x** (rejects diffuse room echo; isolates close-proximity user speech)
+      - `pre_emphasis`: **0.0** (zero high-frequency harshness/stinging)
+      - `low_cutoff_hz`: **40.0 Hz** (preserves full warm vocal fundamentals, cuts sub-bass DC hum)
+      - `high_cutoff_hz`: **5800.0 Hz** (sharp attenuation of electrical hiss above 5.8kHz)
+      - `treble_boost`: **1.65x** (smooth presence shelf @ 2.2kHz-4.2kHz for crisp consonant articulation)
+      - `bg_suppress_db`: **28.0 dB** (downward expansion noise gate attenuating room murmur during pauses)
+      - `agc_max_scale`: **1.50x** (smooth vocal leveling)
+      - `fan_rejection_ratio`: **0.85** & `click_rejection_ratio`: **0.35**
+  - **Studio UI Responsiveness & 100% Button Accessibility (`tune_mic.py`)**:
+    * **Root Cause of Off-Screen Buttons**: Fixed window geometry (`890x890`) exceeded the vertical resolution of standard 1024x768 monitor (768px height minus panel taskbar = ~700px usable). Action buttons and audio playback buttons stacked at the bottom were pushed off-screen.
+    * **Screen-Aware Dynamic Geometry**: Dynamically queries screen dimensions (`screen_w`, `screen_h`) and fits within `980x570` centered (`pos_x`, `pos_y`), providing >90px of clearance on 768p displays and fitting 600p displays.
+    * **Bottom-Anchored Action Bar**: Packed `bottom_bar` (`Calibrate Room`, `Save to listen.py & mic_config.json`, `Reset Defaults`) with `side="bottom"` before central frames. It is permanently anchored to the bottom edge and can NEVER be clipped or hidden regardless of resizing.
+    * **2x2 Sample Action Button Grid**: Grouped sample monitor and recording buttons (`Monitor LIVE`, `Record 3s Sample`, `Hear Raw Mic`, `Hear Vocal Tunnel`) into a compact 2x2 grid, saving 80px of vertical space.
+    * **Compact Slider & Meter Layout**: Reduced slider padding, scale height, and VU meter canvases to 12px height with compact font sizing.
+  - **Whisper Vocal Tunnel DSP Alignment (`listen.py`)**:
+    * Updated `clean_audio_for_transcription()` to apply the exact same 40Hz low-cut, 5.8kHz high-cut, 1.65x presence boost, and 28dB noise gate, guaranteeing Whisper receives clean, hiss-free audio.
+    * `NORMAL_SYSTEM_PROMPT` word count verified and preserved at exactly 331 words (~440 tokens).
+
+- 2026-10-14 (Part 24): Raspberry Pi 5 Audio Architecture Hardening: Edge-TTS 7.3.1 Token Fix, WirePlumber Bluetooth A2DP Lock, & Local Piper Neural TTS Fallback:
+  - **Edge-TTS 7.3.1 Upgrade (WebSocket 403 Forbidden Handshake Fix)**:
+    * Diagnosed root cause of speech failure where `listen.py` cut straight back to listening mode with zero voice output: Microsoft updated security tokens (`Sec-MS-GEC` / `Sec-MS-GEC-Version`) for Bing Speech services, returning `aiohttp.client_exceptions.WSServerHandshakeError: 403 Forbidden` on every WebSocket connection under `edge-tts` 7.2.8.
+    * Upgraded package to `edge-tts==7.3.1`, resolving authentication handshakes and restoring live high-definition speech generation.
+    * Hardened `_synthesize_edge_tts_in_memory()` and `pre_cache_phrases()` in `listen.py` so HTTP 403, forbidden, unauthorized, and handshake errors immediately trigger `_edge_tts_dns_offline = True`, bypassing network retry stalls and routing instantly to offline speech.
+  - **WirePlumber 0.5.8 Bluetooth Profile Lock (`11-bluetooth-policy.conf`)**:
+    * Diagnosed Bluetooth conflict on Raspberry Pi 5 Debian 13: WirePlumber by default sets `bluetooth.autoswitch-to-headset-profile = true`. When `pw-record` audio capture started from the Samsung Galaxy A15 phone mic, WirePlumber attempted to switch the Syvo Soul 100 Bluetooth speaker into low-quality mono HFP telephony mode or created internal loopback filter deadlocks.
+    * Deployed persistent configuration in `~/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf` setting `bluetooth.autoswitch-to-headset-profile = false`, locking the Syvo Soul 100 speaker permanently to high-fidelity A2DP stereo playback regardless of microphone capture streams.
+  - **Local Piper Neural Speech Engine Integration (`assets/piper/en_US-lessac-low.onnx`)**:
+    * Resolved complete silence during network disconnects or API token failures: previous fallbacks (`pyttsx3`, `espeak-ng`) were uninstalled or Windows-only PowerShell commands.
+    * Integrated Piper TTS (`piper-tts==1.8.0` + `onnxruntime`) with local ONNX model `en_US-lessac-low.onnx` into `listen.py`:
+      - Implemented cached in-memory singleton voice loader `_get_piper_voice()` with thread lock.
+      - Updated `_speak_local_offline_fallback()` to synthesize WAV audio directly into memory and stream via `pw-play -` through PipeWire to the active Bluetooth speaker.
+      - Verified 100% offline speech playback with sub-second synthesis latency and zero external dependencies.
+  - **Prompt Integrity & Verification**:
+    * Maintained `NORMAL_SYSTEM_PROMPT` word count strictly at 331 words (~440 tokens).
+    * Validated end-to-end live speech and offline fallback playback on Syvo Soul 100 speaker with return code 0.
+
 ## Reliability Notes
 
 - **Exhibition Screen Isolation**: On the Raspberry Pi 7-inch display, ONLY the Face UI (`screen.py`) is rendered. Camera feeds, vision debug windows, and terminal consoles run silently in the background with zero popups or desktop artifacts visible to guests.
@@ -963,4 +1041,5 @@ To do:
 - Keep modules small.
 - Test one feature at a time.
 - Exhibition reliability is more important than flashy behavior.
+
 

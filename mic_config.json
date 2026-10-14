@@ -1,0 +1,19 @@
+{
+  "hardware_gain_pct": 79,
+  "vad_mode": 0,
+  "min_speech_rms": 1380.0,
+  "speech_multiplier": 2.5,
+  "continue_ratio": 0.35,
+  "start_frames": 2,
+  "end_silence_sec": 0.45,
+  "pre_emphasis": 0.0,
+  "low_cutoff_hz": 40.0,
+  "high_cutoff_hz": 5800.0,
+  "treble_boost": 1.65,
+  "bg_suppress_db": 12.0,
+  "agc_target_peak": 22000.0,
+  "agc_max_scale": 1.5,
+  "fan_rejection_ratio": 0.85,
+  "click_rejection_ratio": 0.35,
+  "proximity_crest_min": 1.5
+}

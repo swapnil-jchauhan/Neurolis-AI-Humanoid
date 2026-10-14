@@ -3,6 +3,7 @@ import base64
 from collections import deque
 import difflib
 import io
+import json
 import os
 import queue
 import random
@@ -328,7 +329,24 @@ FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_SECONDS)
 
 # Probes the input device to find its native hardware sample rate (e.g. 44100Hz on USB webcam mics)
 def probe_hardware_sample_rate() -> int:
+    if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        return TARGET_SAMPLE_RATE
     with suppress_c_stderr():
+        try:
+            devices = sd.query_devices()
+            target_dev = None
+            for idx, dev in enumerate(devices):
+                if dev.get("max_input_channels", 0) > 0:
+                    name = dev.get("name", "").lower()
+                    if "iris" in name or "webca" in name or "sonar" in name or "microphone" in name:
+                        target_dev = idx
+                        break
+            if target_dev is not None:
+                current_out = sd.default.device[1] if isinstance(sd.default.device, (list, tuple)) else None
+                sd.default.device = (target_dev, current_out)
+        except Exception:
+            pass
+
         try:
             sd.check_input_settings(samplerate=TARGET_SAMPLE_RATE, channels=CHANNELS, dtype="int16")
             return TARGET_SAMPLE_RATE
@@ -352,18 +370,77 @@ def probe_hardware_sample_rate() -> int:
 HW_SAMPLE_RATE = probe_hardware_sample_rate()
 HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
-START_SPEECH_FRAMES = 4            # 120ms to trip speech start (filters out clicks, sighs, breath puffs, and transient room noises)
-END_SILENCE_SECONDS = 0.50         # 500ms silence cutoff - natural speech cadence without early cutoffs
+START_SPEECH_FRAMES = 3            # 90ms to trip speech start (calibrated: 3 consecutive 30ms frames)
+END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff - snappy and responsive without cutting off speech
 CONVERSATION_TIMEOUT_SECONDS = 35  # 35s follow-up window (comfortable time to converse without premature standby)
 MAX_RECORD_SECONDS = 25
-MIN_RECORD_SECONDS = 0.40          # 400ms minimum speech segment
+MIN_RECORD_SECONDS = 0.50          # Requires at least 500ms audio to avoid phantom acoustic pops
 POST_REPLY_COOLDOWN_SECONDS = 0.04
-AMBIENT_CALIBRATION_SECONDS = 0.55 # 550ms calibration window so steady-state room audio is measured after skipping 200ms surge
-MAX_CALIBRATION_AMBIENT_RMS = 150
-SPEECH_THRESHOLD_MULTIPLIER = 1.50 # Clean headroom above ambient room noise
-CONTINUE_SPEECH_THRESHOLD_RATIO = 0.65
-MIN_SPEECH_RMS_THRESHOLD = 160.0   # Tuned to 160 RMS to reject 70-130 RMS ambient room/fan noise on uncalibrated mic
-VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD Mode 3 to aggressively filter background noise
+AMBIENT_CALIBRATION_SECONDS = 0.35
+MAX_CALIBRATION_AMBIENT_RMS = 1200  # High ceiling so loud room noise/murmur is accurately measured
+SPEECH_THRESHOLD_MULTIPLIER = 2.65
+CONTINUE_SPEECH_THRESHOLD_RATIO = 0.50
+MIN_SPEECH_RMS_THRESHOLD = 820.0     # Baseline RMS threshold (calibrated for Samsung Galaxy A15 5G via AudioSource)
+VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD to aggressively filter background noise
+
+def set_hardware_gain(gain_pct: int):
+    """Sets system capture gain via wpctl / pactl on default audio source (and ALSA fallback)."""
+    try:
+        pct = max(0, min(100, int(gain_pct)))
+        if shutil.which("wpctl"):
+            subprocess.run(
+                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SOURCE@", f"{pct/100.0:.2f}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+        if shutil.which("pactl"):
+            subprocess.run(
+                ["pactl", "set-source-volume", "@DEFAULT_SOURCE@", f"{pct}%"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+        if shutil.which("amixer"):
+            for card in ["2", "3", "0", "1"]:
+                subprocess.run(
+                    ["amixer", "-c", card, "sset", "Mic", f"{pct}%"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False
+                )
+    except Exception:
+        pass
+
+# Load dynamic mic calibration from mic_config.json if available
+MIC_CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
+LOW_CUTOFF_HZ = 40.0
+HIGH_CUTOFF_HZ = 5800.0
+TREBLE_BOOST = 1.65
+BG_SUPPRESS_DB = 28.0
+AGC_MAX_SCALE = 1.50
+
+if MIC_CONFIG_FILE.exists():
+    try:
+        with open(MIC_CONFIG_FILE, "r") as _f:
+            _mic_cfg = json.load(_f)
+            MIN_SPEECH_RMS_THRESHOLD = float(_mic_cfg.get("min_speech_rms", MIN_SPEECH_RMS_THRESHOLD))
+            SPEECH_THRESHOLD_MULTIPLIER = float(_mic_cfg.get("speech_multiplier", SPEECH_THRESHOLD_MULTIPLIER))
+            CONTINUE_SPEECH_THRESHOLD_RATIO = float(_mic_cfg.get("continue_ratio", CONTINUE_SPEECH_THRESHOLD_RATIO))
+            START_SPEECH_FRAMES = int(_mic_cfg.get("start_frames", START_SPEECH_FRAMES))
+            END_SILENCE_SECONDS = float(_mic_cfg.get("end_silence_sec", END_SILENCE_SECONDS))
+            VAD_AGGRESSIVENESS = int(_mic_cfg.get("vad_mode", VAD_AGGRESSIVENESS))
+            MAX_CALIBRATION_AMBIENT_RMS = float(_mic_cfg.get("max_ambient_rms", MAX_CALIBRATION_AMBIENT_RMS))
+            LOW_CUTOFF_HZ = float(_mic_cfg.get("low_cutoff_hz", LOW_CUTOFF_HZ))
+            HIGH_CUTOFF_HZ = float(_mic_cfg.get("high_cutoff_hz", HIGH_CUTOFF_HZ))
+            TREBLE_BOOST = float(_mic_cfg.get("treble_boost", TREBLE_BOOST))
+            BG_SUPPRESS_DB = float(_mic_cfg.get("bg_suppress_db", BG_SUPPRESS_DB))
+            AGC_MAX_SCALE = float(_mic_cfg.get("agc_max_scale", AGC_MAX_SCALE))
+            _hw_gain = _mic_cfg.get("hardware_gain_pct")
+            if _hw_gain is not None:
+                set_hardware_gain(int(_hw_gain))
+    except Exception as _e:
+        print(f"[Config] Error loading {MIC_CONFIG_FILE}: {_e}")
 EDGE_TTS_VOICE = "en-US-ChristopherNeural"
 EDGE_TTS_RATE = "+14%"
 EDGE_TTS_VOLUME = "+0%"
@@ -678,6 +755,107 @@ def audio_rms(audio: np.ndarray):
         return 0.0
     return float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
 
+class PipeWireInputStream:
+    """Zero-latency PipeWire 16kHz mono audio input stream.
+    Directly captures from PipeWire default source (e.g. phone mic via AudioSource)
+    without requiring ALSA pipewire-plugin or PortAudio translation.
+    """
+    def __init__(self, callback, samplerate=16000, blocksize=480, channels=1, dtype="int16", device=None):
+        self.callback = callback
+        self.samplerate = samplerate
+        self.blocksize = blocksize
+        self.channels = channels
+        self.dtype = dtype
+        self.device = device
+        self.proc = None
+        self.reader_thread = None
+        self.is_running = False
+        self._lock = threading.Lock()
+
+    def start(self):
+        with self._lock:
+            if self.is_running:
+                return
+            self.is_running = True
+            cmd = [
+                "pw-record",
+                "--rate", str(self.samplerate),
+                "--channels", str(self.channels),
+                "--format", "s16",
+                "--latency", f"{self.blocksize}/{self.samplerate}",
+                "-"
+            ]
+            if self.device:
+                cmd.extend(["--target", str(self.device)])
+            self.proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
+            self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+            self.reader_thread.start()
+
+    def _reader_loop(self):
+        chunk_bytes = self.blocksize * self.channels * 2
+        while self.is_running and self.proc and self.proc.stdout:
+            try:
+                raw = self.proc.stdout.read(chunk_bytes)
+                if not raw or len(raw) < chunk_bytes:
+                    break
+                samples = np.frombuffer(raw, dtype=np.int16).reshape(-1, self.channels)
+                self.callback(samples, self.blocksize, None, None)
+            except Exception:
+                break
+
+    def stop(self):
+        with self._lock:
+            self.is_running = False
+            if self.proc:
+                try:
+                    self.proc.terminate()
+                except Exception:
+                    pass
+
+    def close(self):
+        with self._lock:
+            self.is_running = False
+            if self.proc:
+                try:
+                    self.proc.terminate()
+                    self.proc.wait(timeout=0.2)
+                except Exception:
+                    pass
+                self.proc = None
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+        self.close()
+
+def get_audio_input_stream(callback):
+    """Factory creating PipeWireInputStream on Linux (when pw-record is present)
+    or sd.InputStream on other platforms / ALSA.
+    """
+    if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        return PipeWireInputStream(
+            callback=callback,
+            samplerate=TARGET_SAMPLE_RATE,
+            blocksize=FRAME_SAMPLES,
+            channels=CHANNELS,
+            dtype="int16"
+        )
+    return sd.InputStream(
+        samplerate=HW_SAMPLE_RATE,
+        blocksize=HW_FRAME_SAMPLES,
+        dtype="int16",
+        channels=CHANNELS,
+        callback=callback,
+    )
+
 # empties out any leftover audio chunks sitting in the recording queue
 def clear_audio_queue():
     while not audio_queue.empty():
@@ -702,66 +880,26 @@ def callback(indata, frames, time_info, status):
         resampled = np.interp(target_x, orig_x, raw).astype(np.int16)
         audio_queue.put(resampled)
 
-def apply_vocal_tunnel_filter(audio_16k: np.ndarray) -> np.ndarray:
-    """
-    Vertical Vocal Tunnel Acoustic Filter (Zero-Latency NumPy DSP):
-    Tailored for uncalibrated/cheap microphones where human speech sounds distant or muffled.
-      1. Pre-emphasis filter: Sharpens speech consonants (reduces low muffled bass boom, lifts clarity).
-      2. Vertical Vocal Tunnel FFT Passband (160 Hz - 4200 Hz): Isolates genuine human vocal chords
-         and formants while stripping sub-bass room rumble (<160 Hz) and high-frequency electrical hiss (>4500 Hz).
-      3. Mid-High Formant Clarity Boost (+4.5 dB at 1.8 kHz - 3.8 kHz): Restores intelligibility for Whisper.
-      4. Dynamic Vocal AGC: Smoothly amplifies soft/distant voices up to 4.5x without clipping.
-    """
-    if audio_16k is None or audio_16k.size < 64:
-        return audio_16k
-
-    try:
-        samples = audio_16k.astype(np.float32)
-
-        # 1. Pre-emphasis filter (alpha = 0.96) to lift consonant clarity
-        emphasized = np.empty_like(samples)
-        emphasized[0] = samples[0]
-        emphasized[1:] = samples[1:] - 0.96 * samples[:-1]
-
-        # 2. Fast FFT
-        n = len(samples)
-        fft_vals = np.fft.rfft(emphasized)
-        freqs = np.fft.rfftfreq(n, d=1.0 / 16000.0)
-
-        # 3. Vocal Tunnel Gain Profile (160 Hz to 4200 Hz passband)
-        gain = np.zeros_like(freqs, dtype=np.float32)
-        pass_mask = (freqs >= 160.0) & (freqs <= 4200.0)
-        gain[pass_mask] = 1.0
-
-        # Smooth bass roll-off (100 Hz to 160 Hz)
-        low_trans = (freqs >= 100.0) & (freqs < 160.0)
-        gain[low_trans] = 0.5 * (1.0 - np.cos(np.pi * (freqs[low_trans] - 100.0) / 60.0))
-
-        # Smooth high roll-off (4200 Hz to 5500 Hz)
-        high_trans = (freqs > 4200.0) & (freqs <= 5500.0)
-        gain[high_trans] = 0.5 * (1.0 + np.cos(np.pi * (freqs[high_trans] - 4200.0) / 1300.0))
-
-        # Mid/High vocal presence and consonant boost (+4.5 dB between 1.8 kHz and 3.8 kHz)
-        clarity_mask = (freqs >= 1800.0) & (freqs <= 3800.0)
-        gain[clarity_mask] *= 1.68
-
-        # 4. Inverse FFT
-        filtered_fft = fft_vals * gain
-        filtered = np.fft.irfft(filtered_fft, n=n)
-
-        # 5. Soft Vocal AGC: lifts distant voices up to 4.5x while preventing digital clipping
-        peak = np.max(np.abs(filtered))
-        if peak > 10.0:
-            target_peak = 22000.0
-            scale = min(target_peak / peak, 4.5)
-            filtered = filtered * scale
-
-        return np.clip(filtered, -32767.0, 32767.0).astype(np.int16)
-    except Exception:
-        return audio_16k
-
-# listens to the room for 0.55 seconds to measure background ambient noise, skipping initial 200ms hardware surge
+# listens to the room for 0.35 seconds to measure background ambient noise
 def calibrate_speech_threshold():
+    if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        try:
+            num_bytes = int(AMBIENT_CALIBRATION_SECONDS * TARGET_SAMPLE_RATE) * 2
+            cmd = ["pw-record", "--rate", str(TARGET_SAMPLE_RATE), "--channels", str(CHANNELS), "--format", "s16", "-"]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            try:
+                raw_bytes = proc.stdout.read(num_bytes)
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=0.3)
+                except Exception:
+                    pass
+            samples = np.frombuffer(raw_bytes, dtype=np.int16)
+            ambient_rms = min(audio_rms(samples), MAX_CALIBRATION_AMBIENT_RMS)
+            return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
+        except Exception:
+            pass
     with suppress_c_stderr():
         audio = sd.rec(
             int(AMBIENT_CALIBRATION_SECONDS * HW_SAMPLE_RATE),
@@ -770,13 +908,7 @@ def calibrate_speech_threshold():
             dtype="int16",
         )
         sd.wait()
-    raw = audio.reshape(-1)
-    # Skip the first 200ms hardware/USB electrical surge
-    skip_samples = int(0.20 * HW_SAMPLE_RATE)
-    steady = raw[skip_samples:] if len(raw) > skip_samples else raw
-    # Apply vocal tunnel isolation to ambient noise so baseline reflects human vocal band
-    isolated_ambient = apply_vocal_tunnel_filter(steady)
-    ambient_rms = min(audio_rms(isolated_ambient), MAX_CALIBRATION_AMBIENT_RMS)
+    ambient_rms = min(audio_rms(audio.reshape(-1)), MAX_CALIBRATION_AMBIENT_RMS)
     return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
 
 # records microphone audio until the user stops speaking using vad and silence timers
@@ -891,13 +1023,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
             return None
     else:
         with suppress_c_stderr():
-            stream_ctx = sd.InputStream(
-                samplerate=HW_SAMPLE_RATE,
-                blocksize=HW_FRAME_SAMPLES,
-                dtype="int16",
-                channels=CHANNELS,
-                callback=callback,
-            )
+            stream_ctx = get_audio_input_stream(callback=callback)
         with stream_ctx:
             # Drain initial USB hardware startup buffer/transient pop (~120ms)
             time.sleep(0.12)
@@ -909,20 +1035,17 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
     if not frames:
         return None
 
-    raw_audio = np.concatenate(frames)
-    duration = raw_audio.size / SAMPLE_RATE
+    audio = np.concatenate(frames)
+    duration = audio.size / SAMPLE_RATE
 
     if duration < MIN_RECORD_SECONDS:
         return None
 
-    # Apply vertical vocal tunnel DSP filter: removes muffled boom, boosts treble & consonant clarity
-    enhanced_audio = apply_vocal_tunnel_filter(raw_audio)
-
-    # Energy check: reject faint background clicks that slipped through
-    if audio_rms(enhanced_audio) < (start_threshold * 0.70):
+    # Energy check: reject faint background mumbling that slipped through
+    if audio_rms(audio) < (start_threshold * 0.85):
         return None
 
-    return enhanced_audio
+    return audio
 
 # runs an external command quietly without dumping text onto the terminal screen
 def run_quiet(command, timeout=15.0):
@@ -1009,7 +1132,17 @@ async def _synthesize_edge_tts_in_memory(text: str) -> Tuple[Optional[np.ndarray
         return data, sr
     except Exception as e:
         err_str = str(e).lower()
-        is_dns = "getaddrinfo" in err_str or "gaierror" in err_str or "nodename" in err_str or "timeout" in err_str or isinstance(e, (asyncio.TimeoutError, TimeoutError))
+        is_dns = (
+            "getaddrinfo" in err_str
+            or "gaierror" in err_str
+            or "nodename" in err_str
+            or "timeout" in err_str
+            or "403" in err_str
+            or "forbidden" in err_str
+            or "unauthorized" in err_str
+            or "handshake" in err_str
+            or isinstance(e, (asyncio.TimeoutError, TimeoutError))
+        )
         if is_dns:
             _edge_tts_dns_offline = True
         return None, None
@@ -1069,15 +1202,66 @@ def _speak_disk_fallback(text: str, timeout: float = 15.0):
         except Exception:
             pass
 
+_PIPER_VOICE = None
+_PIPER_LOCK = threading.Lock()
+
+def _get_piper_voice():
+    global _PIPER_VOICE
+    if _PIPER_VOICE is not None:
+        return _PIPER_VOICE
+    with _PIPER_LOCK:
+        if _PIPER_VOICE is not None:
+            return _PIPER_VOICE
+        piper_model = Path(__file__).resolve().parent / "assets" / "piper" / "en_US-lessac-low.onnx"
+        if piper_model.exists():
+            try:
+                import piper
+                _PIPER_VOICE = piper.PiperVoice.load(str(piper_model))
+            except Exception as e:
+                print(f"[TTS] Failed to initialize Piper voice: {e}")
+        return _PIPER_VOICE
+
 def _speak_local_offline_fallback(text: str) -> bool:
     """
     100% Platform-Agnostic Offline Speech Engine (Raspberry Pi 5 Native + PC Simulation).
     Checks:
+      0. Piper Neural TTS on Raspberry Pi 5 (assets/piper/en_US-lessac-low.onnx)
       1. pyttsx3 in Python environment
       2. espeak-ng / espeak via shutil.which (standard on Debian Linux / Raspberry Pi OS)
       3. Windows PowerShell SAPI fallback adapter (PC simulation mode)
       4. Disk audio fallback
     """
+    # Priority 0: Ultra-low latency offline Neural TTS via Piper on Raspberry Pi 5
+    voice = _get_piper_voice()
+    if voice is not None:
+        try:
+            import wave
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                voice.synthesize_wav(text, wf)
+            wav_bytes = buf.getvalue()
+            if wav_bytes:
+                if sys.platform.startswith("linux") and shutil.which("pw-play"):
+                    with _active_audio_proc_lock:
+                        proc = subprocess.Popen(
+                            ["pw-play", "-"],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        _active_audio_proc = proc
+                    proc.communicate(input=wav_bytes, timeout=12.0)
+                    with _active_audio_proc_lock:
+                        if _active_audio_proc is proc:
+                            _active_audio_proc = None
+                    return proc.returncode == 0
+                else:
+                    buf.seek(0)
+                    data, sr = sf.read(buf, dtype="float32")
+                    return play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=True)
+        except Exception as e:
+            print(f"[TTS] Piper offline fallback error: {e}")
+
     # Priority 1: pyttsx3 if installed
     try:
         import pyttsx3
@@ -1134,45 +1318,140 @@ def _speak_system_fallback(text: str):
     """Instant offline speech fallback: ensures speech never stalls or goes silent."""
     _speak_local_offline_fallback(text)
 
-def play_sounddevice_audio(data: np.ndarray, samplerate: int) -> bool:
+_active_audio_proc_lock = threading.Lock()
+_active_audio_proc: Optional[subprocess.Popen] = None
+_audio_generation_id: int = 0
+last_audio_played_at: float = 0.0
+
+def stop_all_audio():
+    """Immediately and completely terminates all audio playback across all engines (<1ms latency)."""
+    global _active_audio_proc, _audio_generation_id, is_speaking
+    with _active_audio_proc_lock:
+        _audio_generation_id += 1
+        if _active_audio_proc is not None:
+            try:
+                _active_audio_proc.terminate()
+                _active_audio_proc.kill()
+            except Exception:
+                pass
+            _active_audio_proc = None
+
+    if sys.platform.startswith("linux"):
+        for player in ["pw-play", "paplay", "ffplay", "mpv", "mpg123"]:
+            try:
+                subprocess.run(
+                    ["pkill", "-9", "-f", player],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=0.3,
+                )
+            except Exception:
+                pass
+
+    try:
+        sd.stop()
+    except Exception:
+        pass
+
+    clear_audio_queue()
+    is_speaking = False
+
+def prime_audio_sink():
+    """Wakes up Bluetooth/PipeWire sink asynchronously in background with digital silence."""
+    global last_audio_played_at
+    if standby_kill_event.is_set():
+        return
+    try:
+        sr = 24000
+        silence = np.zeros(int(sr * 0.04), dtype=np.float32)
+        buf = io.BytesIO()
+        sf.write(buf, silence, sr, format="WAV", subtype="PCM_16")
+        p = subprocess.Popen(
+            ["pw-play", "-"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        p.communicate(buf.getvalue(), timeout=0.6)
+        last_audio_played_at = time.monotonic()
+    except Exception:
+        pass
+
+def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: bool = False, ignore_kill: bool = False) -> bool:
     """
     Plays audio array reliably across platforms (Raspberry Pi 5 / ALSA / PipeWire / Windows).
     On Linux/Raspberry Pi 5, prioritizes native PipeWire stream (pw-play) so audio automatically
     routes to the user's active Bluetooth headphones (e.g. Rockerz 512 ANC), USB Audio, or HDMI.
     Falls back to sounddevice / ALSA / Windows DirectSound with automatic resampling.
     """
+    global _active_audio_proc, last_audio_played_at
     if data is None or len(data) == 0:
         return False
+    if not ignore_kill and standby_kill_event.is_set():
+        return False
+
     if len(data.shape) == 1:
         data = np.ascontiguousarray(data, dtype=np.float32)
 
-    # Prepend 150ms of silence lead-in and 50ms trailing silence so Bluetooth DAC / PipeWire stream onset never truncates the first word
-    lead_silence_samples = int(samplerate * 0.15)
-    tail_silence_samples = int(samplerate * 0.05)
+    # Adaptive lead-in padding:
+    # - Continuation chunks (chunk 2): 0ms lead-in (seamless, gapless sentence flow)
+    # - Warm sink (<3.0s since last audio or primed): 120ms lead-in (ensures Bluetooth/PipeWire DAC anti-pop ramp never clips first syllable)
+    # - Cold sink (standby / idle startup): 240ms lead-in (ensures cold DAC wakes up before first syllable)
+    now = time.monotonic()
+    is_warm = (now - last_audio_played_at) < 3.0
+    if is_continuation:
+        lead_sec = 0.0
+    elif is_warm:
+        lead_sec = 0.12
+    else:
+        lead_sec = 0.24
+
+    tail_sec = 0.04
+    lead_silence_samples = int(samplerate * lead_sec)
+    tail_silence_samples = int(samplerate * tail_sec)
     silence_parts = []
     if lead_silence_samples > 0:
         silence_parts.append(np.zeros(lead_silence_samples, dtype=np.float32))
     silence_parts.append(data)
     if tail_silence_samples > 0:
         silence_parts.append(np.zeros(tail_silence_samples, dtype=np.float32))
-    data = np.concatenate(silence_parts)
+    padded_data = np.concatenate(silence_parts)
+
+    current_gen = _audio_generation_id
 
     # Priority 0: Native Linux PipeWire streaming (routes directly to active Bluetooth/USB/HDMI sink)
     if sys.platform.startswith("linux") and shutil.which("pw-play"):
         try:
             buf = io.BytesIO()
-            sf.write(buf, data, samplerate, format="WAV", subtype="PCM_16")
-            proc = subprocess.Popen(
-                ["pw-play", "-"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            proc.communicate(input=buf.getvalue())
-            if proc.returncode == 0:
-                return True
+            sf.write(buf, padded_data, samplerate, format="WAV", subtype="PCM_16")
+            wav_bytes = buf.getvalue()
+
+            with _active_audio_proc_lock:
+                if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
+                    return False
+                proc = subprocess.Popen(
+                    ["pw-play", "-"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                _active_audio_proc = proc
+
+            proc.communicate(input=wav_bytes)
+
+            with _active_audio_proc_lock:
+                if _active_audio_proc is proc:
+                    _active_audio_proc = None
+
+            last_audio_played_at = time.monotonic()
+            return proc.returncode == 0
         except Exception:
-            pass
+            with _active_audio_proc_lock:
+                if _active_audio_proc is not None:
+                    _active_audio_proc = None
+
+    if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
+        return False
 
     devices_to_try = ["default", "sysdefault", None]
 
@@ -1180,23 +1459,25 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int) -> bool:
     for dev in devices_to_try:
         try:
             with suppress_c_stderr():
-                sd.play(data, samplerate=samplerate, device=dev)
+                sd.play(padded_data, samplerate=samplerate, device=dev)
                 sd.wait()
+            last_audio_played_at = time.monotonic()
             return True
         except Exception:
             continue
 
     # Priority 2: Resample to 44.1kHz (standard rate supported by all ALSA/HDMI/USB DACs)
     try:
-        target_len = int(len(data) * 44100 / samplerate)
-        x_old = np.linspace(0, 1, len(data))
+        target_len = int(len(padded_data) * 44100 / samplerate)
+        x_old = np.linspace(0, 1, len(padded_data))
         x_new = np.linspace(0, 1, target_len)
-        resampled = np.interp(x_new, x_old, data).astype(np.float32)
+        resampled = np.interp(x_new, x_old, padded_data).astype(np.float32)
         for dev in devices_to_try:
             try:
                 with suppress_c_stderr():
                     sd.play(resampled, samplerate=44100, device=dev)
                     sd.wait()
+                last_audio_played_at = time.monotonic()
                 return True
             except Exception:
                 continue
@@ -1225,117 +1506,213 @@ async def save_edge_tts(text: str, audio_path: Path):
     )
     await communicate.save(str(audio_path))
 
+_speak_lock = threading.Lock()
+
 # downloads edge-tts speech in RAM and plays it continuously with instant subtitles and zero mid-sentence delays
-def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0):
+def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0, allow_during_standby: bool = False):
     global is_speaking
-    if standby_kill_event.is_set():
-        return
-    is_speaking = True
-    clear_audio_queue()
-
-    active_state = custom_state if custom_state else "speaking"
-    active_status = custom_status if custom_status else "SPEAKING"
-
-    # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
-    if text in _AUDIO_CACHE:
-        data, sr = _AUDIO_CACHE[text]
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", text)
-        set_face_state(active_state, active_status)
-        play_sounddevice_audio(data, sr)
-        time.sleep(0.06)
-        clear_audio_queue()
-        is_speaking = False
-        if not standby_kill_event.is_set():
-            _restore_face_state_after_speech(custom_state, custom_status)
+    if not allow_during_standby and standby_kill_event.is_set():
         return
 
-    # Check dynamic cache for recently synthesized responses (0ms replay)
-    if text in _DYNAMIC_TTS_CACHE:
-        data, sr = _DYNAMIC_TTS_CACHE[text]
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", text)
-        set_face_state(active_state, active_status)
-        play_sounddevice_audio(data, sr)
-        time.sleep(0.06)
-        clear_audio_queue()
-        is_speaking = False
-        if not standby_kill_event.is_set():
-            _restore_face_state_after_speech(custom_state, custom_status)
-        return
-
-    # Fast offline failover: if Edge-TTS DNS is offline, route directly to local speech with 0ms stall
-    if _edge_tts_dns_offline:
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", text)
-        set_face_state(active_state, active_status)
-        if not standby_kill_event.is_set():
-            _speak_local_offline_fallback(text)
-        time.sleep(0.06)
-        clear_audio_queue()
-        is_speaking = False
-        if not standby_kill_event.is_set():
-            _restore_face_state_after_speech(custom_state, custom_status)
-        return
-
-    # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
-    chunk1, chunk2 = _split_for_pipelined_tts(text)
-
-    # Immediately display subtitles and active state on UI with 0ms delay!
-    if face_ui is not None:
-        face_ui.set_subtitles("NEUROLIS", text)
-    set_face_state(active_state, active_status)
-
-    try:
-        fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
-        fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
-
-        data1, sr1 = fut1.result(timeout=12.0)
-        if standby_kill_event.is_set():
-            is_speaking = False
+    with _speak_lock:
+        if not allow_during_standby and standby_kill_event.is_set():
             return
-        if data1 is not None:
-            # While chunk 1 is playing, fetch chunk 2 in parallel
-            data2, sr2 = None, None
-            played1 = play_sounddevice_audio(data1, sr1)
+        is_speaking = True
+        clear_audio_queue()
 
-            if fut2:
-                try:
-                    data2, sr2 = fut2.result(timeout=12.0)
-                except Exception:
-                    pass
+        my_gen = _audio_generation_id
 
-            if standby_kill_event.is_set():
+        active_state = custom_state if custom_state else "speaking"
+        active_status = custom_status if custom_status else "SPEAKING"
+
+        # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
+        if text in _AUDIO_CACHE:
+            data, sr = _AUDIO_CACHE[text]
+            if face_ui is not None:
+                face_ui.set_subtitles("NEUROLIS", text)
+            set_face_state(active_state, active_status)
+            play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
+            time.sleep(0.06)
+            clear_audio_queue()
+            is_speaking = False
+            if not standby_kill_event.is_set() or allow_during_standby:
+                _restore_face_state_after_speech(custom_state, custom_status)
+            return
+
+        # Check dynamic cache for recently synthesized responses (0ms replay)
+        if text in _DYNAMIC_TTS_CACHE:
+            data, sr = _DYNAMIC_TTS_CACHE[text]
+            if face_ui is not None:
+                face_ui.set_subtitles("NEUROLIS", text)
+            set_face_state(active_state, active_status)
+            play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
+            time.sleep(0.06)
+            clear_audio_queue()
+            is_speaking = False
+            if not standby_kill_event.is_set() or allow_during_standby:
+                _restore_face_state_after_speech(custom_state, custom_status)
+            return
+
+        # Fast offline failover: if Edge-TTS DNS is offline, route directly to local speech with 0ms stall
+        if _edge_tts_dns_offline:
+            if face_ui is not None:
+                face_ui.set_subtitles("NEUROLIS", text)
+            set_face_state(active_state, active_status)
+            if not standby_kill_event.is_set() or allow_during_standby:
+                _speak_local_offline_fallback(text)
+            time.sleep(0.06)
+            clear_audio_queue()
+            is_speaking = False
+            if not standby_kill_event.is_set() or allow_during_standby:
+                _restore_face_state_after_speech(custom_state, custom_status)
+            return
+
+        # 2. Pipelined synthesis using persistent event loop and concurrent sentence fetching
+        chunk1, chunk2 = _split_for_pipelined_tts(text)
+
+        # Immediately display subtitles and active state on UI with 0ms delay!
+        if face_ui is not None:
+            face_ui.set_subtitles("NEUROLIS", text)
+        set_face_state(active_state, active_status)
+
+        try:
+            fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
+            fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
+
+            # Wait for chunk 1 synthesis while actively polling for standby kill every 20ms
+            wait_start = time.monotonic()
+            while not fut1.done():
+                if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
+                    fut1.cancel()
+                    if fut2:
+                        fut2.cancel()
+                    is_speaking = False
+                    return
+                if time.monotonic() - wait_start > 12.0:
+                    break
+                time.sleep(0.02)
+
+            data1, sr1 = fut1.result(timeout=0.1) if fut1.done() else (None, None)
+            if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
                 is_speaking = False
                 return
+            if data1 is not None:
+                # While chunk 1 is playing, fetch chunk 2 in parallel
+                data2, sr2 = None, None
+                played1 = play_sounddevice_audio(data1, sr1, is_continuation=False, ignore_kill=allow_during_standby)
 
-            # Seamless gapless transition to chunk 2
-            if data2 is not None:
-                play_sounddevice_audio(data2, sr2)
+                if fut2:
+                    wait2_start = time.monotonic()
+                    while not fut2.done():
+                        if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
+                            fut2.cancel()
+                            is_speaking = False
+                            return
+                        if time.monotonic() - wait2_start > 12.0:
+                            break
+                        time.sleep(0.02)
+                    try:
+                        data2, sr2 = fut2.result(timeout=0.1) if fut2.done() else (None, None)
+                    except Exception:
+                        pass
 
-            # Cache single-chunk responses for instant replay
-            if chunk2 is None and len(_DYNAMIC_TTS_CACHE) < _MAX_DYNAMIC_CACHE_SIZE and played1:
-                _DYNAMIC_TTS_CACHE[text] = (data1, sr1)
-        else:
-            if not standby_kill_event.is_set():
+                if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
+                    is_speaking = False
+                    return
+
+                # Seamless gapless transition to chunk 2 (is_continuation=True)
+                if data2 is not None:
+                    play_sounddevice_audio(data2, sr2, is_continuation=True, ignore_kill=allow_during_standby)
+
+                # Cache single-chunk responses for instant replay
+                if chunk2 is None and len(_DYNAMIC_TTS_CACHE) < _MAX_DYNAMIC_CACHE_SIZE and played1:
+                    _DYNAMIC_TTS_CACHE[text] = (data1, sr1)
+            else:
+                if not standby_kill_event.is_set() or allow_during_standby:
+                    _speak_system_fallback(text)
+        except Exception as e:
+            if not standby_kill_event.is_set() or allow_during_standby:
                 _speak_system_fallback(text)
-    except Exception as e:
-        if not standby_kill_event.is_set():
-            _speak_system_fallback(text)
-    finally:
-        time.sleep(0.06)
-        clear_audio_queue()
-        is_speaking = False
-        if not standby_kill_event.is_set():
-            _restore_face_state_after_speech(custom_state, custom_status)
+        finally:
+            time.sleep(0.06)
+            clear_audio_queue()
+            is_speaking = False
+            if not standby_kill_event.is_set() or allow_during_standby:
+                _restore_face_state_after_speech(custom_state, custom_status)
 
 
+
+def clean_audio_for_transcription(audio: np.ndarray) -> np.ndarray:
+    """Vocal Tunnel DSP filter for Whisper: cuts rumble (<40Hz) and electrical hiss (>5800Hz),
+    applies subtle consonant clarity (1.65x @ 2.2-4.2kHz), and down-gates background noise/murmur (28dB).
+    Preserves 100% vocal pitch fundamentals and warmth.
+    """
+    if audio is None or len(audio) < 128:
+        return audio
+    try:
+        frame_sz = 480  # 30ms blocks for clean downward expansion gate during pauses
+        if len(audio) <= frame_sz:
+            return _clean_audio_chunk(audio)
+
+        out_frames = []
+        for i in range(0, len(audio), frame_sz):
+            chunk = audio[i:i + frame_sz]
+            if len(chunk) < 64:
+                out_frames.append(chunk)
+            else:
+                out_frames.append(_clean_audio_chunk(chunk))
+        concat = np.concatenate(out_frames)
+        return np.clip(concat, -32767.0, 32767.0).astype(np.int16)
+    except Exception:
+        return audio
+
+
+def _clean_audio_chunk(chunk: np.ndarray) -> np.ndarray:
+    samples = chunk.astype(np.float32)
+    n = len(samples)
+    fft_vals = np.fft.rfft(samples)
+    freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
+    gain = np.ones_like(freqs, dtype=np.float32)
+
+    # 1. Clean sub-bass roll-off (cuts DC hum, preserves vocal warmth)
+    sub_mask = freqs < LOW_CUTOFF_HZ
+    gain[sub_mask] = np.clip((freqs[sub_mask] / max(1.0, LOW_CUTOFF_HZ)) ** 2, 0.0, 1.0)
+
+    # 2. Smooth high-cut roll-off (cuts electrical hiss above high_cut)
+    high_mask = freqs > HIGH_CUTOFF_HZ
+    gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - HIGH_CUTOFF_HZ) / (8000.0 - HIGH_CUTOFF_HZ), 0.05, 1.0)
+
+    # 3. Consonant presence shelf (2.2kHz to 4.2kHz) for crisp intelligible speech
+    clarity_mask = (freqs >= 2200.0) & (freqs <= 4200.0)
+    gain[clarity_mask] *= TREBLE_BOOST
+
+    filtered = np.fft.irfft(fft_vals * gain, n=n)
+
+    # 4. Background noise & hiss suppression gate (downward expansion)
+    f_rms = float(np.sqrt(np.mean(filtered ** 2)))
+    min_floor_gain = 10.0 ** (-BG_SUPPRESS_DB / 20.0)
+    if f_rms < MIN_SPEECH_RMS_THRESHOLD:
+        norm = max(0.0, f_rms / max(1.0, MIN_SPEECH_RMS_THRESHOLD))
+        gate_gain = min_floor_gain + (1.0 - min_floor_gain) * (norm ** 2)
+        filtered = filtered * gate_gain
+    else:
+        peak = np.max(np.abs(filtered))
+        if peak > 20.0:
+            scale = min(22000.0 / peak, AGC_MAX_SCALE)
+            filtered = filtered * scale
+
+    return filtered
 
 # sends recorded wav audio to groq whisper to turn speech into english text
 def transcribe_audio(audio: np.ndarray):
+    # Prime Bluetooth audio sink in background so it's awake and warm when TTS starts
+    if sys.platform.startswith("linux") and shutil.which("pw-play"):
+        threading.Thread(target=prime_audio_sink, daemon=True).start()
+
     buf = io.BytesIO()
     try:
-        write_wav(buf, SAMPLE_RATE, audio)
+        clean_audio = clean_audio_for_transcription(audio)
+        write_wav(buf, SAMPLE_RATE, clean_audio)
 
         transcription = groq_call_with_retry(
             client.audio.transcriptions.create,
@@ -1688,7 +2065,7 @@ def pre_cache_phrases():
                             dns_error_count += 1
                 except Exception as e:
                     err_str = str(e).lower()
-                    if "getaddrinfo" in err_str or "gaierror" in err_str:
+                    if "getaddrinfo" in err_str or "gaierror" in err_str or "403" in err_str or "forbidden" in err_str or "unauthorized" in err_str:
                         dns_error_count += 1
                 if dns_error_count >= 2:
                     print("[TTS] Edge-TTS DNS offline; local offline speech engine active.")
@@ -2539,6 +2916,7 @@ def run_conversation_mode(speech_threshold: float):
             pass
 
     try:
+        standby_kill_event.clear()
         reset_session()
         print("Neurolis:", ACTIVATION_GREETING)
         if SPEAK_ACTIVATION_GREETING:
@@ -2549,16 +2927,10 @@ def run_conversation_mode(speech_threshold: float):
 
         last_valid_input_at = time.monotonic()
 
-        # keep audio stream warm across all conversation turns so there is zero portaudio driver re-init lag
+        # keep audio stream warm across all conversation turns so there is zero driver re-init lag
         try:
             with suppress_c_stderr():
-                warm_stream_ctx = sd.InputStream(
-                    samplerate=HW_SAMPLE_RATE,
-                    blocksize=HW_FRAME_SAMPLES,
-                    dtype="int16",
-                    channels=CHANNELS,
-                    callback=callback,
-                )
+                warm_stream_ctx = get_audio_input_stream(callback=callback)
             with warm_stream_ctx as warm_stream:
                 while True:
                     if standby_kill_event.is_set():
@@ -2634,6 +3006,8 @@ def run_conversation_mode(speech_threshold: float):
 # probes the operating system to see if a microphone is plugged in and working
 def check_audio_devices():
     """Probes the system for an active audio input device."""
+    if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        return True
     with suppress_c_stderr():
         try:
             sd.query_devices(kind='input')
@@ -2742,6 +3116,7 @@ threading.Thread(target=_console_input_worker, daemon=True).start()
 if face_ui is not None:
     def _handle_screen_talk_click():
         global AUDIO_ENABLED, is_in_active_conversation, last_user_activity_at
+        standby_kill_event.clear()
         reset_standby_cooldown()
         if motor_ctrl is not None:
             try:
@@ -2771,12 +3146,8 @@ if face_ui is not None:
             except Exception:
                 pass
 
-        # 2. Immediately cut off any playing audio mid-speech (0ms latency)
-        try:
-            sd.stop()
-        except Exception:
-            pass
-        clear_audio_queue()
+        # 2. Immediately cut off any playing audio mid-sentence (<1ms latency)
+        stop_all_audio()
         is_speaking = False
         is_in_active_conversation = False
 
@@ -2788,12 +3159,12 @@ if face_ui is not None:
             face_ui.set_state("idle", "STANDBY")
             face_ui.set_subtitles("NEUROLIS", STANDBY_KILL_MESSAGE)
 
-        # 5. Play mandated vocal confirmation in dedicated thread without blocking Tkinter
+        # 5. Play mandated vocal confirmation in dedicated thread exclusively without overlap
         def _announce_worker():
-            time.sleep(0.08)  # audio buffer stabilization
-            standby_kill_event.clear()
+            time.sleep(0.06)  # allow any dying subprocesses to cleanly release audio sink
+            stop_all_audio()   # ensure clean slate
             print(f"Neurolis (Standby): {STANDBY_KILL_MESSAGE}")
-            speak(STANDBY_KILL_MESSAGE, custom_state="idle", custom_status="STANDBY")
+            speak(STANDBY_KILL_MESSAGE, custom_state="idle", custom_status="STANDBY", allow_during_standby=True)
             if face_ui is not None:
                 face_ui.set_state("idle", "STANDBY")
             reset_session()
@@ -2858,6 +3229,7 @@ if __name__ == "__main__":
                         pass
 
                 if user_input == "__ENTER__":
+                    standby_kill_event.clear()
                     if AUDIO_ENABLED:
                         if cached_speech_threshold is None:
                             cached_speech_threshold = calibrate_speech_threshold()
@@ -2935,6 +3307,7 @@ if __name__ == "__main__":
                 if face_ui is not None:
                     face_ui.set_subtitles("YOU", user_input)
 
+                standby_kill_event.clear()
                 is_in_active_conversation = True
                 last_user_activity_at = time.monotonic()
                 should_end = handle_user_text(user_input)

@@ -424,7 +424,7 @@ class ArduinoBridge:
                                 if len(parts) > 5:
                                     try:
                                         cnt = int(parts[5])
-                                        self.active_sensor_count = cnt if cnt > 0 else 16
+                                        self.active_sensor_count = cnt if cnt > 0 else 12
                                         if len(parts) > 6:
                                             self.sensors_all = [float(p) for p in parts[6:]]
                                     except Exception:
@@ -1317,7 +1317,7 @@ class ManualControlRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "motor": motor, "pwm": pwm, "duration": duration})
 
         elif self.path == "/api/config_sensors":
-            count = str(payload.get("count", "16"))
+            count = str(payload.get("count", "12"))
             bridge.set_sensor_config(count)
             self._send_json({"ok": True, "count": count})
 

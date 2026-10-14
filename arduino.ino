@@ -1,5 +1,5 @@
 /*
-  project neurolis - arduino mega 4wd motor & 16-sensor god-tier ultrasonic controller
+  project neurolis - arduino mega 4wd motor & 12-sensor god-tier ultrasonic controller
   =====================================================================================
   board: arduino mega 2560
   baud rate: 115200
@@ -7,10 +7,10 @@
   what is plugged into this board:
     - 4 johnson dc motors (non-encoder) for the 4wd skid-steer wheels
     - 4 bts7960 high-power motor drivers (m1, m2 left, m3, m4 right)
-    - up to 16 hc-sr04 ultrasonic distance sensors (4 banks: 4, 8, 12, or 16 total)
+    - up to 12 hc-sr04 ultrasonic distance sensors (3 banks: 4, 8, or 12 total)
     - god-tier time-sliced bank interleaving: pings 1 bank per tick (4 sensors: 1 per side),
       maintaining rock-solid 20hz loop rate with zero cpu choking and zero acoustic cross-talk
-    - auto-detection: checks connected sensors on boot; seamless plug-and-play for 4, 8, 12, or 16
+    - auto-detection: checks connected sensors on boot; seamless plug-and-play for 4, 8, or 12
     - emergency stop triggers automatically if an obstacle gets closer than 20cm ahead or behind
 */
 
@@ -137,7 +137,7 @@ void setup() {
   pinMode(M4_LPWM, OUTPUT);
   pinMode(M4_EN,   OUTPUT);
 
-  // auto-detect which sensor banks are physically plugged in (4, 8, 12, or 16)
+  // auto-detect which sensor banks are physically plugged in (4, 8, or 12)
   detect_installed_sensors();
 
   // ensure all motors are at 0 speed before activating the enable lines
@@ -260,7 +260,7 @@ void stop_all_motors() {
 
 
 // ================= 8. ultrasonic sensor detection & reading =================
-// tests all 16 slots at boot to auto-detect whether 4, 8, 12, or 16 sensors are plugged in
+// tests all 12 slots at boot to auto-detect whether 4, 8, or 12 sensors are plugged in
 void detect_installed_sensors() {
   int detected_count = 0;
 
@@ -426,13 +426,14 @@ void process_serial() {
       // emergency stop command from the pi
       stop_all_motors();
     } else if (line.startsWith("CONFIG_SENSORS,")) {
-      // manual or host override for sensor count: 4, 8, 12, 16, or AUTO
+      // manual or host override for sensor count: 0, 4, 8, 12, or AUTO (12 sensors max)
       String cfg = line.substring(15);
       cfg.trim();
       if (cfg == "AUTO") {
         detect_installed_sensors();
       } else {
         int val = cfg.toInt();
+        if (val > 12) val = 12; // clamp to 12 sensors maximum
         if (val == 0 || val == 4 || val == 8 || val == 12) {
           num_active_sensors = val;
           for (int i = 0; i < num_active_sensors; i++) sensors[i].isConnected = true;

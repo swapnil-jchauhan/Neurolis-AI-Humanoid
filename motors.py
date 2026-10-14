@@ -1107,9 +1107,9 @@ class MotorController:
                     print(f"[Motors] Serial telemetry error: {e}")
             time.sleep(0.02)
 
-    # configures active sensor count on physical arduino (e.g. 4, 8, 12, 16, or 'AUTO')
-    def set_sensor_config(self, count: int = 16):
-        """sends command to arduino to configure active sensors (4, 8, 12, 16, or 'AUTO')"""
+    # configures active sensor count on physical arduino (e.g. 4, 8, 12, or 'AUTO')
+    def set_sensor_config(self, count: int = 12):
+        """sends command to arduino to configure active sensors (4, 8, 12, or 'AUTO')"""
         if self.ser and self.ser.is_open and not self.is_simulated:
             try:
                 self.ser.write(f"CONFIG_SENSORS,{count}\n".encode("ascii"))
