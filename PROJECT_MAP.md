@@ -1031,6 +1031,53 @@ To do:
     * Maintained `NORMAL_SYSTEM_PROMPT` word count strictly at 331 words (~440 tokens).
     * Validated end-to-end live speech and offline fallback playback on Syvo Soul 100 speaker with return code 0.
 
+- 2026-10-14 (Part 25): Samsung Galaxy A15 5G Mic Dynamic Acoustic Calibration & Exhibition Hall Room Noise Mapping:
+  - **Hardware Gain Ceiling Discovery & Dynamic Range Optimization**:
+    * Diagnosed root cause of infinite recording loops and deaf mic at distance: Samsung Android AudioSource applies aggressive non-linear digital preamp boost above 60% system volume. At 79% gain, room ambient noise exploded to >1400 RMS, tripping WebRTC VAD on 98.4% of silent frames and burying human voice in digital noise.
+    * Locked hardware capture volume strictly to **60%** (`wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.60`), providing a pristine 3.25x SNR improvement with ambient room noise dropping to ~200-280 RMS.
+  - **Acoustic Calibration Overhaul (`calibrate_speech_threshold`)**:
+    * Discards initial 150ms of audio buffer from PipeWire `pw-record` to completely eliminate driver initialization clicks/transient pops.
+    * Measures room acoustics over a 1.5-second window across 30ms frames, taking `amb_baseline = min(amb_median * 1.25, amb_p75)` to eliminate transient clicks/clatter while accurately measuring stationary noise floors.
+    * Sets `start_threshold = max(amb_baseline * 1.50, 400.0)` and anchors `continue_threshold = max(start_threshold * 0.70, amb_baseline * 1.15)`.
+    * Stores measured values dynamically in `mic_config.json` (`ambient_p90_rms`, `calibrated_start_rms`, `calibrated_continue_rms`).
+  - **Infinite Recording Loop Elimination**:
+    * In `listen_for_speech_segment()`, anchored `continue_threshold` strictly higher than room ambient noise (`>= amb_baseline * 1.15`).
+    * When user stops speaking, energy drops below `continue_threshold`, immediately allowing `silence_votes` to accumulate and terminating turn in 450ms (15 frames) instead of stalling for the full 25-second `MAX_RECORD_SECONDS` timeout.
+    * Maintained 500ms `preroll` buffer so the very first syllable of speech is captured without truncation.
+  - **Exhibition Hall Calibration Tools (CLI, Voice, Console, Studio UI)**:
+    * **CLI Flag**: `python3 listen.py --calibrate` runs standalone 2-second acoustic scan, locks 60% gain, maps baseline, and saves profile to `mic_config.json`.
+    * **Voice Command**: Fast-path `is_calibration_inquiry` in `handle_user_text()` triggers when user says *"calibrate room"*, *"calibrate mic"*, *"scan room noise"*, or *"map room noise"*, verbally announcing the mapped baseline and new threshold.
+    * **Console Command**: Typing `calibrate` or `cal` in terminal triggers an instant 2-second acoustic mapping.
+    * **Studio UI**: `_calibrate_room` in `tune_mic.py` updated with the robust baseline calculation and configuration sync.
+  - **Verification**:
+    * Live acoustic test executed with Syvo Soul 100 speaker 2 feet away from Samsung Galaxy A15 phone mic, successfully transcribing *"Hello, this is a live acoustic test of the microphone."* with 0 false triggers during silence and clean turn termination.
+    * `NORMAL_SYSTEM_PROMPT` word count verified and preserved at exactly 331 words (~440 tokens).
+
+- 2026-10-14 (Part 26): Autonomous Roam Standby Lockout Fix, Camera Inspection Fast-Path, Silence Fumble Headroom, & Groq Whisper Noise Hallucination Suppression:
+  - **Autonomous Roam Standby Lockout Resolution (`listen.py`)**:
+    * Diagnosed root cause of robot staying in standby for 20+ seconds without engaging autonomous roam: when user entered standby after Follow mode, `motor_ctrl.nav_mode` remained in `NavMode.FOLLOW`. In `_standby_sentry_loop()`, active navigation modes reset `standby_entered_at = time.monotonic()` every 100ms, permanently preventing the 10.0s cooldown from ever being reached.
+    * Hardened `mark_standby_entered()`: explicitly calls `motor_ctrl.stop_all()` if `nav_mode != "STANDBY"`, cleanly resetting chassis to STANDBY and locking wheels.
+    * Ensured `standby_kill_event.clear()` is called in `mark_standby_entered()`, preventing residual kill flags from indefinitely stalling the sentry thread.
+    * Removed duplicate `mark_standby_entered()` invocations before `return` statements in `run_conversation_mode()`, allowing the enclosing `finally:` block to execute it once cleanly and eliminating duplicate perimeter scan log outputs.
+  - **Camera Inspection Fast-Path Prioritization (`listen.py`)**:
+    * Diagnosed failure where *"Okay, how about you inspect something with your camera?"* was dismissed with a generic conversational reply: `"about"` was present in `conversational_non_vision`, bypassing vision checks entirely; simultaneously, `cam_inquiry_patterns` regex `r"\b(what|how|why)\b.*\b(camera|...)\b"` matched `"how"` + `"camera"`, falsely classifying the command as an informational inquiry.
+    * Implemented `is_explicit_camera_action`: detects imperative inspection and camera commands (`inspect/check/look with camera`, `use/open/start camera`, `how about you inspect`, `camera function/inspection`, `see the camera picture`).
+    * Differentiated informational questions (`"what is the camera"`, `"explain your camera"`, `"how does the camera work"`) using prefix detection, while allowing explicit action commands to immediately bypass conversational guards and execute `handle_vision_request()`.
+  - **Natural Speech Hesitation & Fumble Window (`mic_config.json`, `tune_mic.py`, `listen.py`)**:
+    * Increased silence cutoff `END_SILENCE_SECONDS` from 450ms (0.45s) to 850ms (0.85s) across `mic_config.json`, `tune_mic.py` (`DEFAULT_CONFIG`), and `listen.py`.
+    * Gives humans natural conversational headroom to hesitate, pause mid-sentence, or fumble without premature audio truncation.
+  - **Distant Hindi Chatter & Whisper Hallucination Suppression (`listen.py`)**:
+    * Diagnosed root cause of false transcriptions (*"Good morning."*, *"Good luck."*) during dead silence in a noisy room: `listen_for_speech_segment()` continued recording if `chunk_rms >= CURRENT_AMBIENT_RMS * 1.10`, capturing diffuse distant background chatter and forcing Whisper to hallucinate English phrases.
+    * Required continuing speech frames to strictly satisfy `chunk_rms >= continue_threshold`.
+    * Upgraded post-capture energy validation to reject audio buffers with `audio_rms(audio) < continue_threshold`.
+    * Upgraded Groq Whisper API requests to `response_format="verbose_json"`, inspecting segment telemetry: rejects hallucinations where `no_speech_prob > 0.40` or `avg_logprob < -0.85`.
+    * Added polite standalone noise hallucinations (`"good morning"`, `"good luck"`, `"good day"`, `"have a good day"`, `"have a nice day"`, `"im sorry"`, `"im going to go"`) to rejection filters, dropping them if `audio_rms(audio) < CURRENT_SPEECH_THRESHOLD * 0.95` or `avg_logprob < -0.55`.
+  - **Follow Mode Inactivity & Stop Slip-Through Protection**:
+    * Confirmed Follow Mode inactivity timer immunity keeps the listening loop active without premature standby timeouts, requiring explicit stop commands (`"stop"`, `"halt"`, `"freeze"`, `"cancel"`) or explicit standby commands to exit.
+  - **Prompt & Hardware Integrity**:
+    * Maintained `NORMAL_SYSTEM_PROMPT` word count strictly at 331 words (~440 tokens).
+    * `arduino.ino` completely untouched and preserved.
+
 ## Reliability Notes
 
 - **Exhibition Screen Isolation**: On the Raspberry Pi 7-inch display, ONLY the Face UI (`screen.py`) is rendered. Camera feeds, vision debug windows, and terminal consoles run silently in the background with zero popups or desktop artifacts visible to guests.

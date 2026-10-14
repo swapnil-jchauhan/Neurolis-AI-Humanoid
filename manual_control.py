@@ -85,8 +85,9 @@ class ArduinoBridge:
                     dev_low = dev.lower()
                     desc = p.description or dev
                     desc_low = desc.lower()
-                    # Exclude internal serial consoles and bluetooth
-                    if any(ex in dev_low or ex in desc_low for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                    hwid = (p.hwid or "").lower()
+                    # Exclude internal serial consoles, bluetooth, and connected phones/modems
+                    if any(ex in dev_low or ex in desc_low or ex in hwid for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth", "samsung", "android", "phone", "modem"]):
                         continue
                     discovered[dev] = desc
             except Exception:
@@ -103,7 +104,13 @@ class ArduinoBridge:
             for pat in linux_patterns:
                 try:
                     for node in sorted(glob.glob(pat)):
+                        node_low = node.lower()
+                        if any(ex in node_low for ex in ["samsung", "android", "phone"]):
+                            continue
                         real_path = os.path.realpath(node)
+                        real_low = real_path.lower()
+                        if any(ex in real_low for ex in ["samsung", "android", "phone"]):
+                            continue
                         if real_path not in discovered:
                             discovered[real_path] = f"USB Serial Device ({os.path.basename(node)})"
                         if node not in discovered and node != real_path:
@@ -134,17 +141,20 @@ class ArduinoBridge:
                 desc = (p.description or "").lower()
                 hwid = (p.hwid or "").lower()
 
-                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                # Strictly exclude internal serial consoles, bluetooth, and connected phones/modems
+                if any(ex in dev or ex in desc or ex in hwid for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth", "samsung", "android", "phone", "modem"]):
                     continue
 
                 # VID:PID matches:
                 # 2341:0010, 2341:0042 (Arduino Mega 2560)
-                # 1a86:7523 (CH340/CH341 USB chip)
+                # 2a03:0042 (Arduino Mega clone/org)
+                # 1a86:7523, 1a86:5523 (CH340/CH341 USB chip)
                 # 10c4:ea60 (Silicon Labs CP210x)
                 # 0403:6001 (FTDI FT232R)
-                is_known_vid = any(vid in hwid for vid in ["2341:", "1a86:", "10c4:", "0403:"])
-                is_known_name = any(k in desc or k in hwid or k in dev for k in [
-                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "cdc", "acm"
+                # 067b:2303 (Prolific PL2303)
+                is_known_vid = any(vid in hwid for vid in ["2341:", "2a03:", "1a86:", "10c4:", "0403:", "067b:"])
+                is_known_name = any(k in desc or k in hwid for k in [
+                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "qinheng"
                 ])
 
                 if is_known_vid or is_known_name:
@@ -157,8 +167,14 @@ class ArduinoBridge:
             for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"]:
                 try:
                     matches = sorted(glob.glob(pat))
-                    if matches:
-                        return matches[0]
+                    for m in matches:
+                        m_low = m.lower()
+                        if any(ex in m_low for ex in ["samsung", "android", "phone"]):
+                            continue
+                        real = os.path.realpath(m).lower()
+                        if any(ex in real for ex in ["samsung", "android", "phone"]):
+                            continue
+                        return m
                 except Exception:
                     pass
 
@@ -423,10 +439,10 @@ class ArduinoBridge:
                                 self.dist_rear = float(parts[4])
                                 if len(parts) > 5:
                                     try:
-                                        cnt = int(parts[5])
+                                        cnt = int(float(parts[5]))
                                         self.active_sensor_count = cnt if cnt > 0 else 12
                                         if len(parts) > 6:
-                                            self.sensors_all = [float(p) for p in parts[6:]]
+                                            self.sensors_all = [float(p) for p in parts[6:] if p.strip()]
                                     except Exception:
                                         pass
                         self.add_log(f"RX: {line}")
@@ -1128,14 +1144,24 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       const res = await fetch('/api/ports');
       const data = await res.json();
       const sel = document.getElementById('portSelect');
+      const prevVal = sel.value;
       sel.innerHTML = '';
-      (data.ports || []).forEach(p => {
+      if (!data.ports || data.ports.length === 0) {
+        sel.innerHTML = '<option value="">No COM ports detected</option>';
+        return;
+      }
+      data.ports.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.device;
         opt.innerText = `${p.device} (${p.description})`;
         sel.appendChild(opt);
       });
-    } catch (e) {}
+      if (prevVal && [...sel.options].some(o => o.value === prevVal)) {
+        sel.value = prevVal;
+      }
+    } catch (e) {
+      console.error('loadPorts error:', e);
+    }
   }
 
   function handleConnect() {
@@ -1183,7 +1209,11 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
       }
 
       // Speeds
-      document.getElementById('speedSteerBadge').innerText = `SPD: ${data.speed:+4d} | STR: ${data.steer:+4d}`;
+      const sNum = parseInt(data.speed) || 0;
+      const tNum = parseInt(data.steer) || 0;
+      const sStr = (sNum >= 0 ? '+' : '') + sNum;
+      const tStr = (tNum >= 0 ? '+' : '') + tNum;
+      document.getElementById('speedSteerBadge').innerText = `SPD: ${sStr} | STR: ${tStr}`;
 
       // Ultrasonic Radar Minimums
       updateTag('tagFront', 'FRONT', data.dist_front);

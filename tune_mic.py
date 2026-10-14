@@ -29,23 +29,23 @@ from tkinter import ttk, messagebox
 CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
 
 DEFAULT_CONFIG = {
-    "hardware_gain_pct": 61,
-    "vad_mode": 3,
-    "min_speech_rms": 820.0,
-    "speech_multiplier": 2.65,
-    "continue_ratio": 0.50,
+    "hardware_gain_pct": 60,
+    "vad_mode": 2,
+    "min_speech_rms": 400.0,
+    "speech_multiplier": 1.50,
+    "continue_ratio": 0.70,
     "start_frames": 3,
-    "end_silence_sec": 0.45,
+    "end_silence_sec": 0.85,
     "pre_emphasis": 0.0,
     "low_cutoff_hz": 40.0,
     "high_cutoff_hz": 5800.0,
     "treble_boost": 1.65,
-    "bg_suppress_db": 28.0,
+    "bg_suppress_db": 24.0,
     "agc_target_peak": 22000.0,
     "agc_max_scale": 1.50,
     "fan_rejection_ratio": 0.85,
     "click_rejection_ratio": 0.35,
-    "proximity_crest_min": 2.20
+    "proximity_crest_min": 1.50
 }
 
 def load_saved_config() -> dict:
@@ -902,21 +902,34 @@ class MicTunerApp:
         self.root.after(30, self._schedule_gui_update)
 
     def _calibrate_room(self):
-        """Measures room audio for 1 second in a worker thread and updates baseline."""
+        """Measures room audio for 1.5 seconds in a worker thread and updates baseline."""
         self.btn_calibrate.config(text="Measuring...", state="disabled")
 
         def _cal_worker():
             chunks = []
+            time.sleep(0.15)  # Discard startup transients
             start = time.monotonic()
-            while time.monotonic() - start < 1.0:
+            while time.monotonic() - start < 1.5:
                 with self.data_lock:
                     chunks.append(self.filtered_rms)
-                time.sleep(0.04)
+                time.sleep(0.03)
             if chunks:
-                amb_rms = float(np.median(chunks))
+                amb_median = float(np.median(chunks))
+                amb_p75 = float(np.percentile(chunks, 75))
+                amb_baseline = max(10.0, min(amb_median * 1.25, amb_p75))
                 with self.data_lock:
-                    self.calibrated_ambient = max(10.0, amb_rms)
-            self.root.after(0, lambda: self.btn_calibrate.config(text="🎯 Calibrate Room (1s)", state="normal"))
+                    self.calibrated_ambient = amb_baseline
+                    mult = float(self.cfg.get("speech_multiplier", 1.50))
+                    min_floor = float(self.cfg.get("min_speech_rms", 400.0))
+                    new_thresh = max(amb_baseline * mult, min_floor)
+                    self.calibrated_threshold = new_thresh
+                    self.continue_threshold_val = max(new_thresh * float(self.cfg.get("continue_ratio", 0.70)), amb_baseline * 1.15)
+                self.root.after(0, lambda: self.min_rms_var.set(round(new_thresh, 1)))
+                self.cfg["ambient_p90_rms"] = round(amb_baseline, 1)
+                self.cfg["calibrated_start_rms"] = round(new_thresh, 1)
+                self.cfg["calibrated_continue_rms"] = round(self.continue_threshold_val, 1)
+                save_config(self.cfg)
+            self.root.after(0, lambda: self.btn_calibrate.config(text="🎯 Calibrate Room (1.5s)", state="normal"))
 
         threading.Thread(target=_cal_worker, daemon=True).start()
 

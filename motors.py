@@ -262,13 +262,13 @@ class MotorController:
                 desc = (p.description or "").lower()
                 hwid = (p.hwid or "").lower()
 
-                # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
-                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
+                # Exclude internal Linux UARTs, printk consoles, bluetooth ttys, and connected phones/modems
+                if any(ex in dev or ex in desc or ex in hwid for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth", "samsung", "android", "phone", "modem"]):
                     continue
 
-                is_known_vid = any(vid in hwid for vid in ["2341:", "1a86:", "10c4:", "0403:"])
-                is_usb_desc = any(k in desc or k in hwid or k in dev for k in [
-                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "cdc", "acm"
+                is_known_vid = any(vid in hwid for vid in ["2341:", "2a03:", "1a86:", "10c4:", "0403:", "067b:"])
+                is_usb_desc = any(k in desc or k in hwid for k in [
+                    "arduino", "mega", "2560", "ch340", "cp210", "ftdi", "usb serial", "usb-serial", "qinheng"
                 ])
 
                 if is_known_vid or is_usb_desc:
@@ -281,8 +281,14 @@ class MotorController:
             for pat in ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*", "/dev/serial/by-path/*"]:
                 try:
                     matches = sorted(glob.glob(pat))
-                    if matches:
-                        return matches[0]
+                    for m in matches:
+                        m_low = m.lower()
+                        if any(ex in m_low for ex in ["samsung", "android", "phone"]):
+                            continue
+                        real = os.path.realpath(m).lower()
+                        if any(ex in real for ex in ["samsung", "android", "phone"]):
+                            continue
+                        return m
                 except Exception:
                     pass
 
@@ -1079,7 +1085,9 @@ class MotorController:
                             s_all = None
                             if len(parts) > 5:
                                 try:
-                                    cnt_val = int(parts[5])
+                                    cnt_val = int(float(parts[5]))
+                                    if cnt_val <= 0:
+                                        cnt_val = 12
                                     if len(parts) > 6:
                                         s_all = [float(p) for p in parts[6:] if p != ""]
                                 except (ValueError, IndexError):

@@ -120,10 +120,16 @@ def reset_standby_cooldown():
             pass
 
 def mark_standby_entered():
-    """Explicitly marks entering standby state, scans all 360 degrees (12 ultrasonic sensors), and initiates the 10.0s cooldown."""
+    """Explicitly marks entering standby state, resets leftover navigation modes to STANDBY, scans 360° sensors, and initiates 10.0s cooldown."""
     global standby_entered_at
     standby_entered_at = time.monotonic()
+    standby_kill_event.clear()
     if motor_ctrl is not None:
+        try:
+            if getattr(motor_ctrl, "nav_mode", "STANDBY") != "STANDBY":
+                motor_ctrl.stop_all()
+        except Exception:
+            pass
         try:
             sectors = motor_ctrl.get_radial_sectors()
             print(f"[Standby Sentry] 360° perimeter scan: F={sectors['front_min']:.1f}cm, L={sectors['lateral_left']:.1f}cm, R={sectors['lateral_right']:.1f}cm, B={sectors['rear_min']:.1f}cm")
@@ -371,17 +377,20 @@ HW_SAMPLE_RATE = probe_hardware_sample_rate()
 HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
 START_SPEECH_FRAMES = 3            # 90ms to trip speech start (calibrated: 3 consecutive 30ms frames)
-END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff - snappy and responsive without cutting off speech
+END_SILENCE_SECONDS = 0.85         # 850ms silence cutoff - allows natural pauses and fumbling without premature cutoff
 CONVERSATION_TIMEOUT_SECONDS = 35  # 35s follow-up window (comfortable time to converse without premature standby)
 MAX_RECORD_SECONDS = 25
 MIN_RECORD_SECONDS = 0.50          # Requires at least 500ms audio to avoid phantom acoustic pops
 POST_REPLY_COOLDOWN_SECONDS = 0.04
-AMBIENT_CALIBRATION_SECONDS = 0.35
+AMBIENT_CALIBRATION_SECONDS = 1.5
 MAX_CALIBRATION_AMBIENT_RMS = 1200  # High ceiling so loud room noise/murmur is accurately measured
-SPEECH_THRESHOLD_MULTIPLIER = 2.65
-CONTINUE_SPEECH_THRESHOLD_RATIO = 0.50
-MIN_SPEECH_RMS_THRESHOLD = 820.0     # Baseline RMS threshold (calibrated for Samsung Galaxy A15 5G via AudioSource)
-VAD_AGGRESSIVENESS = 3             # Strict WebRTC VAD to aggressively filter background noise
+SPEECH_THRESHOLD_MULTIPLIER = 1.50
+CONTINUE_SPEECH_THRESHOLD_RATIO = 0.70
+MIN_SPEECH_RMS_THRESHOLD = 400.0     # Baseline RMS threshold (calibrated for Samsung Galaxy A15 5G via AudioSource)
+VAD_AGGRESSIVENESS = 2             # WebRTC VAD mode 2: balanced noise rejection & speech continuity
+CURRENT_AMBIENT_RMS = 250.0
+CURRENT_SPEECH_THRESHOLD = 400.0
+CURRENT_CONTINUE_THRESHOLD = 300.0
 
 def set_hardware_gain(gain_pct: int):
     """Sets system capture gain via wpctl / pactl on default audio source (and ALSA fallback)."""
@@ -417,7 +426,7 @@ MIC_CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
 LOW_CUTOFF_HZ = 40.0
 HIGH_CUTOFF_HZ = 5800.0
 TREBLE_BOOST = 1.65
-BG_SUPPRESS_DB = 28.0
+BG_SUPPRESS_DB = 24.0
 AGC_MAX_SCALE = 1.50
 
 if MIC_CONFIG_FILE.exists():
@@ -436,6 +445,9 @@ if MIC_CONFIG_FILE.exists():
             TREBLE_BOOST = float(_mic_cfg.get("treble_boost", TREBLE_BOOST))
             BG_SUPPRESS_DB = float(_mic_cfg.get("bg_suppress_db", BG_SUPPRESS_DB))
             AGC_MAX_SCALE = float(_mic_cfg.get("agc_max_scale", AGC_MAX_SCALE))
+            CURRENT_AMBIENT_RMS = float(_mic_cfg.get("ambient_p90_rms", CURRENT_AMBIENT_RMS))
+            CURRENT_SPEECH_THRESHOLD = float(_mic_cfg.get("calibrated_start_rms", CURRENT_SPEECH_THRESHOLD))
+            CURRENT_CONTINUE_THRESHOLD = float(_mic_cfg.get("calibrated_continue_rms", CURRENT_CONTINUE_THRESHOLD))
             _hw_gain = _mic_cfg.get("hardware_gain_pct")
             if _hw_gain is not None:
                 set_hardware_gain(int(_hw_gain))
@@ -880,11 +892,28 @@ def callback(indata, frames, time_info, status):
         resampled = np.interp(target_x, orig_x, raw).astype(np.int16)
         audio_queue.put(resampled)
 
-# listens to the room for 0.35 seconds to measure background ambient noise
-def calibrate_speech_threshold():
+# listens to the room to measure background ambient noise and map room acoustics
+def calibrate_speech_threshold(duration_sec: float = None) -> float:
+    global CURRENT_AMBIENT_RMS, CURRENT_SPEECH_THRESHOLD, CURRENT_CONTINUE_THRESHOLD
+    if duration_sec is None:
+        duration_sec = AMBIENT_CALIBRATION_SECONDS
+
+    # Ensure hardware capture gain is active
+    try:
+        if MIC_CONFIG_FILE.exists():
+            with open(MIC_CONFIG_FILE, "r") as _f:
+                _cfg = json.load(_f)
+                set_hardware_gain(int(_cfg.get("hardware_gain_pct", 60)))
+        else:
+            set_hardware_gain(60)
+    except Exception:
+        set_hardware_gain(60)
+
+    amb_baseline = 250.0
     if sys.platform.startswith("linux") and shutil.which("pw-record"):
         try:
-            num_bytes = int(AMBIENT_CALIBRATION_SECONDS * TARGET_SAMPLE_RATE) * 2
+            total_samples = int((duration_sec + 0.15) * TARGET_SAMPLE_RATE)
+            num_bytes = total_samples * 2
             cmd = ["pw-record", "--rate", str(TARGET_SAMPLE_RATE), "--channels", str(CHANNELS), "--format", "s16", "-"]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             try:
@@ -895,21 +924,76 @@ def calibrate_speech_threshold():
                     proc.wait(timeout=0.3)
                 except Exception:
                     pass
-            samples = np.frombuffer(raw_bytes, dtype=np.int16)
-            ambient_rms = min(audio_rms(samples), MAX_CALIBRATION_AMBIENT_RMS)
-            return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
+            # Discard initial 150ms startup pop
+            discard_samples = int(TARGET_SAMPLE_RATE * 0.15)
+            all_samples = np.frombuffer(raw_bytes, dtype=np.int16)
+            samples = all_samples[discard_samples:] if len(all_samples) > discard_samples else all_samples
+            frame_len = int(TARGET_SAMPLE_RATE * FRAME_SECONDS)
+            if len(samples) >= frame_len:
+                num_frames = len(samples) // frame_len
+                frame_rmses = [
+                    audio_rms(samples[i * frame_len : (i + 1) * frame_len])
+                    for i in range(num_frames)
+                ]
+                amb_median = float(np.median(frame_rmses))
+                amb_p75 = float(np.percentile(frame_rmses, 75))
+                amb_baseline = min(amb_median * 1.25, amb_p75)
+            else:
+                amb_baseline = float(audio_rms(samples))
         except Exception:
-            pass
-    with suppress_c_stderr():
-        audio = sd.rec(
-            int(AMBIENT_CALIBRATION_SECONDS * HW_SAMPLE_RATE),
-            samplerate=HW_SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype="int16",
-        )
-        sd.wait()
-    ambient_rms = min(audio_rms(audio.reshape(-1)), MAX_CALIBRATION_AMBIENT_RMS)
-    return max(ambient_rms * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
+            amb_baseline = 250.0
+    else:
+        try:
+            with suppress_c_stderr():
+                audio = sd.rec(
+                    int((duration_sec + 0.15) * HW_SAMPLE_RATE),
+                    samplerate=HW_SAMPLE_RATE,
+                    channels=CHANNELS,
+                    dtype="int16",
+                )
+                sd.wait()
+            raw = audio.reshape(-1)
+            discard_samples = int(HW_SAMPLE_RATE * 0.15)
+            samples = raw[discard_samples:] if len(raw) > discard_samples else raw
+            frame_len = int(HW_SAMPLE_RATE * FRAME_SECONDS)
+            if len(samples) >= frame_len:
+                num_frames = len(samples) // frame_len
+                frame_rmses = [
+                    audio_rms(samples[i * frame_len : (i + 1) * frame_len])
+                    for i in range(num_frames)
+                ]
+                amb_median = float(np.median(frame_rmses))
+                amb_p75 = float(np.percentile(frame_rmses, 75))
+                amb_baseline = min(amb_median * 1.25, amb_p75)
+            else:
+                amb_baseline = float(audio_rms(samples))
+        except Exception:
+            amb_baseline = 250.0
+
+    amb_baseline = min(max(amb_baseline, 10.0), MAX_CALIBRATION_AMBIENT_RMS)
+    start_thresh = max(amb_baseline * SPEECH_THRESHOLD_MULTIPLIER, MIN_SPEECH_RMS_THRESHOLD)
+    continue_thresh = max(start_thresh * CONTINUE_SPEECH_THRESHOLD_RATIO, amb_baseline * 1.15)
+
+    CURRENT_AMBIENT_RMS = amb_baseline
+    CURRENT_SPEECH_THRESHOLD = start_thresh
+    CURRENT_CONTINUE_THRESHOLD = continue_thresh
+
+    try:
+        if MIC_CONFIG_FILE.exists():
+            with open(MIC_CONFIG_FILE, "r") as _f:
+                cfg_data = json.load(_f)
+        else:
+            cfg_data = {}
+        cfg_data["ambient_p90_rms"] = round(amb_baseline, 1)
+        cfg_data["calibrated_start_rms"] = round(start_thresh, 1)
+        cfg_data["calibrated_continue_rms"] = round(continue_thresh, 1)
+        with open(MIC_CONFIG_FILE, "w") as _f:
+            json.dump(cfg_data, _f, indent=2)
+    except Exception:
+        pass
+
+    print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
+    return start_thresh
 
 # records microphone audio until the user stops speaking using vad and silence timers
 def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None):
@@ -927,7 +1011,8 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
     start_threshold = max(speech_threshold, MIN_SPEECH_RMS_THRESHOLD)
     continue_threshold = max(
         start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-        MIN_SPEECH_RMS_THRESHOLD * 0.85,
+        CURRENT_AMBIENT_RMS * 1.15,
+        MIN_SPEECH_RMS_THRESHOLD * 0.70,
     )
 
     def _recording_loop():
@@ -979,7 +1064,9 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
                     start_threshold = (start_threshold * 0.95) + (ambient_threshold * 0.05)
                     continue_threshold = max(
                         start_threshold * CONTINUE_SPEECH_THRESHOLD_RATIO,
-                        MIN_SPEECH_RMS_THRESHOLD * 0.85,
+                        chunk_rms * 1.15,
+                        CURRENT_AMBIENT_RMS * 1.15,
+                        MIN_SPEECH_RMS_THRESHOLD * 0.70,
                     )
 
                 preroll.append(chunk)
@@ -1018,6 +1105,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
         return True
 
     if active_stream is not None:
+        clear_audio_queue()
         completed = _recording_loop()
         if not completed:
             return None
@@ -1042,7 +1130,7 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
         return None
 
     # Energy check: reject faint background mumbling that slipped through
-    if audio_rms(audio) < (start_threshold * 0.85):
+    if audio_rms(audio) < continue_threshold:
         return None
 
     return audio
@@ -1721,14 +1809,36 @@ def transcribe_audio(audio: np.ndarray):
             language="en",
             prompt="Neurolis, humanoid robot, Auckland House School for Boys, Swapnil, Shivam, exhibition, sensors, follow, approach, spin, camera, expressions, standby.",
             temperature=0,
-            response_format="json",
+            response_format="verbose_json",
         )
 
         raw_text = getattr(transcription, "text", "").strip()
         # Remove bracketed noise annotations like [music], (laughter), [applause]
         text = re.sub(r"\[.*?\]|\(.*?\)", "", raw_text).strip()
         cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-        
+
+        # Reject noisy or low-confidence hallucinations via Whisper segment telemetry
+        segments = getattr(transcription, "segments", []) or []
+        avg_logprobs = []
+        no_speech_probs = []
+        if segments:
+            for s in segments:
+                nsp = s.get("no_speech_prob", 0.0) if isinstance(s, dict) else getattr(s, "no_speech_prob", 0.0)
+                alp = s.get("avg_logprob", 0.0) if isinstance(s, dict) else getattr(s, "avg_logprob", 0.0)
+                try:
+                    no_speech_probs.append(float(nsp or 0.0))
+                except Exception:
+                    pass
+                try:
+                    avg_logprobs.append(float(alp or 0.0))
+                except Exception:
+                    pass
+
+            if any(nsp > 0.40 for nsp in no_speech_probs):
+                return None
+            if avg_logprobs and (sum(avg_logprobs) / len(avg_logprobs)) < -0.85:
+                return None
+
         # Whisper hallucinations on silence / fan noise / distant background chatter / breathing / acoustic fillers
         hallucinations = {
             "im going to go to the next video",
@@ -1774,6 +1884,20 @@ def transcribe_audio(audio: np.ndarray):
         }
         if not cleaned or cleaned in hallucinations:
             return None
+
+        # Polite noise hallucinations: common phrases Whisper outputs on ambient chatter / foreign murmur
+        polite_noise_hallucinations = {
+            "good morning", "good luck", "good day", "have a good day", "have a nice day",
+            "good afternoon", "good evening", "good night", "im sorry", "i am sorry", "sorry",
+            "im going to go", "i'm going to go", "i am going to go", "thank you so much",
+            "thank you very much", "see you next time", "see you soon", "bye bye",
+        }
+        if cleaned in polite_noise_hallucinations:
+            # If user spoke with low energy or low confidence, it's distant room chatter
+            is_low_energy = audio_rms(audio) < (CURRENT_SPEECH_THRESHOLD * 0.95)
+            is_low_conf = avg_logprobs and (sum(avg_logprobs) / len(avg_logprobs)) < -0.55
+            if is_low_energy or is_low_conf:
+                return None
 
         # Ignore single characters and non-word fillers (only accept legitimate 2-letter English words)
         ALLOWED_2CHAR_WORDS = {"no", "hi", "go", "ok", "up", "me", "we", "he", "in", "on", "at", "to", "do", "is", "am", "my"}
@@ -2245,7 +2369,19 @@ def is_mean_input(text: str) -> bool:
         return True
     return groq_mean_check(text)
 
-# (Apology and compliment checks are imported from intent_rules.py)
+def is_calibration_inquiry(text: str) -> bool:
+    """Detects commands to calibrate or map room background noise."""
+    lower = text.lower().strip()
+    patterns = [
+        r"\bcalibrate\b",
+        r"\bcalibration\b",
+        r"\bscan\s+room\b",
+        r"\bmap\s+room\b",
+        r"\broom\s+noise\b",
+        r"\bbackground\s+noise\b",
+        r"\brecalibrate\b",
+    ]
+    return any(re.search(p, lower) for p in patterns)
 
 # master decision router: checks fast paths locally, then executes single unified ai pipeline
 def handle_user_text(text: str) -> bool:
@@ -2258,6 +2394,21 @@ def handle_user_text(text: str) -> bool:
         remember_exchange(text, reply)
         print("Neurolis:", reply)
         speak(reply)
+        return False
+
+    # 0b. Check for Room Noise Calibration command -> 0ms, 0 tokens (Fast-Path)
+    if is_calibration_inquiry(text):
+        announcement = "Scanning room noise. Please remain quiet for two seconds."
+        print(f"\nNeurolis: {announcement}")
+        speak(announcement, custom_state="thinking", custom_status="CALIBRATING ROOM...")
+        set_face_state("thinking", "CALIBRATING ROOM...")
+        time.sleep(0.3)
+        new_thresh = calibrate_speech_threshold(duration_sec=2.0)
+        confirm_reply = f"Room noise calibrated. Ambient baseline mapped to {int(CURRENT_AMBIENT_RMS)} RMS, speech threshold set to {int(new_thresh)} RMS."
+        remember_exchange(text, confirm_reply)
+        print(f"Neurolis: {confirm_reply}")
+        speak(confirm_reply, custom_state="happy", custom_status="CALIBRATED")
+        set_face_state("happy", "CALIBRATED")
         return False
 
     # 1. Check for conversation enders (e.g. "alr thanks", "good", "bye", "nice", "cool") -> 0ms, 0 tokens
@@ -2406,6 +2557,23 @@ def handle_user_text(text: str) -> bool:
         return False
 
     # 5. Fast-Path: Visual perception, camera inspection, follow-up re-checks -> 0ms, 0 tokens
+    # Informational camera question detection (e.g. "What is the camera inspection?", "Explain the camera")
+    is_informational_camera_inquiry = bool(re.search(
+        r"^(what\s+is|what\s*\'?s|what\s+does|how\s+does|why\s+do|why\s+does|explain|describe|tell\s+me\s+about)\b",
+        cleaned_lower
+    ))
+
+    # Explicit camera action triggers (e.g. "Okay, how about you inspect something with your camera?")
+    explicit_camera_action_patterns = [
+        r"\b(inspect|examine|scan|check|look at|view|capture|take)\b.*\b(camera|picture|photo|snapshot|image|lens|frame)\b",
+        r"\b(use|open|start|activate|turn on|switch to)\b.*\b(camera|vision)\b",
+        r"\b(inspect|examine)\s+(?:something|this|around|me|room|here)\b",
+        r"\bhow about\b.*\b(inspect|camera|see|look)\b",
+        r"\bcamera\s+(function|feature|inspection|demo|view)\b",
+        r"\bsee\s+the\s+camera\b",
+    ]
+    is_explicit_camera_action = (not is_informational_camera_inquiry) and any(re.search(p, cleaned_lower) for p in explicit_camera_action_patterns)
+
     # Rhetorical / conversational guard: questions with slang, doubt, or abstract words are NEVER camera requests
     conversational_non_vision = {
         "bro", "dude", "mean", "meaning", "nonsense", "about", "even", "saying",
@@ -2418,7 +2586,7 @@ def handle_user_text(text: str) -> bool:
         "see this is", "see that is", "see why", "see how", "see if",
         "see what i mean", "see the problem", "see here", "you see", "as you see"
     ])
-    if not cleaned_words.intersection(conversational_non_vision) and not is_see_discourse:
+    if is_explicit_camera_action or (not cleaned_words.intersection(conversational_non_vision) and not is_see_discourse):
         visual_fast_patterns = [
             # Self & camera perception
             "show me myself", "show myself", "show me me", "show my face",
@@ -2460,30 +2628,37 @@ def handle_user_text(text: str) -> bool:
         ]
         has_cam_inquiry = any(re.search(p, cleaned_lower) for p in cam_inquiry_patterns)
         is_informational_camera = (
-            has_cam_inquiry
-            or any(cleaned_lower.startswith(p) for p in [
-                "what is the camera", "what is a camera", "what is camera",
-                "explain the camera", "tell me about the camera", "how does your camera"
-            ])
-            or any(p in cleaned_lower for p in ["meaning of camera", "purpose of the camera", "camera inspection mean"])
+            not is_explicit_camera_action
+            and (
+                is_informational_camera_inquiry
+                or has_cam_inquiry
+                or any(cleaned_lower.startswith(p) for p in [
+                    "what is the camera", "what is a camera", "what is camera",
+                    "explain the camera", "tell me about the camera", "how does your camera"
+                ])
+                or any(p in cleaned_lower for p in ["meaning of camera", "purpose of the camera", "camera inspection mean"])
+            )
         )
         is_bare_camera_or_see = cleaned_lower in ["camera", "the camera", "see", "the see"]
 
         is_visual = (
-            (
-                cleaned_lower in direct_standalone_objects
-                or any(p in cleaned_lower for p in visual_fast_patterns)
-                or ("myself" in cleaned_words)
-                or ("look like" in cleaned_lower)
-                or ("in my hand" in cleaned_lower)
-                or ("check again" in cleaned_lower)
-                or ("what phone" in cleaned_lower)
-                or ("which phone" in cleaned_lower)
-                or ("what device" in cleaned_lower)
-                or (look_prefix and not is_expression_cmd)
+            is_explicit_camera_action
+            or (
+                (
+                    cleaned_lower in direct_standalone_objects
+                    or any(p in cleaned_lower for p in visual_fast_patterns)
+                    or ("myself" in cleaned_words)
+                    or ("look like" in cleaned_lower)
+                    or ("in my hand" in cleaned_lower)
+                    or ("check again" in cleaned_lower)
+                    or ("what phone" in cleaned_lower)
+                    or ("which phone" in cleaned_lower)
+                    or ("what device" in cleaned_lower)
+                    or (look_prefix and not is_expression_cmd)
+                )
+                and not is_informational_camera
+                and not is_bare_camera_or_see
             )
-            and not is_informational_camera
-            and not is_bare_camera_or_see
         )
         if is_visual:
             motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility", "follow", "forward", "backward"}
@@ -2949,7 +3124,6 @@ def run_conversation_mode(speech_threshold: float):
                         speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
                         set_face_state("idle", "STANDBY")
                         reset_session()
-                        mark_standby_entered()
                         return
 
                     audio = listen_for_speech_segment(speech_threshold, remaining, active_stream=warm_stream)
@@ -2967,7 +3141,6 @@ def run_conversation_mode(speech_threshold: float):
                         speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
                         set_face_state("idle", "STANDBY")
                         reset_session()
-                        mark_standby_entered()
                         return
 
                     text = transcribe_audio(audio)
@@ -2984,7 +3157,6 @@ def run_conversation_mode(speech_threshold: float):
                     if should_end or standby_kill_event.is_set():
                         reset_session()
                         set_face_state("idle", "STANDBY")
-                        mark_standby_entered()
                         return
 
                     for _ in range(int(POST_REPLY_COOLDOWN_SECONDS / 0.1)):
@@ -3014,6 +3186,23 @@ def check_audio_devices():
             return True
         except Exception:
             return False
+
+# Check for manual calibration command line flags
+CALIBRATE_ONLY = any(arg.lower() in ("--calibrate", "-c", "calibrate") for arg in sys.argv[1:])
+if CALIBRATE_ONLY:
+    print("\n=================================================================")
+    print("      PROJECT NEUROLIS - ROOM NOISE ACOUSTIC CALIBRATION")
+    print("=================================================================")
+    print("[*] Locking hardware capture gain to 60%...")
+    set_hardware_gain(60)
+    print("[*] Scanning ambient room acoustics (2.0s measurement window)...")
+    thresh = calibrate_speech_threshold(duration_sec=2.0)
+    print(f"\n[+] Room Baseline Mapped: {CURRENT_AMBIENT_RMS:.1f} RMS")
+    print(f"[+] Speech Start Threshold: {thresh:.1f} RMS")
+    print(f"[+] Continue Threshold: {CURRENT_CONTINUE_THRESHOLD:.1f} RMS")
+    print(f"[+] Saved to {MIC_CONFIG_FILE}")
+    print("=================================================================\n")
+    sys.exit(0)
 
 # Check for manual text mode command line flags
 FORCE_TEXT_MODE = any(arg.lower() in ("--text", "-t", "--text-only", "text") for arg in sys.argv[1:])
@@ -3250,6 +3439,12 @@ if __name__ == "__main__":
                 if cmd_lower in ("exit", "quit", "q"):
                     print("\nExiting. See ya!")
                     break
+
+                if cmd_lower in ("calibrate", "cal", "calibrate room", "scan room"):
+                    print("\n[Acoustic Calibration] Scanning room background noise for 2 seconds...")
+                    cached_speech_threshold = calibrate_speech_threshold(duration_sec=2.0)
+                    print(f"[Acoustic Calibration] Complete! Baseline: {CURRENT_AMBIENT_RMS:.1f} RMS | Speech Threshold: {cached_speech_threshold:.1f} RMS\n")
+                    continue
 
                 if cmd_lower in ("v", "voice", "mic"):
                     if check_audio_devices():
