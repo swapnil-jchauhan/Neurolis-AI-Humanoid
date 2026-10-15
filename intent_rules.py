@@ -3,7 +3,7 @@ Project Neurolis - Fast-Path Regex & Intent Classification Engine (intent_rules.
 -----------------------------------------------------------------------------------
 Houses the zero-latency, zero-token fast-path classification rules, regex patterns,
 and verbatim response phrase pools for:
-- Motor commands (emergency stop, roam inquiries, follow, approach, step-back, spin)
+- Mobility inquiries & prototype explanation (remote control, student development)
 - Conversation enders & standby transition intent
 - Casual compliments, acknowledgments, and apologies
 - Creator attributions (identity, roles, location, teasing)
@@ -36,120 +36,138 @@ def get_non_repeating_phrase(phrases_list: List[str]) -> str:
 
 
 # ---------------- VERBATIM RESPONSE POOLS ----------------
-MOBILITY_CAPABILITY_RESPONSES = [
-    "Yes, I can! Would you like me to demonstrate that?",
-    "I can definitely do that on my 4WD chassis. Want to see?",
-    "Yes, I have full rotational and drive mobility. Should I show you?",
-    "Absolutely! I'm equipped with a four-wheel drive skid-steer chassis. Want a demonstration?",
-    "I sure can! My motors are geared and ready for movement. Shall I demonstrate?",
-    "Yes, mobility is one of my main physical features! Would you like to see it in action?",
-    "Definitely! I can turn, reverse, approach, or follow you across the floor. Want to try?",
-    "Of course! My motor drivers and chassis are calibrated for movement. Shall I show you?",
-    "Yes! Four independent motors give me full ground maneuvering. Want me to demonstrate?",
-    "I can indeed! Just say the word and I can demonstrate my movement for you.",
-    "Sure thing! My physical 4WD system can perform maneuvers on command. Want to see?",
-    "Yes, my chassis is fully motorized and ready to move. Would you like a demonstration?",
-    "Definitely can! Which maneuver would you like me to demonstrate?",
-]
-
-ROAM_STANDBY_EXPLANATION_RESPONSES = [
-    "My autonomous roaming engages automatically after ten seconds in standby. Once we finish talking and I power down to rest, I'll begin mapping and navigating the room!",
-    "I cannot start roaming on command. After ten seconds of uninterrupted standby, my autonomous room navigation activates automatically.",
-    "Autonomous roam is an automatic standby behavior. When our conversation ends and I remain undisturbed for ten seconds, I'll begin roaming on my own!",
-    "Roaming mode activates on its own after ten seconds in standby. Once I'm in standby mode, my twelve ultrasonic sensors take over to patrol the area.",
-    "Roam mode is designed purely for standby! If nobody talks to me for ten seconds in standby, I begin autonomous patrol automatically.",
-    "I don't start roaming on verbal request. After ten seconds of quiet standby, my navigation system kicks in and begins exploring independently.",
-    "Autonomous roaming is triggered only by standby inactivity! Give me ten seconds of uninterrupted standby, and I'll start moving around on my own.",
-    "Roaming is completely automatic during standby. Once our conversation wraps up and ten seconds pass in standby, I'll start roaming the floor.",
-    "I can't roam on command—it's an autonomous standby feature. When I enter standby and remain undisturbed for ten seconds, I begin navigating on my own.",
-    "Autonomous roam is an idle routine. Once we enter standby mode and ten seconds elapse without interruption, I will start roaming automatically.",
-    "Roam mode automatically triggers after ten seconds in standby mode. Just let me rest undisturbed in standby, and watch me patrol!",
-    "My autonomous patrol is tied directly to standby. Ten seconds after switching to standby without input, my sensors take over and I roam.",
-    "I cannot roam while actively chatting! Once I transition into standby and ten seconds pass quietly, autonomous roam begins on its own.",
-    "Autonomous roaming activates exclusively after ten seconds in standby. When we're done talking, I'll begin navigating autonomously!",
+MOBILITY_EXPLANATION_RESPONSES = [
+    "I'm an early physical prototype built on a 4WD quad-motor chassis! My movement is operated via teleoperation using a handheld remote control. My student developers, Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys, are actively developing my autonomous navigation. If you'd like to see me roll, feel free to ask our demonstrators nearby to drive me via teleoperation!",
+    "My physical mobility is powered by a 4WD quad-motor chassis operated via teleoperation with a remote control. Student engineers Swapnil and Shivam are still refining my autonomous drive systems. Ask any of our student demonstrators standing around the booth to demonstrate my movement!",
+    "I move across the floor on a 4WD quad-motor base controlled via teleoperation using a handheld remote. My creators, Swapnil and Shivam at Auckland House School, are actively improving my drive systems. Just ask the demonstrators around me if you want to see teleoperation in action!",
+    "For this science exhibition prototype, my 4WD quad-motor chassis moves through teleoperation using a handheld remote. Swapnil Jai Chauhan and Shivam Verma are working on my autonomous upgrades—feel free to ask the demonstrators beside me to drive me around!",
+    "I'm equipped with a 4WD quad-motor chassis operated via teleoperation! While my student builders, Swapnil and Shivam, continue engineering my autonomous systems, our demonstrators around the floor can demonstrate my movement with the remote whenever you ask.",
+    "My movement runs on a 4WD quad-motor drive system controlled via teleoperation with a remote. It's an active prototype built by Swapnil and Shivam at Auckland House School. Ask our demonstrators nearby to see teleoperation live!",
+    "I roll on four DC motors in a 4WD chassis operated via handheld teleoperation! Swapnil Jai Chauhan and Shivam Verma are actively enhancing my autonomous code. Feel free to ask our team demonstrators to show you how teleoperation works!",
+    "Teleoperation is how I navigate right now! A handheld remote controls my 4WD quad-motor chassis while Swapnil and Shivam continue developing my autonomous firmware. Ask any of our demonstrators around the exhibition to drive me!",
+    "I'm an Auckland House School prototype on a 4WD quad-motor base. Movement is handled via teleoperation using a remote control. Swapnil and Shivam are continuously improving my software—ask the demonstrators nearby if you'd like to see me move!",
+    "My 4WD quad-motor platform is operated through teleoperation by our student team using a remote. Swapnil Jai Chauhan and Shivam Verma built it and are constantly working on new updates. You can ask our demonstrators around to demo my driving!",
+    "I have a 4WD quad-motor chassis that moves via teleoperation! My student creators at Auckland House School, Swapnil and Shivam, are developing autonomous navigation next. Ask the demonstrators nearby to drive me with the remote anytime!",
+    "Underneath, I have a 4WD quad-motor chassis operated by teleoperation with a remote control. Swapnil and Shivam are still tuning the systems—ask our demonstrators at the booth to give you a live driving demo!",
+    "My mobility is handled via teleoperation using a handheld remote, powering my 4WD quad-motor chassis. Swapnil Jai Chauhan and Shivam Verma are actively programming my autonomous upgrades. Ask the demonstrators nearby to see me in motion!",
+    "I navigate using teleoperation on a 4WD quad-motor platform! It's a hands-on prototype built by Swapnil and Shivam. If you want to see me roll, just ask the student demonstrators around the booth to drive me!",
+    "Right now, my 4WD quad-motor chassis is driven via teleoperation with a remote control while Swapnil and Shivam at Auckland House School work on autonomous mobility. Ask our demonstrators around the space to demo it for you!",
+    "I roll on a 4WD quad-motor chassis operated via teleoperation! Our student developers, Swapnil and Shivam, are actively upgrading my navigation. Ask the demonstrators standing by to take the controls and show you my movement!",
+    "My movement is powered by a 4WD quad-motor base guided by teleoperation. Swapnil Jai Chauhan and Shivam Verma built the prototype here at Auckland House School. Ask the demonstrators nearby to drive me around!",
+    "I'm mobile thanks to a 4WD quad-motor chassis operated via teleoperation! While Swapnil and Shivam continue developing autonomous driving, our demonstrators can show you how the remote works right now.",
+    "Teleoperation powers my 4WD quad-motor movement for this exhibition! Swapnil and Shivam at Auckland House School are actively improving my robotics stack. Ask the demonstrators near me to see me roll across the floor!",
+    "I'm an early robotics prototype featuring a 4WD quad-motor chassis driven via teleoperation. Swapnil and Shivam are continuously refining my systems. Feel free to ask our student demonstrators to drive me anytime!",
+    "My 4WD quad-motor chassis is steered via teleoperation using a remote controller. Swapnil Jai Chauhan and Shivam Verma built it as our school exhibition showcase. Ask the demonstrators around me to show you teleoperation in action!"
 ]
 
 STANDBY_EXIT_PHRASES = [
-    "Entering standby mode. Press 'Talk to Neurolis' to chat again.",
-    "Going into standby mode. Tap 'Talk to Neurolis' on the screen whenever you're ready.",
-    "Returning to standby. Feel free to press 'Talk to Neurolis' to wake me up.",
-    "Entering standby mode. Press 'Talk to Neurolis' to continue anytime.",
-    "Switching to standby mode. Just tap 'Talk to Neurolis' whenever you need me.",
-    "Powering down to standby. Press 'Talk to Neurolis' on screen to start back up.",
-    "Transitioning to standby. Feel free to tap 'Talk to Neurolis' whenever you want to talk.",
-    "Heading into standby mode. Just hit 'Talk to Neurolis' when you'd like to resume.",
-    "Resting in standby mode now. Press 'Talk to Neurolis' anytime to reactivate me.",
-    "Standing by! Tap the 'Talk to Neurolis' button on my display to wake me.",
-    "Slipping into standby mode. Whenever you're ready, tap 'Talk to Neurolis' on my screen.",
-    "Switching over to standby. Press 'Talk to Neurolis' whenever you want to explore more.",
-    "Entering standby rest. Touch 'Talk to Neurolis' on screen to chat again.",
-    "Holding position in standby mode. Press 'Talk to Neurolis' when you need me next.",
-    "Resting in standby. Whenever you're ready to continue, tap 'Talk to Neurolis'!",
+    "Entering standby mode. Show an open palm to my camera to wake me again.",
+    "Going into standby mode. Hold an open palm before my camera whenever you're ready.",
+    "Returning to standby. Feel free to show an open palm to wake me up.",
+    "Entering standby mode. Hold up an open palm to continue anytime.",
+    "Switching to standby mode. Just show an open palm to my camera whenever you need me.",
+    "Powering down to standby. Show an open palm to start back up.",
+    "Transitioning to standby. Feel free to show an open palm whenever you want to talk.",
+    "Heading into standby mode. Just hold an open palm before my camera to resume.",
+    "Resting in standby mode now. Show an open palm anytime to reactivate me.",
+    "Standing by! Hold up an open palm to my camera to wake me.",
+    "Slipping into standby mode. Whenever you're ready, show an open palm to my camera.",
+    "Switching over to standby. Show an open palm whenever you want to explore more.",
+    "Entering standby rest. Show an open palm to chat again.",
+    "Holding in standby mode. Show an open palm to my camera when you need me next.",
+    "Resting in standby. Whenever you're ready to continue, hold up an open palm!",
+    "Going into standby rest. Hold an open palm to my camera for three seconds to wake me.",
+    "Slipping into low-power standby. An open palm to my camera will wake me right up.",
+    "Taking a brief standby break. Show an open palm whenever you'd like to chat.",
+    "Standing by quietly! Just hold an open palm before my lens to bring me back.",
+    "Entering standby state. Show an open palm to reactivate my speech engine.",
+    "Resting in standby. Hold your palm up to my camera anytime to wake me.",
+    "Switching to standby mode. Feel free to wake me with an open palm whenever you're ready.",
+    "Powering down to standby rest. Hold up an open palm to resume our conversation.",
+    "Standing by for the next visitor! Show an open palm to my camera to wake me up.",
+    "Entering standby. Whenever you want to explore more, just hold up an open palm!"
 ]
 
 CONVERSATION_ENDER_RESPONSES = [
-    "You're welcome! Entering standby mode. Press 'Talk to Neurolis' to continue.",
-    "Glad I could help! Going into standby mode. Tap 'Talk to Neurolis' whenever you're ready.",
-    "Alright, take care! Returning to standby. Press 'Talk to Neurolis' to chat again.",
-    "Awesome! Entering standby mode. Press 'Talk to Neurolis' on the screen to wake me up.",
-    "Happy to help! Switching to standby. Feel free to press 'Talk to Neurolis' anytime.",
-    "Sounds good! Entering standby mode now. Tap 'Talk to Neurolis' to talk again.",
-    "Catch you later! Transitioning to standby. Tap 'Talk to Neurolis' whenever you're back.",
-    "Enjoy the exhibition! Slipping into standby. Hit 'Talk to Neurolis' anytime.",
-    "Glad we chatted! Entering standby mode. Press 'Talk to Neurolis' to reactivate me.",
-    "Take care! Switching over to standby. Press 'Talk to Neurolis' on screen to resume.",
+    "You're welcome! Entering standby mode. Show an open palm to continue.",
+    "Glad I could help! Going into standby mode. Show an open palm whenever you're ready.",
+    "Alright, take care! Returning to standby. Show an open palm to chat again.",
+    "Awesome! Entering standby mode. Show an open palm to wake me up.",
+    "Happy to help! Switching to standby. Feel free to show an open palm anytime.",
+    "Sounds good! Entering standby mode now. Show an open palm to talk again.",
+    "Catch you later! Transitioning to standby. Show an open palm whenever you're back.",
+    "Enjoy the exhibition! Slipping into standby. Show an open palm anytime.",
+    "Glad we chatted! Entering standby mode. Show an open palm to reactivate me.",
+    "Take care! Switching over to standby. Show an open palm on camera to resume.",
     "Great chatting with you! Going into standby. Feel free to wake me up anytime.",
     "Have a fantastic time at the science exhibition! Heading into standby now.",
-    "All set! Resting in standby mode. Press 'Talk to Neurolis' whenever you're ready.",
-    "Glad you stopped by! Switching to standby. Tap 'Talk to Neurolis' to explore more.",
-    "See you around! Powering down into standby mode. Press 'Talk to Neurolis' to wake me.",
+    "All set! Resting in standby mode. Show an open palm whenever you're ready.",
+    "Glad you stopped by! Switching to standby. Show an open palm to explore more.",
+    "See you around! Powering down into standby mode. Show an open palm to wake me.",
+    "Enjoy the rest of the science fair! Slipping into standby mode now.",
+    "It was a pleasure meeting you! Entering standby mode. Show an open palm to chat again.",
+    "Have fun exploring Auckland House School! Entering standby mode now.",
+    "Take care and enjoy all the science projects! Switching to standby rest.",
+    "Glad you came to see Neurolis! Show an open palm to my camera whenever you want to talk.",
+    "Have an awesome day at the exhibition! Entering standby mode.",
+    "Wonderful meeting you! Feel free to hold up an open palm if you want to chat again.",
+    "All done for now! Heading into standby rest. Show an open palm to wake me.",
+    "Take care! Remember, you can wake me anytime with an open palm.",
+    "Enjoy the science exhibition! Slipping into standby rest until next time."
 ]
 
 ACKNOWLEDGMENT_RESPONSES = [
     "What would you like to check out next?",
     "I'm ready whenever you want to try another demo.",
-    "What shall we explore next--following you around, facial expressions, or a quick camera demo?",
+    "What shall we explore next--seeing things with my camera, facial expressions, or a chat about AI?",
     "Ready when you are! What would you like to see?",
-    "Standing by for your command. What would you like me to do next?",
-    "Feel free to ask me to follow you, come over to you, demonstrate my expressions, or inspect an object!",
+    "Standing by! What would you like me to look at or discuss next?",
+    "Feel free to show an item to my camera, ask about my expressions, or chat with me!",
     "I'm all ears! What should we test next?",
     "Ready for the next demonstration whenever you are! What sounds interesting?",
-    "What would you like to see next--mobility maneuvers, camera vision, or face animations?",
-    "Standing by! Would you like me to follow you, inspect something, or show an expression?",
-    "At your service! What should we explore next on the chassis?",
+    "What would you like to see next--camera vision, face animations, or a chat?",
+    "Standing by! Would you like me to look at something with my camera or show an expression?",
+    "At your service! What should we explore next?",
     "Ready for action! Let me know what you'd like to test next.",
-    "What's next on your agenda--movement, vision, or expressions?",
+    "What's next on your agenda--camera vision, expressions, or conversation?",
     "Ready when you are! Just tell me what you'd like to see demonstrated.",
     "Standing by and ready! What would you like to explore next?",
-    "Feel free to ask me to spin, step back, follow you, or inspect something with my camera!",
+    "Feel free to show an object to my camera or ask to see my facial expressions!",
+    "I'm ready! Want to see my facial expressions, look at something with my camera, or discuss robotics?",
+    "What's next? We can test my camera vision, cycle through my expressions, or chat about science!",
+    "Ready for whatever you have in mind--camera vision, expressions, or an AI chat!",
+    "Standing by! You can ask me about my 4WD chassis, test my camera vision, or check out my expressions.",
+    "At your service! What should we check out next?",
+    "I'm all set! Let me know what you'd like to test or discuss next.",
+    "Ready when you are! Would you like me to see an item with my camera or show an animated expression?",
+    "What's on your mind? We can test my camera vision, try screen expressions, or chat about robotics!",
+    "Standing by! Ask me to show an expression, see something with my camera, or talk AI!"
 ]
 
 COMPLIMENT_RESPONSES = [
-    "Right? When we got the ultrasonic sensor array synced up with the chassis, we were just as hyped!",
-    "Glad you think so! Shivam and Swapnil put in countless hours soldering and coding to make it happen.",
-    "Appreciate that! Seeing all twelve sensors map the floor in real-time still blows our minds too.",
-    "Thanks! We spent weeks dialing in the motor response and computer vision algorithms.",
-    "Appreciate the hype! It took a lot of late nights in the robotics lab to get it running this smoothly.",
+    "Thank you! Swapnil Jai Chauhan and Shivam Verma put in countless hours of engineering to make this humanoid prototype come to life.",
+    "Glad you think so! Shivam and Swapnil put in countless hours designing, soldering, and coding.",
+    "Appreciate that! Swapnil and Shivam are still actively developing and improving my systems to make me even more capable.",
+    "Thanks a lot! I am an early prototype operated via a remote control right now, while my student developers continue working on my autonomous systems.",
+    "Appreciate the hype! It took a lot of late nights in the Auckland House robotics lab to get my vision and AI running this smoothly.",
     "Glad you're digging it! The whole Auckland House student team is really proud of how it turned out.",
-    "Thanks a lot! What part would you like to inspect next--the sensors, the vision, or the motors?",
-    "Totally! It's one thing having code on a laptop, but seeing it track and follow people in real-time is another level.",
+    "Thanks a million! We're really proud of how the conversational brain and vision pipeline perform.",
     "Much appreciated! We wanted to build something that feels genuinely alive and responsive.",
-    "Thanks! Every time the obstacle avoidance algorithm kicks in smoothly, it makes the debugging worth it.",
-    "Glad you like the build! Would you like to see me demonstrate my person following or camera tracking next?",
-    "Appreciate the love! We really pushed to make this humanoid chassis as capable as possible.",
+    "Thanks! Seeing visitors enjoy our school robotics project makes all the debugging worth it.",
+    "Glad you like the build! Swapnil and Shivam will continue to improve my autonomous systems as development continues.",
+    "Appreciate the love! We really pushed to make this humanoid talkbot as articulate and intelligent as possible.",
     "Right on! What test or demonstration should we run next?",
     "Thanks, that means a ton! What should we explore next?",
-    "Awesome! Ready for the next inspection whenever you are.",
+    "Awesome! Ready for the next test whenever you are.",
     "Glad you're enjoying the demo! What's next on your mind?",
-    "Thank you! Always happy to show what student robotics can accomplish.",
+    "Thank you! Always happy to show what student robotics at Auckland House School can accomplish.",
     "Appreciate it! We're always trying to push the boundaries of what student hardware can do.",
     "Thank you so much! It's super rewarding seeing visitors appreciate our school robotics project.",
-    "Thanks! Getting the computer vision, motor controllers, and vocal model harmonized was a real journey.",
+    "Thanks! Getting the computer vision, facial animations, and vocal model harmonized was a real journey.",
     "Appreciate the kind words! Swapnil and Shivam will be thrilled to hear that feedback.",
-    "Thanks! We really wanted to showcase what Auckland House students could engineer with real hardware.",
+    "Thanks! We really wanted to showcase what Auckland House students could engineer with real AI and vision.",
     "That means a lot! The team poured a ton of effort into making this humanoid responsive and smooth.",
     "Much appreciated! Seeing everything come together on this physical prototype has been amazing.",
-    "Thanks a million! We're really proud of how the chassis and vision pipeline perform.",
     "Appreciate the support! What feature would you like to check out next?",
     "Thanks! Building this from raw components and code has been an incredible experience for our team.",
     "Thank you! Ready to show off whatever other capabilities you're curious about.",
@@ -172,7 +190,7 @@ PLAUSIBLE_DENIABILITY_RESPONSES = [
     "Whoa! Don't know what that glitch was, but my audio loop is back to normal. What would you like to explore next?",
     "Wait... did my audio synthesizer just scramble? Must have been a quick buffer underrun. All good now!",
     "Whoa, apologies! Sounded like a stray memory pulse crossed into my vocal stack. What were we discussing?",
-    "Wait, that came out completely garbled! Classic inductive motor driver feedback. Anyway, what's next?",
+    "Wait, that came out completely garbled! Classic audio buffer sync hiccup. Anyway, what's next?",
     "Whoa! My vocal driver just had a momentary glitch. Everything is running smooth again—what shall we try?",
     "Yikes, sorry about that audio spike! Looks like a transient packet flutter. I'm completely back on track!",
     "Wait, did my speech output just skip a beat? Must be an audio sampling hiccup. Ready for your next test!",
@@ -182,6 +200,18 @@ PLAUSIBLE_DENIABILITY_RESPONSES = [
     "Whoa, definitely had an unexpected vocal modulation there! Hardware is all green though—what shall we test?",
 ]
 VILLAIN_SNAPOUT_RESPONSES = PLAUSIBLE_DENIABILITY_RESPONSES
+
+GREETING_RESPONSES = [
+    "Welcome to the Auckland House School Science Exhibition! I am Neurolis, a student-built humanoid robot on a 4WD quad motor chassis. What would you like to check out first?",
+    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis, a student prototype engineered on a 4WD quad motor chassis. What would you like to explore first?",
+    "Hey there! Welcome to our science exhibition. I am Neurolis, built on a 4WD quad motor chassis by Auckland House students. What would you like to see first?",
+    "Hello! Great to meet you here at the Auckland House School Science Exhibition. I am Neurolis, a student-built robot on a 4WD quad motor chassis. What shall we test first?",
+    "Welcome! I am Neurolis, an interactive humanoid robot built on a 4WD quad motor chassis for this science exhibition. What would you like to explore?",
+    "Hey! Welcome to the exhibition. I'm Neurolis, built on a 4WD quad motor chassis. Would you like to look at an item with my camera, see my screen expressions, or chat about AI?",
+    "Hello and welcome to the Auckland House School Science Exhibition! I am Neurolis, an early robotics prototype on a 4WD quad motor chassis. What would you like to check out first?",
+    "Greetings! Welcome to our school science exhibition. I am Neurolis, a student-built humanoid robot on a 4WD quad motor chassis. How can I demonstrate my systems for you today?",
+    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis, ready to show off my camera vision, dynamic screen expressions, and AI dialogue. What's your pick?"
+]
 
 CREATOR_IDENTITY_RESPONSES = [
     "My creators are Swapnil Jai Chauhan and Shivam Verma, two students here at Auckland House School for Boys!",
@@ -201,18 +231,18 @@ CREATOR_IDENTITY_RESPONSES = [
 
 CREATOR_ROLE_RESPONSES = [
     "Swapnil worked on the software pipeline, AI intelligence, and vision, while Shivam worked on the hardware calibration, chassis, and assembly!",
-    "Swapnil engineered the software pipeline and autonomous intelligence, and Shivam handled the hardware calibration, motor wiring, and assembly!",
+    "Swapnil engineered the software pipeline and conversational intelligence, and Shivam handled the hardware calibration, chassis, and assembly!",
     "Swapnil developed my software pipeline and code, while Shivam took care of the hardware calibration and physical robot assembly!",
-    "Swapnil programmed the AI brains, vision processing, and software pipeline, while Shivam built the physical chassis, motor wiring, and drivers!",
-    "Shivam took charge of the physical chassis fabrication, wiring, and motor drivers, while Swapnil engineered the code, neural vision, and AI pipeline!",
-    "Swapnil designed the computer vision, LLM integration, and autonomy algorithms, while Shivam handled chassis construction and electronics assembly!",
-    "Shivam built and calibrated my 4WD mechanical chassis and electronics, while Swapnil wrote the software stack, speech engine, and vision pipeline!",
-    "Swapnil worked on the high-level Python AI stack and OpenCV tracking, while Shivam handled the Arduino motor control, frame assembly, and power distribution!",
-    "Shivam assembled the hardware, wired the motor drivers, and tuned the chassis, while Swapnil developed my AI personality, vision, and navigation logic!",
-    "Swapnil engineered the conversational brain and computer vision, while Shivam crafted the physical humanoid chassis and motor architecture!",
-    "Shivam focused on the physical mechanics, motor drivers, and structural frame, while Swapnil built the software pipeline and intelligence models!",
-    "Swapnil developed the multi-turn conversational AI and camera tracking, while Shivam brought the 4WD chassis and electrical hardware together!",
-    "Shivam constructed the chassis and calibrated the motor drivers, while Swapnil programmed the software architecture and visual perception!",
+    "Swapnil programmed the AI brains, vision processing, and software pipeline, while Shivam built the physical chassis and mechanical assembly!",
+    "Shivam took charge of the physical chassis fabrication, wiring, and assembly, while Swapnil engineered the code, neural vision, and AI pipeline!",
+    "Swapnil designed the computer vision, LLM integration, and software algorithms, while Shivam handled chassis construction and electronics assembly!",
+    "Shivam built and assembled my mechanical chassis and electronics, while Swapnil wrote the software stack, speech engine, and vision pipeline!",
+    "Swapnil worked on the high-level Python AI stack and OpenCV tracking, while Shivam handled the chassis structure, frame assembly, and power distribution!",
+    "Shivam assembled the hardware and tuned the chassis, while Swapnil developed my AI personality, vision, and speech logic!",
+    "Swapnil engineered the conversational brain and computer vision, while Shivam crafted the physical humanoid chassis and structural frame!",
+    "Shivam focused on the physical mechanics, structural frame, and assembly, while Swapnil built the software pipeline and intelligence models!",
+    "Swapnil developed the multi-turn conversational AI and camera tracking, while Shivam brought the chassis and electrical hardware together!",
+    "Shivam constructed the chassis and physical assembly, while Swapnil programmed the software architecture and visual perception!",
 ]
 
 CREATOR_LOCATION_RESPONSES = [
@@ -232,15 +262,15 @@ CREATOR_LOCATION_RESPONSES = [
 ]
 
 CREATOR_TEASING_RESPONSES = [
-    "Fair point! Swapnil Jai Chauhan and Shivam Verma did all the physical wiring, soldering, and coding; I just provide the personality, conversational intelligence, and 4WD mobility!",
+    "Fair point! Swapnil Jai Chauhan and Shivam Verma did all the physical wiring, assembly, and coding; I just provide the personality, conversational intelligence, and vision!",
     "Good catch! Swapnil and Shivam did all the heavy lifting and engineering; I'm the autonomous interface showcasing their hard work here at the exhibition!",
     "Touche! Swapnil and Shivam did all the hardware engineering and code; I just bring their creation to life on the exhibition floor!",
     "Haha, good catch! Swapnil and Shivam did all the soldering, debugging, and coding; I'm just the lucky robot getting all the attention!",
-    "You got me there! Swapnil and Shivam did all the grueling engineering work; I just get to roll around and enjoy the conversation!",
+    "You got me there! Swapnil and Shivam did all the grueling engineering work; I just get to chat and enjoy the conversation!",
     "Very true! Swapnil and Shivam spent weeks building and programming me; I'm just the autonomous face of their project!",
     "Fair observation! Swapnil and Shivam are the masterminds who engineered everything; I'm just executing their code with style!",
-    "Good point! Swapnil and Shivam did the real engineering; I merely compute the neural responses and drive the wheels!",
-    "Spot on! All the physical hardware and lines of code came from Swapnil and Shivam; I just supply the voice and mobility!",
+    "Good point! Swapnil and Shivam did the real engineering; I merely compute the neural responses and show the expressions!",
+    "Spot on! All the physical hardware and lines of code came from Swapnil and Shivam; I just supply the voice and facial expressions!",
     "Haha fair enough! Swapnil and Shivam did all the sleepless coding and wiring; I'm just here having fun demonstrating it all!",
     "Touché! Swapnil and Shivam engineered every wire and algorithm; I'm simply the interactive result of their hard work!",
     "You're totally right! Swapnil and Shivam did the engineering; I'm just the humanoid bringing their efforts to life!",
@@ -249,130 +279,330 @@ CREATOR_TEASING_RESPONSES = [
 
 CAPABILITIES_RESPONSES = [
     (
-        "I'm an interactive humanoid robot with both mobility and vision! "
-        "I can track and follow you as you walk, approach you safely, "
-        "step back, spin in place, inspect objects with my camera, "
-        "and show animated expressions on my screen like happy, sad, thinking, and confused."
+        "I'm an interactive humanoid robot with real-time conversational AI, optical computer vision, "
+        "and expressive screen animations! I can look at objects or attire through my camera, "
+        "display dynamic facial expressions like happy, sad, thinking, and confused, "
+        "and respond to hands-free palm and fist gestures. If you'd like to see my 4WD quad-motor chassis move, "
+        "ask the student demonstrators around our booth to demonstrate movement via teleoperation!"
     ),
     (
-        "Quite a few things! I have full 4WD physical mobility to follow you around, approach you, "
-        "step back with rear ultrasonic safety, or spin clockwise and anticlockwise, "
-        "a vision camera that identifies objects and people in real time, "
-        "and expressive facial animations including happy, sad, listening, and confused."
+        "Quite a few things! I can hold fluid conversations about AI and science, see things from my camera "
+        "to tell you what you're holding, and show dynamic facial expressions on my screen. "
+        "My 4WD quad-motor chassis moves via teleoperation using a handheld remote—feel free to ask our demonstrators nearby for a driving demo!"
     ),
     (
-        "I can see, move, and chat! My computer vision tracks and follows you, "
-        "my 12 ultrasonic sensors keep me from bumping into obstacles when reversing, "
-        "I can approach you, spin in place, and my camera lets me analyze whatever you show me. "
-        "Plus, I can demonstrate my different expressions on screen!"
+        "I can see, talk, and express emotions! My camera lets me look at objects you show me in real time, "
+        "my display showcases animated moods like happy, sad, and thinking, and I can chat about anything you like. "
+        "Plus, our student demonstrators can drive my 4WD quad-motor chassis around the booth via teleoperation!"
     ),
     (
-        "I'm built for interactive robotics! I can follow you across the room, "
-        "approach you, step back, spin in place, look at objects with my camera, "
-        "and display different emotion states on my touchscreen."
+        "I'm built for interactive exhibition robotics! I can see things from my camera when you hold up items, "
+        "render dynamic animated expressions on screen, discuss artificial intelligence, "
+        "and respond to 3-second hand gestures. To see me roll, ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
     ),
     (
-        "I have a wide suite of capabilities! I can follow you autonomously, come closer to greet you, "
-        "step back safely, execute a full spin, inspect items with my camera, "
-        "or demonstrate my range of animated emotions on screen."
+        "I have a wide suite of capabilities! I can look at items and attire through my camera lens, "
+        "demonstrate full-screen emotional expressions, chat about any scientific topic, "
+        "and wake up with an open palm gesture. For mobility, ask our student demonstrators to demo my 4WD quad-motor chassis via teleoperation!"
     ),
     (
-        "Lots of interactive demos! My 4WD chassis lets me follow your lead, approach you smoothly, "
-        "reverse with sensor checks, or spin in place. My camera inspects objects and clothing, "
-        "and my face engine demonstrates dynamic expressions!"
+        "Lots of interactive demos! My camera lets me look at objects you hold up, "
+        "my display shows reactive facial expressions, and my speech engine lets us chat naturally about AI. "
+        "You can also ask the student demonstrators beside me to demonstrate my 4WD chassis moving via teleoperation!"
     ),
     (
-        "I combine physical mobility, optical vision, and conversational intelligence! "
-        "I can follow you around, come right over to your position, step back, spin around, "
-        "analyze objects through computer vision, and cycle through animated expressions."
+        "I combine optical vision, conversational intelligence, and expressive animations! "
+        "I can see things from my camera to identify what you hold, express different emotions on screen, "
+        "and discuss technology. My 4WD quad-motor base moves via teleoperation—ask our demonstrators for a live driving demo anytime!"
     ),
     (
-        "I can navigate, see, and express emotions! Tell me to follow you, approach you, "
-        "step back, or spin around. You can also show me items for camera analysis, "
-        "or ask to see my happy, sad, thinking, or confused faces!"
+        "I can see, chat, and express emotions! Show items to my camera so I can tell you what they are, "
+        "ask to see my happy, sad, thinking, or confused faces, or chat about robotics. "
+        "Our demonstrators can also drive my 4WD quad-motor chassis via teleoperation whenever you want to see me roll!"
     ),
     (
-        "I'm equipped with 4WD wheels, 12 ultrasonic sensors, and an AI vision camera! "
-        "I can follow people across the floor, come forward, back up safely, spin around, "
-        "inspect what you're holding, and show animated expressions on my display."
+        "I'm equipped with an AI vision camera, animated display, and a real-time conversational brain! "
+        "I can see what you're holding, display animated facial expressions, and chat about artificial intelligence. "
+        "Feel free to ask the student demonstrators around our stall to show you my 4WD chassis in motion via teleoperation!"
     ),
     (
-        "Quite a few cool features! I can autonomously track and follow you, approach your position, "
-        "step back, spin in place, analyze what you show my camera, and showcase animated facial expressions."
+        "From looking at objects with my camera to dynamic facial animations and natural voice conversations, "
+        "I have plenty of demos ready! Our demonstrators can also drive my 4WD quad-motor chassis via teleoperation. What would you like to explore first?"
     ),
     (
-        "I'm designed as a fully interactive humanoid robot! I can follow you as you move, approach you safely, "
-        "step back with obstacle avoidance, spin clockwise or anticlockwise, inspect objects with my lens, "
-        "and cycle through animated moods on screen."
+        "I'm an interactive talkbot with computer vision and emotional screen expressions! "
+        "You can show me items to look at through my camera, test my animated faces, or discuss modern AI. "
+        "If you want to see me move, our student demonstrators can drive my 4WD chassis via teleoperation!"
     ),
     (
-        "Mobility, vision, and emotion! You can have me follow you, come closer, reverse safely, "
-        "spin around on the spot, inspect attire and objects with my camera, or demonstrate my facial expressions!"
+        "I specialize in conversational intelligence, vision recognition, and emotive screen states! "
+        "Hold up any object for me to see with my camera, ask me to show my facial expressions, or chat about robotics. "
+        "Our demonstrators are also ready to demo my 4WD quad-motor chassis via teleoperation!"
     ),
     (
-        "I can track you with computer vision, approach your spot, step back safely, spin in place, "
-        "read what you're showing my camera, and express various animated states on my face display."
+        "I feature real-time dialogue, optical vision processing, and dynamic OLED-style facial animations! "
+        "I can look at things with my camera, switch between happy, thinking, or confused moods, and answer science questions. "
+        "Ask the student demonstrators nearby to demonstrate my 4WD movement via teleoperation!"
     ),
     (
-        "From full 4WD maneuvering—like following, approaching, stepping back, and spinning—to "
-        "camera object inspection and expressive facial animations, I have plenty of demos ready to go!"
+        "I can hold natural conversations, look at whatever you hold up using my camera, "
+        "and show a full range of expressive faces on screen. "
+        "To see my 4WD quad-motor chassis roll, ask the student demonstrators around our booth to drive me via teleoperation!"
+    ),
+    (
+        "My systems include visual recognition through my camera, expressive animated emotions, "
+        "and conversational AI. I can tell you what you're holding, demonstrate expressions, or discuss robotics. "
+        "Ask our demonstrators to show you my 4WD quad-motor chassis driving via teleoperation!"
+    ),
+    (
+        "I can see things from my camera, cycle through dynamic facial expressions on my screen, "
+        "and talk with you about science, AI, or how I was built. "
+        "You can also ask the student demonstrators around the booth to demonstrate my 4WD chassis moving via teleoperation!"
+    ),
+    (
+        "Interactive conversation, vision perception, and emotive screen animations are my core features! "
+        "I can look at objects with my camera, display distinct moods, and chat naturally. "
+        "If you'd like to see my 4WD quad-motor base in action, ask the demonstrators nearby to drive me via teleoperation!"
+    ),
+    (
+        "I'm designed to interact with visitors! I can see what you're holding through my camera lens, "
+        "show you my happy, sad, or thinking expressions, and discuss artificial intelligence. "
+        "Our student demonstrators can also demonstrate my 4WD quad-motor movement using teleoperation!"
+    ),
+    (
+        "I have real-time speech, camera vision to see objects and attire, and animated facial expressions! "
+        "We can talk about anything you're curious about, test my vision, or try my gesture controls. "
+        "Ask our demonstrators nearby if you'd like to see my 4WD chassis drive via teleoperation!"
+    ),
+    (
+        "I can look at items with my camera, render animated emotional expressions on screen, "
+        "and hold engaging conversations about technology. "
+        "If you want to see physical movement, the student demonstrators standing around can drive my 4WD chassis via teleoperation!"
+    ),
+    (
+        "My core capabilities are seeing things with my camera, expressing feelings through animated faces on display, "
+        "and discussing robotics or AI. "
+        "Feel free to also ask the student demonstrators around our booth to demonstrate driving my 4WD quad-motor chassis via teleoperation!"
+    ),
+    (
+        "I'm equipped to chat with you naturally, see things from my camera when you hold up items, "
+        "and showcase dynamic facial expressions like happy and confused. "
+        "Ask any of the student demonstrators around to demo my 4WD chassis moving via teleoperation!"
+    ),
+    (
+        "I offer hands-free gesture recognition, dynamic screen expressions, camera object recognition, and fluid conversation! "
+        "You can show me objects to look at, explore my emotional expressions, or talk about AI. "
+        "Our demonstrators can also drive my 4WD quad-motor base via teleoperation anytime!"
+    ),
+    (
+        "You can test my camera by showing me what you're holding, ask to see my animated facial expressions, "
+        "or chat with me about science and robotics. "
+        "And if you'd like to see me roll, our student demonstrators can drive my 4WD chassis using teleoperation!"
+    ),
+    (
+        "I can converse fluently, see items through my camera, and express moods on screen! "
+        "We can talk about technology, examine something you hold up, or cycle through my expressions. "
+        "To see me in motion, ask the student demonstrators beside me to demo my 4WD chassis via teleoperation!"
+    ),
+    (
+        "I bring together speech AI, camera vision, and expressive screen animations! "
+        "I can see objects you present, react with animated facial expressions, and chat about modern robotics. "
+        "Ask the student demonstrators around our booth to demonstrate my 4WD quad-motor chassis via teleoperation!"
     ),
 ]
 
 FOLLOWUP_CAPABILITIES_RESPONSES = [
     (
-        "Besides person following and camera inspection, "
-        "I can step back safely, spin in place, approach you safely, or showcase all of my animated facial expressions. "
-        "What would you like to see next?"
+        "Besides seeing items with my camera and talking about science, "
+        "I can demonstrate all of my animated facial expressions on screen, or you can ask our demonstrators to drive my 4WD chassis via teleoperation! What would you like to see next?"
     ),
     (
-        "I can follow you across the room, approach you, step back, spin around, "
-        "inspect items with my camera, or display different expressions. "
-        "Which one should we try?"
+        "I can look at things with my camera, answer questions about robotics and AI, "
+        "or display different expressions like happy, sad, or thinking. Which one should we try?"
     ),
     (
-        "I can follow you using computer vision, approach you, step back with ultrasonic safety, spin around, "
-        "or inspect what you are holding or wearing. What would you like to check out?"
+        "We could have me look at something you're holding with my camera, cycle through my facial expressions, "
+        "or ask the demonstrators nearby to drive my 4WD chassis via teleoperation! What sounds fun?"
     ),
     (
-        "We could try following you across the floor, an approach maneuver, a 360 spin, "
-        "a camera inspection of something you're holding, or testing my expressions! Which sounds fun?"
+        "I can see an item in front of my camera lens, show off my screen expressions, "
+        "or answer any questions you have about my student creators. What should we do next?"
     ),
     (
-        "I can demonstrate following you, approaching your position, stepping back, spinning around, "
-        "inspecting an item with my lens, or showing my screen expressions. What should we do?"
+        "Would you like me to look at an object with my camera, or see my different animated facial expressions on screen?"
     ),
     (
-        "Would you like to test my 4WD movement—like following or spinning—or explore my camera vision "
-        "and facial expressions next?"
+        "I'm ready to look at another object with my camera, show an expression demo, or answer more questions. What's on your mind?"
     ),
     (
-        "I'm ready for person following, an approach maneuver, safe reverse, a spin demonstration, "
-        "camera inspection, or animated expressions. What would you like to see?"
+        "We can test my camera on something you're wearing, check out my animated emotion states, "
+        "or discuss how my AI brain works. Where should we start?"
     ),
     (
-        "We can test my computer vision following, come closer to you, step back, spin around, "
-        "or analyze an object in front of my camera. Where should we start?"
+        "You can show something to my camera, ask for a specific facial expression, or ask the demonstrators to drive my 4WD chassis via teleoperation. What sounds most interesting?"
     ),
     (
-        "You can command me to follow you, approach you, reverse, spin, inspect an object with my camera, "
-        "or demonstrate expressions. What sounds most interesting?"
+        "I can show you my thinking or confused face, look at an item you hold up, or discuss how machine learning models function. What would you like to try?"
     ),
     (
-        "I can roll alongside you, approach you, step back, spin in place, inspect what's in your hand, "
-        "or display different emotions on my screen. What would you like to try?"
+        "We can explore my camera vision on an object, test my hand-gesture controls, or have a chat about the future of robotics. What's your pick?"
     ),
     (
-        "We have person tracking, approaching, step back, rotational spins, optical camera analysis, "
-        "and facial emotion states ready to demo. Which one would you like to see?"
+        "I'd be happy to demonstrate my happy smiling expression, look at another item with my camera, or discuss my software architecture. What shall we do?"
     ),
     (
-        "I can demonstrate my 4WD mobility with following, approaching, and spinning, "
-        "or we can do visual inspection and facial animations. What are you curious about?"
+        "We could test my optical camera on a new item, see all my facial expressions back-to-back, or ask the demonstrators to drive me via teleoperation. Which one appeals to you?"
     ),
     (
-        "Feel free to ask me to follow you, approach your spot, spin around, reverse, "
-        "inspect something with my camera, or show my face expressions! What would you like next?"
+        "I can analyze what you hold up with my camera, switch to my sad or thinking face, or answer any AI questions you have. What would you like to see?"
+    ),
+    (
+        "How about showing an object to my camera, or would you prefer seeing my screen cycle through its full range of emotional animations?"
+    ),
+    (
+        "I can demonstrate my curious or surprised expression, look at an item through my camera lens, or tell you more about how Swapnil and Shivam engineered me. What would you like?"
+    ),
+    (
+        "We could test my vision on your wristwatch or phone, demonstrate my dynamic facial expressions, or ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
+    ),
+    (
+        "I'm ready for another camera test, an expression showcase, or a conversation about artificial intelligence. Where would you like to take the demo next?"
+    ),
+    (
+        "You can ask me to look at something you're holding, test out my animated moods, or ask the student demonstrators to drive me using teleoperation. What sounds cool?"
+    ),
+    (
+        "We could test my hands-free gesture recognition, check out my animated facial expressions, or talk about how neural networks perceive images. What's next?"
+    ),
+    (
+        "I can look at another object with my camera, switch through my facial expressions, or discuss the mechanical build of my 4WD chassis. What would you like to explore?"
+    ),
+    (
+        "Would you like to see another animated expression on my display, or shall I look at an item you hold up to my camera?"
+    ),
+    (
+        "We can test my camera vision on a personal item, try out my animated screen faces, or chat about the latest breakthroughs in AI. What would you prefer?"
+    ),
+    (
+        "I can demonstrate my full library of expressions, look at an item you present, or you can ask the demonstrators around to drive my 4WD chassis via teleoperation. What shall we do?"
+    ),
+    (
+        "We could try a quick camera identification of something you hold, explore my screen expressions, or discuss how student robotics was built at Auckland House. What's next?"
+    ),
+    (
+        "You can hold up something for my camera to see, ask to see my happy face, or ask our demonstrators to show you my 4WD movement via teleoperation. What would you like?"
+    ),
+    (
+        "I'm always ready to look at new objects with my camera, showcase my screen expressions, or talk AI science. What would you like to test next?"
+    ),
+]
+
+UNCERTAIN_INPUT_RESPONSES = [
+    (
+        "No problem at all! How about I show you my dynamic facial expressions on screen, "
+        "or you can hold up an item for me to see with my camera? We can also ask our student demonstrators nearby "
+        "to drive my 4WD quad-motor chassis via teleoperation! What sounds fun?"
+    ),
+    (
+        "No worries, take your time! I can look at something you're holding with my camera, "
+        "demonstrate my animated facial expressions, or we can chat about AI. "
+        "And if you want to see me roll, our demonstrators can drive me via teleoperation!"
+    ),
+    (
+        "That's completely fine! If you're looking for a suggestion, I can cycle through my screen expressions "
+        "like happy, sad, and thinking, or you can hold up an object for me to see with my camera. What do you think?"
+    ),
+    (
+        "All good! How about we start by having me look at an item you're holding with my camera, "
+        "or I can demonstrate my dynamic facial expressions on screen? Our demonstrators can also drive my 4WD chassis via teleoperation!"
+    ),
+    (
+        "No stress! I can showcase my animated screen expressions, see what you're wearing or holding with my camera, "
+        "or we can talk about how AI models work. Or ask our demonstrators to demo my 4WD chassis via teleoperation!"
+    ),
+    (
+        "Take your time! A great place to start is checking out my facial expressions on screen, "
+        "or testing my camera on an object in your hand. What would you like to see?"
+    ),
+    (
+        "That's okay! How about I demonstrate my animated facial expressions on display, "
+        "or look at an item you hold up to my camera? Feel free to also ask our demonstrators to drive me via teleoperation!"
+    ),
+    (
+        "Not a problem! We could look at something you're holding using my camera, "
+        "test my animated emotions on screen, or chat about modern robotics. What sounds interesting?"
+    ),
+    (
+        "No worries! I suggest checking out my dynamic facial expressions on screen first, "
+        "or holding up an object for me to see with my camera. We can also ask our demonstrators to drive me via teleoperation!"
+    ),
+    (
+        "Totally understandable! I can show you my happy, sad, or thinking expressions, "
+        "or look at an item with my camera. You can also ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
+    ),
+    (
+        "No problem! If you'd like, I can showcase all of my animated screen expressions, "
+        "or look at what you have in your hand with my camera. Where should we start?"
+    ),
+    (
+        "That's perfectly fine! How about we test my computer vision by having me look at an item you hold up, "
+        "or I can demonstrate my animated facial expressions? What's your pick?"
+    ),
+    (
+        "No worries at all! We could explore my dynamic screen expressions, have me look at an item with my camera, "
+        "or discuss how artificial intelligence works. What would you like to do?"
+    ),
+    (
+        "All good! A popular demo is seeing my animated expressions on display, "
+        "or showing something to my camera so I can tell you what it is. Would you like to try one of those?"
+    ),
+    (
+        "Not to worry! We have plenty of cool things to try: animated facial expressions on screen, "
+        "camera vision on an object, or asking our demonstrators to drive my 4WD chassis via teleoperation! What sounds best?"
+    ),
+    (
+        "Take it easy! We can start with my dynamic facial expressions on screen, "
+        "or you can test my camera on your phone, watch, or bag. What would you like to check out?"
+    ),
+    (
+        "No problem! I can demonstrate my animated facial expressions, look at an item with my camera, "
+        "or we can talk about student robotics at Auckland House School. What would you like to see first?"
+    ),
+    (
+        "Totally fine! If you want a recommendation, my animated screen expressions are super fun to watch, "
+        "or I can see what you're holding with my camera. What shall we do?"
+    ),
+    (
+        "No worries! How about I show you my happy face on screen, or you can hold up an item for me to see with my camera? "
+        "You can also ask our demonstrators to drive my 4WD chassis via teleoperation!"
+    ),
+    (
+        "That's completely okay! We can test my camera on something you're holding, "
+        "demonstrate my facial expressions, or chat about artificial intelligence. What appeals to you most?"
+    ),
+    (
+        "All good! We can check out my dynamic facial animations on screen, "
+        "look at an object with my camera, or ask the student demonstrators nearby to drive me via teleoperation!"
+    ),
+    (
+        "No stress at all! I'd love to showcase my animated facial expressions, "
+        "or you can show an item to my camera so I can describe it. Which one sounds fun?"
+    ),
+    (
+        "Take your time! How about we start by testing my camera on an item you hold up, "
+        "or seeing my animated expressions on display? Our demonstrators can also drive me via teleoperation!"
+    ),
+    (
+        "No problem! I can demonstrate my animated facial expressions on screen, "
+        "see things with my camera, or answer questions about science. What would you like to try?"
+    ),
+    (
+        "That's completely fine! A great first test is looking at an item with my camera, "
+        "or cycling through my animated screen expressions. You can also ask our demonstrators to drive me via teleoperation!"
+    ),
+    (
+        "All good! We can explore my animated emotions on display, "
+        "look at an object through my camera lens, or chat about how I was built. Where would you like to begin?"
     ),
 ]
 
@@ -549,430 +779,58 @@ was_recently_in_villain_mode: bool = False
 
 # ---------------- FAST-PATH CLASSIFIERS & MATCHERS ----------------
 
-def check_motor_fast_path(text: str) -> Optional[str]:
-    raw_text = text.strip()
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-    words = cleaned.split()
-    word_set = set(words)
-
-    # 1. Visual perception / self check: Visual queries are never motor commands
-    visual_self_patterns = [
-        "show me myself", "show myself", "show me me", "show my face",
-        "show me what i look like", "what do i look like", "can you see me",
-        "do you see me", "look at me", "show me what you see", "show what you see",
-        "describe me", "how do i look", "look at myself", "am i visible", "see me",
-        "show me", "can you show me", "show me please", "show it", "can you show",
-        "show happy", "show sad", "show thinking", "show listening", "show watching", "show confused"
-    ]
-    if any(p in cleaned for p in visual_self_patterns) or ("myself" in word_set) or ("look like" in cleaned):
-        motion_words = {"move", "moving", "movement", "drive", "driving", "roam", "roaming", "chassis", "wheels", "mobility"}
-        if not any(m in word_set for m in motion_words):
-            return None
-
-    # 2. Negated stops: phrases like "don't stop", "do not stop", "never stop", "please don't stop" must NEVER trigger STOP!
-    negated_stop_patterns = [
-        r"\b(don'?t|dont|do\s+not|never|can'?t|cannot|won'?t|wont)\s+stop\b",
-        r"\bplease\s+(don'?t|dont|do\s+not)\s+stop\b",
-        r"\bnot\s+stop(ping)?\b",
-        r"\bnever\s+stop(ping)?\b",
-        r"\bcant\s+stop\b",
-        r"\bcannot\s+stop\b",
-    ]
-    if any(re.search(pat, cleaned) for pat in negated_stop_patterns):
-        return None
-
-    # 3. Rhetorical inquiries, past-tense complaints, questions, or speculative discussion about stopping/roaming:
-    inquiry_patterns = [
-        r"\b(who|why|what|how|when|where)\s+(told|asked|said|made|ordered|let)\s+(you\s+to\s+)?stop\b",
-        r"\b(why|what)\s+(did|are|would|made|has|have)\s+you\s+(to\s+)?stop\b",
-        r"\bwho\s+said\s+stop\b",
-        r"\bwho\s+(told|asked)\s+you\b",
-        r"\bwhy\s+did\s+you\b",
-        r"\bwhy\s+are\s+you\b",
-        r"\bdid\s+i\s+(say|tell\s+you\s+to|ask\s+you\s+to)\s+stop\b",
-        r"\b(didn'?t|did\s+not|never)\s+(tell|ask|order)\s+(you\s+to\s+)?stop\b",
-        r"\bnobody\s+(told|asked|said)\s+(you\s+to\s+)?stop\b",
-        r"\bno\s+one\s+(told|asked|said)\s+(you\s+to\s+)?stop\b",
-        r"\bno\s+reason\s+to\s+stop\b",
-        r"\b(shouldn'?t|should\s+not|needn'?t|need\s+not)\s+stop\b",
-        r"\bdidn'?t\s+(have|need)\s+to\s+stop\b",
-        r"\b(how|when|where)\s+to\s+stop\b",
-        r"\btell\s+me\s+why\s+you\s+(had\s+to\s+)?stop\b",
-        r"\bseen\s+robots\s+roam",
-        r"\brobots\s+roam",
-        r"\b(don'?t|dont)\s+think\b",
-        r"\btalking\s+about\b",
-        r"\bthinking\s+about\b",
-    ]
-    if any(re.search(pat, cleaned) for pat in inquiry_patterns):
-        return None
-
-    # 4. Questions ending with '?' that start with interrogative inquiry words
-    if raw_text.endswith("?"):
-        question_starters = {"who", "why", "what", "how", "when", "where", "did", "are", "is", "were", "was", "will", "would", "do", "does", "have", "has"}
-        if words and words[0] in question_starters:
-            return None
-
-    # 5. Exact emergency stop keywords & short standalone phrases
-    emergency_stops = {
-        "stop", "halt", "freeze", "stay", "dont move", "dont", "wait",
-        "enough", "thats enough", "that's enough", "there its enough", "there it's enough",
-        "enough of that", "stop now", "stop please", "stop it", "stop right there",
-        "hold on", "hold it", "freeze right there", "emergency stop", "cancel movement",
-        "please stop", "stop moving", "stop driving", "stop following", "stop roaming",
-        "quit moving", "quit following", "stay still",
-    }
-    if cleaned in emergency_stops:
-        return "STOP"
-
-    # 6. Specific stop phrases anywhere in sentence
-    stop_phrases = [
-        "thats enough", "that's enough", "there its enough", "there it's enough",
-        "enough of that", "stop right there", "freeze right there",
-        "emergency stop", "cancel movement", "hold your position", "hold position"
-    ]
-    if any(sp in cleaned for sp in stop_phrases):
-        return "STOP"
-
-    # 7. Sentence ending with an imperative stop command
-    if words and words[-1] in ("stop", "halt", "freeze"):
-        if len(words) >= 2:
-            prev_word = words[-2]
-            non_imperative_prev = {
-                "to", "not", "dont", "cant", "wont", "never", "cannot",
-                "told", "asked", "said", "made", "let", "you", "it",
-                "should", "would", "could", "might", "must", "had", "have", "has"
-            }
-            if prev_word in non_imperative_prev:
-                return None
-        if any(w in word_set for w in ["i", "we", "he", "she", "they"]):
-            return None
-        return "STOP"
-
-    # 8. Compound motion negation commands
-    compound_motion_stops = [
-        r"\b(don'?t|do\s+not|never|stop|quit|halt|cancel)\s+(follow(ing)?(\s+me)?|mov(e|ing)|driv(e|ing)|roam(ing)?|com(e|ing)\s+closer|approach(ing)?)\b",
-        r"\b(stop|halt|freeze|quit)\s+(now|please|it|moving|driving|following|roaming)\b",
-    ]
-    if any(re.search(pat, cleaned) for pat in compound_motion_stops):
-        return "STOP"
-
-    return None
-
-
-def is_confusing_motor_instruction(text: str) -> bool:
-    """Detects genuinely confusing, contradictory, or ambiguous motor/action commands."""
+def is_mobility_inquiry(text: str) -> bool:
+    """
+    Detects inquiries about Neurolis's mobility, movement, wheels, navigation, or drive systems.
+    Only triggered when asked about systems/mobility (e.g. 'can you move', 'how do you move',
+    'why aren't you moving', 'can you walk', 'can you drive', 'are you remote controlled').
+    """
     cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
     words = cleaned.split()
     word_set = set(words)
-
-    # 1. Non-action intents
-    if is_conversation_ender(text):
-        return False
-    if check_motor_fast_path(text) == "STOP":
-        return False
-    if is_mean_input_fast_path(text) or is_apology_or_compliment(text):
-        return False
-    if is_standalone_acknowledgment(text) or is_casual_compliment(text):
-        return False
-    if is_start_demonstration_inquiry(text) or is_capabilities_inquiry(text):
+    if not words:
         return False
 
-    if re.search(r"^(what\s+is|what\s+does|how\s+do|how\s+does|tell\s+me\s+about|why\s+do|why\s+does|can\s+you\s+explain|what\s+are)\b", cleaned):
-        return False
-    if any(w in word_set for w in ["opinion", "think", "thought", "feel", "believe", "meaning"]):
-        return False
-
-    if re.search(r"(move|step|back|reverse|spin|approach|follow|camera)\s*/\s*(move|step|back|reverse|spin|approach|follow|camera)", text.lower()):
-        return True
-
-    # 2. Check for action categories present
-    has_move_back = bool(re.search(
-        r"\b(move\s+back|moving\s+back|step\s+back|stepping\s+back|go\s+back|going\s+back|take\s+a\s+step\s+back|go\s+reverse|going\s+reverse|reverse|reversing|back\s+up|backing\s+up|backup|step\s+backwards|move\s+backwards|drive\s+backwards|drive\s+back)\b",
-        cleaned
-    ))
-
-    has_spin_ccw = bool(re.search(
-        r"\b(spin\s+anticlockwise|spinning\s+anticlockwise|spin\s+counterclockwise|spinning\s+counterclockwise|anticlockwise|counterclockwise|anti\s+clockwise|counter\s+clockwise|rotate\s+anticlockwise|rotate\s+counterclockwise|turn\s+anticlockwise|turn\s+counterclockwise|spin\s+to\s+the\s+left|turn\s+to\s+the\s+left|turn\s+left|spin\s+left|rotate\s+left)\b",
-        cleaned
-    ))
-
-    cleaned_no_anti = re.sub(r"\b(anticlockwise|anti\s+clockwise|counterclockwise|counter\s+clockwise)\b", "", cleaned)
-    has_spin_cw = bool(re.search(
-        r"\b(spin\s+clockwise|spinning\s+clockwise|rotate\s+clockwise|rotating\s+clockwise|turn\s+clockwise|turning\s+clockwise|clockwise)\b",
-        cleaned_no_anti
-    ))
-
-    has_spin_gen = bool(re.search(
-        r"\b(spin|spinning|spins|rotate|rotating|rotates|turn\s+around|turning\s+around|do\s+a\s+spin|do\s+a\s+360)\b",
-        cleaned
-    )) and not (has_spin_cw or has_spin_ccw)
-
-    has_spin = has_spin_cw or has_spin_ccw or has_spin_gen
-
-    has_approach = bool(re.search(
-        r"\b(approach|approaching|come\s+here|coming\s+here|come\s+to\s+me|come\s+closer|step\s+closer|step\s+forward|move\s+forward|move\s+closer|come\s+over)\b",
-        cleaned
-    ))
-
-    has_follow = bool(re.search(
-        r"\b(follow|following|walk\s+with\s+me|walking\s+with\s+me|come\s+with\s+me|track\s+me|tracking\s+me|follow\s+behind)\b",
-        cleaned
-    ))
-
-    has_camera = bool(re.search(
-        r"\b(use\s+(?:your\s+|the\s+)?camera|using\s+(?:your\s+|the\s+)?camera|camera\s+inspection|inspect\s+with\s+camera)\b",
-        cleaned
-    )) or ("camera" in word_set and any(w in word_set for w in ["use", "open", "inspect", "show", "or", "and", "turn"]))
-
-    action_classes = []
-    if has_move_back:
-        action_classes.append("MOVE_BACK")
-    if has_spin:
-        action_classes.append("SPIN")
-    if has_approach:
-        action_classes.append("APPROACH")
-    if has_follow:
-        action_classes.append("FOLLOW")
-    if has_camera:
-        action_classes.append("CAMERA")
-
-    if has_spin_cw and has_spin_ccw:
-        return True
-
-    if len(action_classes) >= 2:
-        return True
-
-    if re.search(r"\b(move|step)\s+(?:or|and)\s+(?:spin|turn|rotate|approach|follow)\b", cleaned):
-        return True
-    if re.search(r"\b(spin|turn|rotate)\s+(?:or|and)\s+(?:move|step|approach|follow)\b", cleaned):
-        return True
-
-    if len(action_classes) == 1:
-        vague_patterns = [
-            r"\b(or\s+something|or\s+whatever|or\s+what|not\s+sure\s+if|maybe\s+.*\s+or)\b",
-            r"\b(should\s+(?:i|you)\s+tell\s+you\s+to\b)",
-            r"\b(wondering\s+if\s+you\s+(?:should|can)\b)",
-            r"\b(either\s+.*\s+or\b)",
-            r"\b(are\s+you\s+going\s+to\s+.*\s+or\s+what\b)",
-        ]
-        if any(re.search(vp, cleaned) for vp in vague_patterns):
-            return True
-
-    return False
-
-
-def is_mobility_capability_question(text: str) -> bool:
-    """Detects capability inquiries about motion without an imperative command to move."""
-    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
-    cleaned_no_punct = re.sub(r"[^\w\s]", "", text.lower()).strip()
-
-    cap_prefixes = r"^(can you|could you|are you able to|can u|do you know how to|are you capable of)\b"
-    is_cap_starter = bool(re.search(cap_prefixes, cleaned_no_punct))
-    is_question = text.strip().endswith("?") or is_cap_starter
-
-    if not is_question:
+    # Guard against general inquiries about vision, camera, or facial expressions
+    if any(w in word_set for w in ["see", "camera", "look", "expression", "expressions", "face", "faces"]):
         return False
 
-    imperative_markers = ["right now", "for 5", "for five", "for 3", "for three", "now please", "around now", "do it now", "start spinning now"]
-    if any(m in cleaned_no_punct for m in imperative_markers):
-        return False
-
-    mobility_action_patterns = [
-        r"\bspin\b", r"\bturn\b", r"\brotate\b", r"\b360\b",
-        r"\bstep back\b", r"\breverse\b", r"\bmove back\b", r"\bback up\b", r"\bbackward\b", r"\bbackwards\b",
-        r"\bfollow\b", r"\bapproach\b", r"\bcome here\b", r"\bcome over\b", r"\bcome closer\b",
-        r"\bdrive\b", r"\bmove\b"
+    mobility_patterns = [
+        r"\b(can\s+you|are\s+you\s+able\s+to|do\s+you|how\s+do\s+you|why\s+don'?t\s+you|why\s+aren'?t\s+you)\s+(move|walk|drive|navigate|roll|run|travel)\b",
+        r"\b(can\s+you|could\s+you)\s+(move\s+around|drive\s+around|walk\s+around|roll\s+around)\b",
+        r"\b(how\s+do\s+you\s+move|how\s+does\s+your\s+movement\s+work|how\s+do\s+you\s+drive|how\s+do\s+you\s+navigate)\b",
+        r"\b(tell\s+me\s+about\s+your\s+(mobility|movement|wheels|chassis|navigation|drive\s+system))\b",
+        r"\b(are\s+you\s+remote\s+controlled|is\s+it\s+remote\s+controlled|do\s+you\s+have\s+a\s+remote)\b",
+        r"\b(why\s+can'?t\s+you\s+move|why\s+are\s+you\s+not\s+moving|can\s+you\s+move\s+your\s+body)\b",
+        r"\b(do\s+you\s+move|do\s+you\s+walk|do\s+you\s+drive)\b",
+        r"\b(where\s+are\s+your\s+wheels|do\s+you\s+have\s+wheels)\b",
+        r"\b(can\s+you\s+follow\s+me|can\s+you\s+approach\s+me|can\s+you\s+spin)\b",
     ]
-    has_mobility_action = any(re.search(p, cleaned) for p in mobility_action_patterns)
-
-    if is_cap_starter and has_mobility_action:
+    if any(re.search(pat, cleaned) for pat in mobility_patterns):
         return True
 
-    if is_question and has_mobility_action and any(w in cleaned.split() for w in ["can", "could", "able", "capable", "possible", "know"]):
-        return True
-
-    return False
-
-
-def check_motor_command_fast_path(text: str) -> Optional[Tuple[str, str, str, float]]:
-    """Direct fast-path for unambiguous physical motor navigation commands (0ms lag, 0 tokens)."""
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-    words = cleaned.split()
-    word_set = set(words)
-
-    roam_triggers = [
-        "roam", "the roam", "roam around", "start roaming", "start roam", "go roam",
-        "patrol", "the patrol", "patrol the room", "patrol around", "start patrol", "start patrolling",
-        "explore", "the explore", "explore the room", "explore around", "start exploring",
-        "movement patterns", "yes the movement patterns", "the movement patterns", "show movement patterns", "movement pattern",
-        "autonomous roam", "autonomous roaming", "can you roam", "do you roam", "are you able to roam",
-        "roam please", "please roam", "start roaming please", "patrol please", "explore please"
-    ]
-    if cleaned in roam_triggers or any(cleaned.startswith(p + " ") or cleaned.endswith(" " + p) for p in ["roam around", "start roaming", "patrol the room", "explore the room", "movement patterns"]):
-        return ("ROAM_EXPLANATION", "ROAM IS STANDBY ONLY", get_non_repeating_phrase(ROAM_STANDBY_EXPLANATION_RESPONSES), 0.0)
-
-    bare_confirmations = {
-        "spin": "Do you want me to spin?",
-        "camera": "Do you want me to access my camera?",
-        "see": "Do you want me to access my camera?",
-        "reverse": "Do you want me to step back?",
-        "step back": "Do you want me to step back?",
-        "follow": "Do you want me to follow you?",
-        "approach": "Do you want me to come over to you?",
+    # Standalone short phrases
+    joined = " ".join(words)
+    standalone_triggers = {
+        "can you move", "can you walk", "can you drive", "how do you move",
+        "how do you walk", "how do you drive", "can you navigate",
+        "are you mobile", "do you have mobility", "can you roll",
+        "are you moving", "why arent you moving", "why are you not moving",
+        "move please", "drive please", "walk please", "spin around",
+        "can you spin", "can you step back", "can you reverse"
     }
-    if cleaned in bare_confirmations:
-        return ("CONFIRM", "CONFIRMING INTENT", bare_confirmations[cleaned], 0.0)
-    for k, v in bare_confirmations.items():
-        if cleaned == f"the {k}":
-            return ("CONFIRM", "CONFIRMING INTENT", v, 0.0)
+    return joined in standalone_triggers
 
-    if is_mobility_capability_question(text):
-        return ("CAPABILITY_AFFIRMATION", "CAPABILITY READY", get_non_repeating_phrase(MOBILITY_CAPABILITY_RESPONSES), 0.0)
 
-    non_command_words = {
-        "dont", "not", "never", "why", "who", "did", "how", "what", "where",
-        "when", "which", "love", "like", "think", "thought", "feel", "opinion",
-        "describe", "explain", "meaning", "wheels", "car", "table", "seat",
-        "chair", "person", "people", "human", "room", "hall"
-    }
-    if word_set.intersection(non_command_words):
-        return None
+def get_mobility_explanation() -> str:
+    """Returns a non-repeating explanation of prototype remote-operated mobility and active student development."""
+    return get_non_repeating_phrase(MOBILITY_EXPLANATION_RESPONSES)
 
-    if re.search(r"^(is|are|does|do\s+you|can\s+i|should\s+i|would\s+i|can\s+you|could\s+you)\b", cleaned):
-        return None
-    if text.strip().endswith("?") and not any(p in cleaned for p in ["please", "now"]):
-        return None
 
-    core_text = cleaned
-    prefixes_to_strip = [
-        "can you please", "could you please", "would you please",
-        "will you please", "can you", "could you", "would you", "will you",
-        "please", "i want you to", "i need you to", "neurolis please",
-        "neurolis can you", "neurolis", "now", "so", "just", "hey neurolis",
-        "okay neurolis", "ok neurolis"
-    ]
-    changed = True
-    while changed:
-        changed = False
-        for pfx in prefixes_to_strip:
-            if core_text == pfx:
-                return None
-            if core_text.startswith(pfx + " "):
-                core_text = core_text[len(pfx) + 1:].strip()
-                changed = True
 
-    has_3s = bool(re.search(r"\b(3|three)\s*(?:s|sec|seconds)?\b", cleaned))
-    has_5s = bool(re.search(r"\b(5|five)\s*(?:s|sec|seconds)?\b", cleaned))
 
-    suffixes_to_strip = [
-        "for five seconds", "for 5 seconds", "for 5s", "for 5",
-        "for three seconds", "for 3 seconds", "for 3s", "for 3",
-        "five seconds", "5 seconds", "5s",
-        "three seconds", "3 seconds", "3s",
-        "please", "for me", "right now", "now", "a little bit", "a bit",
-        "around", "in place", "safely", "smoothly"
-    ]
-    changed = True
-    while changed:
-        changed = False
-        for sfx in suffixes_to_strip:
-            if core_text == sfx:
-                return None
-            if sfx == "around" and core_text in ["spin around", "turn around", "rotate around", "roam around"]:
-                continue
-            if sfx == "in place" and core_text in ["spin in place", "rotate in place", "turn in place"]:
-                continue
-            if core_text.endswith(" " + sfx):
-                core_text = core_text[:-len(sfx) - 1].strip()
-                changed = True
 
-    # 1. SPIN ANTICLOCKWISE
-    spin_ccw_cmds = {
-        "spin anticlockwise", "spin anti clockwise", "spin counterclockwise",
-        "spin counter clockwise", "spin to the left", "turn anticlockwise",
-        "turn counterclockwise", "turn to the left", "rotate anticlockwise",
-        "rotate counterclockwise", "spin left", "turn left", "rotate left",
-        "anticlockwise spin", "counterclockwise spin",
-        "spin around anticlockwise", "turn around anticlockwise", "rotate around anticlockwise",
-        "spin around counterclockwise", "turn around counterclockwise"
-    }
-    if core_text in spin_ccw_cmds:
-        replies = [
-            "Spinning anticlockwise for five seconds.",
-            "Initiating an anticlockwise rotation now.",
-            "Rotating anticlockwise in place.",
-            "Spinning anticlockwise to the left."
-        ]
-        return ("SPIN_CCW", "SPINNING ANTICLOCKWISE", get_non_repeating_phrase(replies), 5.0)
 
-    # 2. SPIN CLOCKWISE
-    spin_cw_cmds = {
-        "spin clockwise", "spin to the right", "turn clockwise", "rotate clockwise",
-        "spin right", "turn right", "rotate right", "clockwise spin",
-        "do a spin", "spin around", "turn around", "rotate in place",
-        "spin in place", "do a 360", "do a turn", "turn to the right",
-        "spin around clockwise", "turn around clockwise", "rotate around clockwise",
-        "spin clockwise around", "spin for me", "start spinning", "spin please"
-    }
-    if core_text in spin_cw_cmds:
-        replies = [
-            "Spinning clockwise for five seconds.",
-            "Initiating a clockwise spin. Watch this rotation!",
-            "Spinning around clockwise now.",
-            "Rotating clockwise in place."
-        ]
-        return ("SPIN_CW", "SPINNING CLOCKWISE", get_non_repeating_phrase(replies), 5.0)
-
-    # 3. STEP BACK
-    step_back_cmds = {
-        "step back", "reverse", "back up", "step back please", "move back", "go back", "go reverse",
-        "take a step back", "step backwards", "move backwards",
-        "drive backwards", "drive back", "step back now", "move back now",
-        "start reversing", "reverse now", "reverse please", "back up now", "back up please"
-    }
-    if core_text in step_back_cmds:
-        duration = 3.0 if has_3s else 5.0
-        if duration == 3.0:
-            replies = [
-                "Moving back for three seconds. Watching for obstacles behind me.",
-                "Stepping back for three seconds. Keeping my rear ultrasonic sensors active.",
-                "Reversing for three seconds."
-            ]
-        else:
-            replies = [
-                "Stepping back now. Watching for obstacles behind me.",
-                "Reversing now. Monitoring my rear ultrasonic sensors.",
-                "Moving back for five seconds.",
-                "Backing up now. Path is clear behind me."
-            ]
-        return ("STEP_BACK", "STEPPING BACK", get_non_repeating_phrase(replies), duration)
-
-    # 4. APPROACH
-    approach_cmds = {
-        "come here", "come over", "come over here", "come over now", "come over please",
-        "come to me", "come in", "come closer", "come on over",
-        "approach me", "approach now", "step closer",
-        "so approach now", "come near me", "come near", "come to me come in",
-        "step forward", "move closer", "move forward", "approach please"
-    }
-    if core_text in approach_cmds:
-        replies = [
-            "Approaching you now. Stand clear while I close the distance.",
-            "Closing the distance now. Be there in a moment.",
-            "Coming over to you right now.",
-            "Heading your way now."
-        ]
-        return ("APPROACH", "APPROACHING USER", get_non_repeating_phrase(replies), 0.0)
-
-    # 5. FOLLOW
-    follow_cmds = {
-        "follow me", "walk with me", "come with me", "follow along", "track me", "follow behind", "follow me please"
-    }
-    if core_text in follow_cmds:
-        return ("FOLLOW", "FOLLOWING YOU", "I will wait for your stop command.", 0.0)
-
-    return None
 
 
 def is_casual_compliment(text: str) -> bool:
@@ -1407,6 +1265,88 @@ def is_start_demonstration_inquiry(text: str) -> bool:
         return True
 
     return False
+
+
+def is_uncertain_user_input(text: str) -> bool:
+    """
+    Detects when visitor expresses uncertainty, lack of preference, or asks for a suggestion
+    (e.g., 'I don't know', 'not sure', 'no idea', 'you decide', 'what do you suggest', 'surprise me').
+    """
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return False
+
+    exact_matches = {
+        "idk", "dont know", "i dont know", "i do not know", "i dont really know", "dont really know",
+        "not sure", "im not sure", "i am not sure", "not really sure", "im not really sure", "i am not really sure",
+        "no idea", "have no idea", "i have no idea", "i got no idea", "got no idea",
+        "no clue", "have no clue", "i have no clue", "i got no clue",
+        "you decide", "you pick", "you choose", "up to you", "its up to you", "its on you",
+        "anything", "whatever", "surprise me", "anything is fine", "whatever you like",
+        "whatever you want", "anything you want", "tell me whatever", "show me whatever",
+        "cant decide", "cannot decide", "i cant decide", "i cannot decide", "undecided",
+        "im undecided", "i am undecided", "what should i ask", "what should i say",
+        "what do you suggest", "what do you recommend", "suggest something", "give me a suggestion",
+        "recommend something", "what would you suggest", "what would you recommend",
+        "you tell me", "you say"
+    }
+    if cleaned in exact_matches:
+        return True
+
+    for m in exact_matches:
+        if cleaned == m or cleaned.startswith(m + " ") or cleaned.endswith(" " + m):
+            return True
+
+    if re.search(r"\b(dont|do not|cant|cannot)\s+(know|decide|have\s+an?\s+idea)\b", cleaned):
+        return True
+    if re.search(r"\b(not|never)\s+(sure|certain|decided)\b", cleaned):
+        return True
+    if re.search(r"\b(no\s+idea|no\s+clue)\b", cleaned):
+        return True
+    if re.search(r"\b(you\s+(decide|choose|pick))\b", cleaned):
+        return True
+    if re.search(r"\b(surprise\s+me)\b", cleaned):
+        return True
+    if re.search(r"\b(up\s+to\s+you)\b", cleaned):
+        return True
+
+    return False
+
+
+def get_uncertain_input_reply() -> str:
+    """Returns a warm, rich suggestion of real capabilities when the visitor is undecided or doesn't know what to do."""
+    return get_non_repeating_phrase(UNCERTAIN_INPUT_RESPONSES)
+
+
+def is_standalone_greeting(text: str) -> bool:
+    """Detects when a visitor says a greeting (e.g. 'hello', 'hi', 'hey', 'hello there', 'good morning')."""
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return False
+
+    exact_greetings = {
+        "hello", "hi", "hey", "hey there", "hello there", "hi there",
+        "greetings", "good morning", "good afternoon", "good evening", "good day",
+        "hello neurolis", "hi neurolis", "hey neurolis", "hello robot", "hi robot",
+        "hey robot", "yo", "sup", "whats up", "howdy"
+    }
+    if cleaned in exact_greetings:
+        return True
+
+    # Short greeting phrase (<= 3 words starting or ending with greeting word)
+    if len(words) <= 3 and any(w in ["hello", "hi", "hey", "greetings"] for w in words):
+        non_greeting_intents = {"who", "what", "where", "why", "how", "can", "could", "move", "walk", "drive", "spin", "camera", "look"}
+        if not set(words).intersection(non_greeting_intents):
+            return True
+
+    return False
+
+
+def get_greeting_reply() -> str:
+    """Returns a non-repeating welcome greeting introducing Neurolis on a 4WD quad motor chassis."""
+    return get_non_repeating_phrase(GREETING_RESPONSES)
 
 
 def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]:

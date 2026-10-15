@@ -333,60 +333,20 @@ class BootAudioPlayer:
 
 # checks all the physical wires, chips, and code scripts on startup
 class HardwareInspector:
-    # keeps track of the motor controller handle so we can read real serial and camera stats
-    def __init__(self, motor_controller=None):
-        self.motor_controller = motor_controller
-
-    # helper to check if physical arduino mega is connected over serial
-    def _is_arduino_connected(self):
-        # 1. check active serial on motor controller
-        if self.motor_controller is not None:
-            if not getattr(self.motor_controller, "is_simulated", True):
-                ser = getattr(self.motor_controller, "ser", None)
-                if ser is not None and getattr(ser, "is_open", False):
-                    return True, getattr(ser, "port", "USB")
-            else:
-                return False, None
-
-        # 2. scan live serial com ports
-        try:
-            import serial.tools.list_ports as lp
-            ports = list(lp.comports())
-            for p in ports:
-                dev = (p.device or "").lower()
-                desc = (p.description or "").lower()
-                hwid = (p.hwid or "").lower()
-
-                # Exclude internal Linux UARTs, printk consoles, and bluetooth ttys
-                if any(ex in dev or ex in desc for ex in ["ttyama", "ttyprintk", "rfcomm", "bluetooth"]):
-                    continue
-
-                # Genuine USB serial criteria
-                is_usb_path = any(dev.startswith(prefix) for prefix in ["/dev/ttyacm", "/dev/ttyusb"])
-                is_usb_desc = any(k in desc or k in hwid for k in ["arduino", "mega", "ch340", "cp210", "ftdi", "usb serial", "usb-serial"])
-
-                if is_usb_path or is_usb_desc:
-                    return True, p.device
-        except Exception:
-            pass
-
-        return False, None
+    def __init__(self, gesture_sentry=None):
+        self.gesture_sentry = gesture_sentry
 
     # checks if a physical webcam or usb camera is plugged in and accessible
     def check_camera(self):
-        # first check if motor controller already opened camera or is initializing
-        if self.motor_controller is not None:
-            for _ in range(10):
-                cap = getattr(self.motor_controller, "cap", None)
-                latest_frame = getattr(self.motor_controller, "latest_raw_frame", None)
-                if (cap is not None and cap.isOpened()) or latest_frame is not None:
+        # 1. If gesture sentry / camera worker already has an active frame
+        if self.gesture_sentry is not None and getattr(self.gesture_sentry, "get_frame_fn", None) is not None:
+            try:
+                frame = self.gesture_sentry.get_frame_fn()
+                if frame is not None:
                     return True, "✓", "Connected"
-                time.sleep(0.05)
-            if getattr(self.motor_controller, "cap", None) is not None or getattr(self.motor_controller, "running", False):
-                return True, "✓", "Connected"
-            return False, "✗", "Not Detected"
-
-        # live test probe on device 0 (only if motor controller is not present)
+            except Exception:
+                pass
+        # 2. Probe directly
         try:
             import cv2
             cap = cv2.VideoCapture(0)
@@ -452,90 +412,31 @@ class HardwareInspector:
             return True, "✓", "Online"
         return False, "✗", "Not Found"
 
-    # checks if physical arduino mega is plugged into usb serial port
-    def check_arduino(self):
-        conn, port = self._is_arduino_connected()
-        if conn:
-            return True, "✓", f"Connected ({port})"
-        return False, "✗", "Not Detected"
+    # checks if Google MediaPipe Tasks Vision is installed
+    def check_mediapipe(self):
+        try:
+            import mediapipe as mp
+            return True, "✓", f"Installed (v{mp.__version__})"
+        except Exception:
+            return False, "✗", "Not Installed"
 
-    # tests whether arduino.ino firmware is responding or running fallback simulation
-    def check_arduino_firmware(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            return True, "✓", "Online"
-        return False, "✗", "Testing Fallback (Simulation Mode)"
-
-    # checks if 4x bts7960 motor drivers are detected on hardware
-    def check_motor_drivers(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            return True, "✓", "Connected"
-        return False, "✗", "Not Detected"
-
-    # returns exact motor driver count: 4 if connected, 0 (Simulation Mode) with cross if none
-    def check_motor_driver_count(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            return True, "✓", "4"
-        return False, "✗", "0 (Simulation Mode)"
-
-    # checks if 4x johnson motors are detected on hardware
-    def check_motors(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            return True, "✓", "Connected"
-        return False, "✗", "Not Detected"
-
-    # returns exact motor count: 4 if connected, 0 (Simulation Mode) with cross if none
-    def check_motor_count(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            return True, "✓", "4"
-        return False, "✗", "0 (Simulation Mode)"
-
-    # verifies motors.py script exists
-    def check_motors_py(self):
+    # checks if the MediaPipe gesture recognizer task model is downloaded
+    def check_gesture_model(self):
         base_dir = Path(__file__).resolve().parent
-        motors_file = base_dir / "motors.py"
-        if motors_file.exists():
-            return True, "✓", "Online"
+        model_file = base_dir / "gesture_recognizer.task"
+        if model_file.exists():
+            size_mb = model_file.stat().st_size / (1024 * 1024)
+            return True, "✓", f"Ready ({size_mb:.1f}MB)"
+        return False, "✗", "Model Missing"
+
+    # checks if gesture_sentry.py module is present and online
+    def check_gesture_sentry(self):
+        base_dir = Path(__file__).resolve().parent
+        sentry_file = base_dir / "gesture_sentry.py"
+        if sentry_file.exists():
+            return True, "✓", "Online (✋/✊)"
         return False, "✗", "Not Found"
 
-    # checks if ultrasonic distance sensors are detected
-    def check_ultrasound_detected(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            cnt = 0
-            if self.motor_controller is not None:
-                telem = getattr(self.motor_controller, "telemetry", None)
-                cnt = getattr(telem, "active_sensor_count", 0) if telem else 0
-            if cnt > 0:
-                return True, "✓", "Connected"
-            return False, "✗", "Not Detected (0 Active)"
-        return False, "✗", "Not Detected (Simulation Mode)"
-
-    # returns exact ultrasound count: 4, 8, 12, or 16 if connected, or 0 (Simulation Mode) with cross if none
-    def check_ultrasound_count(self):
-        conn, _ = self._is_arduino_connected()
-        if conn:
-            cnt = 0
-            if self.motor_controller is not None:
-                telem = getattr(self.motor_controller, "telemetry", None)
-                cnt = getattr(telem, "active_sensor_count", 0) if telem else 0
-            if cnt in [4, 8, 12, 16] or cnt > 0:
-                return True, "✓", str(cnt)
-            return False, "✗", "0 (Simulation Mode)"
-        return False, "✗", "0 (Simulation Mode)"
-
-    # checks if autonomous sentry approach tracking system is engaged
-    def check_autonomous_approach(self):
-        if self.motor_controller is not None:
-            engaged = getattr(self.motor_controller, "autonomous_approach_engaged", True)
-            if engaged:
-                return True, "✓", "Engaged"
-            return False, "✗", "Disengaged"
-        return True, "✓", "Engaged"
 
 
 # main class that creates and animates the robotic face on the screen
@@ -595,7 +496,7 @@ class FaceUI:
 
         # Subtitles
         self.subtitle_speaker = "NEUROLIS"
-        self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+        self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
         self.subtitle_time = time.time()
 
         # Colors - Modern Luminous OLED Robot Palette (Vector / EMO inspired)
@@ -618,13 +519,16 @@ class FaceUI:
         self.eye_spacing = int(260 * self.ui_scale)
         self.corner_radius = int(42 * self.ui_scale)
 
-        # Touchscreen 'TALK TO NEUROLIS', 'STAND-BY' & 'SEND ARROW' Button attributes & callbacks
+        # Gesture HUD Bar & fallback click attributes & callbacks
+        self.gesture_sentry = None
+        self._gesture_feedback = (None, 0.0)
         self.on_talk_click = None
         self.on_standby_click = None
         self.on_send_click = None
         self.talk_btn_bbox = None
         self.standby_btn_bbox = None
         self.send_btn_bbox = None
+        self._hud_geom = None
         self._last_talk_press_time = 0.0
         self._last_standby_press_time = 0.0
         self._last_send_press_time = 0.0
@@ -643,9 +547,14 @@ class FaceUI:
     def set_human_latch(self, latched: bool = True, label: str = "HUMAN TARGET"):
         pass
 
-    # links the motor controller handle so hardware inspector can read real camera & serial stats
+    # links the vision gesture sentry engine for real-time progress HUD rendering
+    def set_gesture_sentry(self, gesture_sentry):
+        self.gesture_sentry = gesture_sentry
+        self.hardware_inspector.gesture_sentry = gesture_sentry
+
     def set_motor_controller(self, motor_controller):
-        self.hardware_inspector.motor_controller = motor_controller
+        # Deprecated: motor controller removed in favor of standalone remote control
+        pass
 
     # lets developer or user skip the 18s boot sequence by tapping screen or pressing any key
     def skip_boot(self):
@@ -654,18 +563,36 @@ class FaceUI:
                 self.state = ExpressionState.IDLE
                 self.status_text = "STANDBY // READY"
                 self.subtitle_speaker = "NEUROLIS"
-                self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
+                self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
         self._last_static_key = None
         if hasattr(self, "boot_audio_player"):
             self.boot_audio_player.fade_out_and_stop(0.3)
 
-    # handles key presses to support fullscreen, stop, and instant boot skipping
+    # handles key presses to support fullscreen, stop, instant boot skipping, and Enter key wake/send
     def _on_key(self, event):
         key = (event.keysym or "").lower()
         if key in ["f", "f11"]:
             self._toggle_fullscreen()
         elif key == "escape":
             self.stop()
+        elif key in ["return", "enter"]:
+            with self.lock:
+                in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
+                is_standby = (self.state == ExpressionState.IDLE)
+            if in_boot:
+                self.skip_boot()
+            elif is_standby:
+                if self.on_talk_click is not None:
+                    try:
+                        self.on_talk_click()
+                    except Exception as e:
+                        print(f"[Screen] Enter key talk callback error: {e}")
+            else:
+                if self.on_send_click is not None:
+                    try:
+                        self.on_send_click()
+                    except Exception as e:
+                        print(f"[Screen] Enter key send callback error: {e}")
         else:
             self.skip_boot()
 
@@ -685,57 +612,18 @@ class FaceUI:
 
         with self.lock:
             is_standby = (self.state == ExpressionState.IDLE)
-            is_roam = ("ROAM" in (self.status_text or "").upper())
 
-        # If roaming, any touchscreen interaction immediately halts roaming (<5ms)
-        if is_roam:
-            # Check if STAND-BY button was clicked to hold position
-            if self.standby_btn_bbox is not None:
-                sbx1, sby1, sbx2, sby2 = self.standby_btn_bbox
-                if sbx1 <= event.x <= sbx2 and sby1 <= event.y <= sby2:
-                    self._last_standby_press_time = time.time()
-                    if self.on_standby_click is not None:
-                        try:
-                            self.on_standby_click()
-                        except Exception as e:
-                            print(f"[Screen] Standby button callback error: {e}")
-                    return
-
-            # Any other touch interaction (clicking TALK or tapping screen) resumes active conversation
-            self._last_talk_press_time = time.time()
-            if self.on_talk_click is not None:
-                try:
-                    self.on_talk_click()
-                except Exception as e:
-                    print(f"[Screen] Talk button callback error: {e}")
-            return
-
-        # 2. Check touch tap in STANDBY: tapping TALK TO NEUROLIS button or anywhere on screen wakes up Neurolis
+        # 1. Check touch tap in STANDBY: tapping Palm card or anywhere on screen wakes up Neurolis
         if is_standby:
             self._last_talk_press_time = time.time()
             if self.on_talk_click is not None:
                 try:
                     self.on_talk_click()
                 except Exception as e:
-                    print(f"[Screen] Talk button callback error: {e}")
+                    print(f"[Screen] Talk callback error: {e}")
             return
 
-        # Check if Send Arrow button was clicked during LISTENING
-        if not is_standby and self.send_btn_bbox is not None:
-            snx1, sny1, snx2, sny2 = self.send_btn_bbox
-            if snx1 <= event.x <= snx2 and sny1 <= event.y <= sny2:
-                with self.lock:
-                    is_listening = (self.state == ExpressionState.LISTENING)
-                if is_listening:
-                    self._last_send_press_time = time.time()
-                    if self.on_send_click is not None:
-                        try:
-                            self.on_send_click()
-                        except Exception as e:
-                            print(f"[Screen] Send button callback error: {e}")
-                    return
-
-        # 3. Check touch tap on STAND-BY button (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
+        # 2. Check touch tap on Closed Fist card (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
         if self.standby_btn_bbox is not None and not is_standby:
             sbx1, sby1, sbx2, sby2 = self.standby_btn_bbox
             if sbx1 <= event.x <= sbx2 and sby1 <= event.y <= sby2:
@@ -753,7 +641,7 @@ class FaceUI:
             self._boot_thread = threading.Thread(target=self._boot_diagnostic_worker, daemon=True)
             self._boot_thread.start()
 
-    # runs through all 15 component checks with human-friendly pacing (~1.15s per check)
+    # runs through all component checks with human-friendly pacing (~1.15s per check)
     def _boot_diagnostic_worker(self):
         steps = [
             ("Camera Detected?", self.hardware_inspector.check_camera),
@@ -761,16 +649,9 @@ class FaceUI:
             ("Speakers Detected?", self.hardware_inspector.check_speakers),
             ("Raspberry Pi Detected?", self.hardware_inspector.check_raspberry_pi),
             ("listen.py Test Initiate", self.hardware_inspector.check_listen_py),
-            ("Arduino Detected?", self.hardware_inspector.check_arduino),
-            ("arduino.ino Test Initiate", self.hardware_inspector.check_arduino_firmware),
-            ("Motor Drivers Detected?", self.hardware_inspector.check_motor_drivers),
-            ("Motor Driver Number", self.hardware_inspector.check_motor_driver_count),
-            ("Motors Detected?", self.hardware_inspector.check_motors),
-            ("Motor Number", self.hardware_inspector.check_motor_count),
-            ("motors.py Test Initiate", self.hardware_inspector.check_motors_py),
-            ("Ultrasound Sensor Detected?", self.hardware_inspector.check_ultrasound_detected),
-            ("Ultrasound Number", self.hardware_inspector.check_ultrasound_count),
-            ("Autonomous approach engaged?", self.hardware_inspector.check_autonomous_approach),
+            ("MediaPipe Tasks Vision?", self.hardware_inspector.check_mediapipe),
+            ("Gesture Model Asset?", self.hardware_inspector.check_gesture_model),
+            ("Vision Gesture Sentry?", self.hardware_inspector.check_gesture_sentry),
         ]
 
         for name, check_fn in steps:
@@ -1164,8 +1045,7 @@ class FaceUI:
         # Static UI caching: Only redraw buttons, subtitle card, and header when state/text/dimensions change
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
-        send_pressed = (now - self._last_send_press_time) < 0.25
-        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed, send_pressed)
+        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed)
 
         mouth_cy = center_y + self.eye_h * 0.65
         btn_y = mouth_cy + int(self.eye_h * 0.22)
@@ -1173,7 +1053,7 @@ class FaceUI:
         if static_key != getattr(self, "_last_static_key", None):
             self.canvas.delete("all")
             self._draw_ambient_header(w, h, main_color, cur_state)
-            btn_h = self._draw_talk_button(w, h, center_x, btn_y, cur_state)
+            btn_h = self._draw_gesture_hud(w, h, center_x, btn_y, cur_state)
             self._cached_btn_h = btn_h
             sub_top = btn_y + btn_h + int(10 * (h / 600.0))
             self._draw_subtitle_card(w, h, sub_speaker, sub_text, status_str, main_color, sub_top)
@@ -1185,11 +1065,14 @@ class FaceUI:
 
         items_before_dynamic = len(self.canvas.find_all())
 
-        # 2. Eye Positioning (with gentle suspension dynamics when driving & ocular gaze tracking)
+        # Live Dynamic Gesture HUD progress fill gauge & badge
+        self._draw_gesture_hud_dynamic(w, h, center_x, btn_y, cur_state)
+
+        # 2. Eye Positioning
         gaze_scale = self.ui_scale / 1.8
         gaze_dx = look_x * (24.0 * gaze_scale)
         gaze_dy = look_y * (16.0 * gaze_scale)
-        suspension_bounce = math.sin(self.anim_phase * 6.0) * (3.0 * gaze_scale) if cur_state == ExpressionState.MOVING else 0.0
+        suspension_bounce = 0.0
         left_eye_cx = center_x - (self.eye_spacing / 2.0) + gaze_dx
         right_eye_cx = center_x + (self.eye_spacing / 2.0) + gaze_dx
         eye_cy = center_y + suspension_bounce + gaze_dy
@@ -2077,82 +1960,71 @@ class FaceUI:
         dot_r = int(5 * (h / 600.0))
         self.canvas.create_oval(32, 22 - dot_r, 32 + dot_r * 2, 22 + dot_r, fill=dot_color, outline="")
 
-    # prominent touch-enabled 'TALK TO NEUROLIS' and 'STAND-BY' buttons
-    def _draw_talk_button(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
+    # Dedicated Gesture HUD Bar (✋ Open Palm Wake / ✊ Closed Fist Standby)
+    def _draw_gesture_hud(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
         """
-        Renders the touchable 'TALK TO NEUROLIS' and 'STAND-BY' buttons side-by-side,
-        keeping the combined button area perfectly centered.
-        In IDLE/STANDBY:
-          - TALK TO NEUROLIS: Vibrant glowing Neon Cyan with active green indicator, clickable.
-          - STAND-BY: Muted dark grey with inactive dot, greyed out and unclickable.
-        In ACTIVE (speaking/listening/thinking/watching/roaming):
-          - TALK TO NEUROLIS: Muted dark grey with inactive dot, greyed out and unclickable.
-          - STAND-BY: Vibrant glowing Neon Cyan with active green indicator, clickable kill switch.
-        Returns the height of the button.
+        Renders the static container cards for the Gesture HUD Bar:
+        - Standby Mode:
+          * ✋ Open Palm: Hold 3s to Talk: Vibrant glowing Neon Cyan (#00f0ff).
+          * ✊ Closed Fist: Standby: Muted charcoal (#222f3e), disabled.
+        - Active Mode:
+          * ✋ Open Palm: Talk: Muted charcoal (#222f3e), disabled.
+          * ✊ Closed Fist: Hold 3s for Standby: Vibrant glowing Neon Crimson (#ff4757).
         """
         scale_x = w / 1024.0
         scale_y = h / 600.0
 
-        btn_h = int(48 * scale_y)
+        card_h = int(48 * scale_y)
         radius = int(24 * scale_y)
-        gap = int(14 * scale_x)
+        gap = int(16 * scale_x)
 
-        talk_w = int(340 * scale_x)
-        standby_w = int(160 * scale_x)
-        send_gap = int(10 * scale_x)
-        send_w = int(44 * scale_x)  # compact icon-only button matching button height
-        total_w = talk_w + gap + standby_w + send_gap + send_w
+        card_w = int(380 * scale_x)
+        total_w = card_w * 2 + gap
 
-        # Perfectly center the combined multi-button bar on cx
         bx1 = cx - total_w / 2.0
-        bx2 = bx1 + talk_w
+        bx2 = bx1 + card_w
         sbx1 = bx2 + gap
-        sbx2 = sbx1 + standby_w
-        snx1 = sbx2 + send_gap
-        snx2 = snx1 + send_w
+        sbx2 = sbx1 + card_w
 
         by1 = btn_y
-        by2 = btn_y + btn_h
+        by2 = btn_y + card_h
 
-        # Store bounding boxes for touchscreen tap & mouse click handling
+        # Cache bounding boxes for fallback mouse click & touch handling
         self.talk_btn_bbox = (bx1, by1, bx2, by2)
         self.standby_btn_bbox = (sbx1, by1, sbx2, by2)
-        self.send_btn_bbox = (snx1, by1, snx2, by2)
+        self.send_btn_bbox = None
+        self._hud_geom = (bx1, by1, bx2, by2, sbx1, sbx2, radius, scale_x, scale_y)
 
-        is_roam = ("ROAM" in (self.status_text or "").upper())
-        talk_active = (state == ExpressionState.IDLE) or is_roam
-        standby_active = (state != ExpressionState.IDLE)
-        send_active = (state == ExpressionState.LISTENING)
+        is_standby = (state == ExpressionState.IDLE)
         now = time.time()
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
-        send_pressed = (now - self._last_send_press_time) < 0.25
 
         glow_pad = int(5 * scale_y)
         inset = int(4 * scale_y)
         dot_r = int(5 * scale_y)
         dot_cy = (by1 + by2) / 2.0
-        font_size = int(13 * scale_y)
+        font_size = int(11 * scale_y)
 
-        # ---------------- 1. TALK TO NEUROLIS BUTTON ----------------
-        if talk_active:
-            # Standby / Roaming state: Vibrant Neon Cyan / Electric Blue (Clickable)
+        # ---------------- 1. PALM CARD (WAKE) ----------------
+        if is_standby:
+            # Standby state: Vibrant Neon Cyan (#00f0ff)
             btn_bg = "#003254" if talk_pressed else "#001b2e"
             btn_border = "#00f0ff"
             btn_glow = "#00384d"
-            talk_text_col = "#ffffff" if talk_pressed else "#00f0ff"
-            talk_dot_col = "#00ffaa"
+            palm_text_col = "#ffffff" if talk_pressed else "#00f0ff"
+            palm_dot_col = "#00ffaa"
 
-            # Ambient glow behind button
+            # Ambient glow behind card
             self._create_rounded_rect(
                 bx1 - glow_pad, by1 - glow_pad,
                 bx2 + glow_pad, by2 + glow_pad,
                 radius=radius + glow_pad, fill=btn_glow, outline=""
             )
-            # Main button pill
+            # Main card pill
             self._create_rounded_rect(
                 bx1, by1, bx2, by2,
-                radius=radius, fill=btn_bg, outline=btn_border, width=3
+                radius=radius, fill=btn_bg, outline=btn_border, width=2
             )
             # Inner high-tech specular bevel
             self._create_rounded_rect(
@@ -2160,139 +2032,195 @@ class FaceUI:
                 radius=max(4, radius - inset), fill="", outline="#004d73", width=1
             )
         else:
-            # Active state: Muted Charcoal / Dark Grey (Greyed out & unclickable)
-            talk_bg = "#0c1219"
-            talk_border = "#222f3e"
-            talk_text_col = "#475e7a"
-            talk_dot_col = "#2a3b4c"
+            # Active state: Muted Charcoal (#222f3e), disabled
+            palm_bg = "#0c1219"
+            palm_border = "#222f3e"
+            palm_text_col = "#475e7a"
+            palm_dot_col = "#2a3b4c"
 
             self._create_rounded_rect(
                 bx1, by1, bx2, by2,
-                radius=radius, fill=talk_bg, outline=talk_border, width=2
+                radius=radius, fill=palm_bg, outline=palm_border, width=1
             )
 
-        # Talk button indicator dot
-        talk_dot_x = bx1 + int(32 * scale_x)
+        # Palm card indicator dot
+        palm_dot_x = bx1 + int(24 * scale_x)
         self.canvas.create_oval(
-            talk_dot_x - dot_r, dot_cy - dot_r,
-            talk_dot_x + dot_r, dot_cy + dot_r,
-            fill=talk_dot_col, outline=""
+            palm_dot_x - dot_r, dot_cy - dot_r,
+            palm_dot_x + dot_r, dot_cy + dot_r,
+            fill=palm_dot_col, outline=""
         )
 
-        # Talk button typography
-        talk_text_x = (bx1 + bx2) / 2.0 + int(10 * scale_x)
+        # Palm card label
+        palm_label = "✋ Open Palm: Hold 3s to Talk" if is_standby else "✋ Open Palm: Talk"
+        palm_text_x = (bx1 + bx2) / 2.0 + int(10 * scale_x)
         self.canvas.create_text(
-            talk_text_x, dot_cy,
-            text="TALK TO NEUROLIS",
-            fill=talk_text_col,
-            font=(FONT_FAMILY, font_size, "bold")
+            palm_text_x, dot_cy,
+            text=palm_label,
+            fill=palm_text_col,
+            font=(FONT_FAMILY, font_size, "bold" if is_standby else "normal")
         )
 
-        # ---------------- 2. STAND-BY BUTTON ----------------
-        if standby_active:
-            # Active state: Vibrant Neon Cyan / Electric Blue (Clickable kill switch)
-            btn_bg = "#003254" if standby_pressed else "#001b2e"
-            btn_border = "#00f0ff"
-            btn_glow = "#00384d"
-            standby_text_col = "#ffffff" if standby_pressed else "#00f0ff"
-            standby_dot_col = "#00ffaa"
+        # ---------------- 2. CLOSED FIST CARD (STANDBY) ----------------
+        if not is_standby:
+            # Active state: Vibrant Glowing Neon Crimson (#ff4757)
+            btn_bg = "#380d15" if standby_pressed else "#1f0a10"
+            btn_border = "#ff4757"
+            btn_glow = "#3d000f"
+            fist_text_col = "#ffffff" if standby_pressed else "#ff4757"
+            fist_dot_col = "#ff4757"
 
-            # Ambient glow behind button
+            # Ambient glow behind card
             self._create_rounded_rect(
                 sbx1 - glow_pad, by1 - glow_pad,
                 sbx2 + glow_pad, by2 + glow_pad,
                 radius=radius + glow_pad, fill=btn_glow, outline=""
             )
-            # Main button pill
+            # Main card pill
             self._create_rounded_rect(
                 sbx1, by1, sbx2, by2,
-                radius=radius, fill=btn_bg, outline=btn_border, width=3
-            )
-            # Inner high-tech specular bevel
-            self._create_rounded_rect(
-                sbx1 + inset, by1 + inset, sbx2 - inset, by2 - inset,
-                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
-            )
-        else:
-            # Standby state: Muted Charcoal / Dark Grey (Greyed out & unclickable)
-            standby_bg = "#0c1219"
-            standby_border = "#222f3e"
-            standby_text_col = "#475e7a"
-            standby_dot_col = "#2a3b4c"
-
-            self._create_rounded_rect(
-                sbx1, by1, sbx2, by2,
-                radius=radius, fill=standby_bg, outline=standby_border, width=2
-            )
-
-        # Standby button indicator dot
-        standby_dot_x = sbx1 + int(24 * scale_x)
-        self.canvas.create_oval(
-            standby_dot_x - dot_r, dot_cy - dot_r,
-            standby_dot_x + dot_r, dot_cy + dot_r,
-            fill=standby_dot_col, outline=""
-        )
-
-        # Standby button typography (strictly no emojis)
-        standby_text_x = (sbx1 + sbx2) / 2.0 + int(8 * scale_x)
-        self.canvas.create_text(
-            standby_text_x, dot_cy,
-            text="STAND-BY",
-            fill=standby_text_col,
-            font=(FONT_FAMILY, font_size, "bold")
-        )
-
-        # ---------------- 3. SEND ARROW ICON BUTTON ----------------
-        sncx = (snx1 + snx2) / 2.0
-        sncy = (by1 + by2) / 2.0
-        ar = int(9 * scale_y)
-
-        if send_active:
-            # During LISTENING: Active glowing cyan/mint pill with bright vector send arrow
-            btn_bg = "#003254" if send_pressed else "#001b2e"
-            btn_border = "#00ffaa"
-            btn_glow = "#003b33"
-            arrow_col = "#ffffff" if send_pressed else "#00ffaa"
-
-            # Ambient glow behind button
-            self._create_rounded_rect(
-                snx1 - glow_pad, by1 - glow_pad,
-                snx2 + glow_pad, by2 + glow_pad,
-                radius=radius + glow_pad, fill=btn_glow, outline=""
-            )
-            # Main button rounded pill
-            self._create_rounded_rect(
-                snx1, by1, snx2, by2,
                 radius=radius, fill=btn_bg, outline=btn_border, width=2
             )
             # Inner high-tech specular bevel
             self._create_rounded_rect(
-                snx1 + inset, by1 + inset, snx2 - inset, by2 - inset,
-                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
-            )
-            # Sleek forward send arrow / dart vector polygon
-            self.canvas.create_polygon(
-                sncx - ar * 0.8, sncy - ar * 0.85,
-                sncx + ar * 0.95, sncy,
-                sncx - ar * 0.8, sncy + ar * 0.85,
-                sncx - ar * 0.35, sncy,
-                fill=arrow_col, outline=""
+                sbx1 + inset, by1 + inset, sbx2 - inset, by2 - inset,
+                radius=max(4, radius - inset), fill="", outline="#611220", width=1
             )
         else:
-            # Standby / non-listening state: Muted dark charcoal with slate arrow (unclickable)
+            # Standby state: Muted Charcoal (#222f3e), disabled
+            fist_bg = "#0c1219"
+            fist_border = "#222f3e"
+            fist_text_col = "#475e7a"
+            fist_dot_col = "#2a3b4c"
+
             self._create_rounded_rect(
-                snx1, by1, snx2, by2,
-                radius=radius, fill="#0c1219", outline="#222f3e", width=2
-            )
-            self.canvas.create_polygon(
-                sncx - ar * 0.8, sncy - ar * 0.85,
-                sncx + ar * 0.95, sncy,
-                sncx - ar * 0.8, sncy + ar * 0.85,
-                sncx - ar * 0.35, sncy,
-                fill="#475e7a", outline=""
+                sbx1, by1, sbx2, by2,
+                radius=radius, fill=fist_bg, outline=fist_border, width=1
             )
 
-        return float(btn_h)
+        # Fist card indicator dot
+        fist_dot_x = sbx1 + int(24 * scale_x)
+        self.canvas.create_oval(
+            fist_dot_x - dot_r, dot_cy - dot_r,
+            fist_dot_x + dot_r, dot_cy + dot_r,
+            fill=fist_dot_col, outline=""
+        )
+
+        # Fist card label
+        fist_label = "✊ Closed Fist: Hold 3s to Standby" if not is_standby else "✊ Closed Fist: Standby"
+        fist_text_x = (sbx1 + sbx2) / 2.0 + int(10 * scale_x)
+        self.canvas.create_text(
+            fist_text_x, dot_cy,
+            text=fist_label,
+            fill=fist_text_col,
+            font=(FONT_FAMILY, font_size, "bold" if not is_standby else "normal")
+        )
+
+        return float(card_h)
+
+    # renders live, animated fill gauges and progress timers across the Gesture HUD Bar
+    def _draw_gesture_hud_dynamic(self, w: float, h: float, cx: float, btn_y: float, state: str):
+        """
+        Renders live, animated fill gauges and progress timers across the Gesture HUD Bar
+        at full display frame rate whenever a hand gesture is held continuously.
+        """
+        if not hasattr(self, "_hud_geom") or self._hud_geom is None:
+            return
+
+        bx1, by1, bx2, by2, sbx1, sbx2, radius, scale_x, scale_y = self._hud_geom
+        is_standby = (state == ExpressionState.IDLE)
+
+        gesture_name, progress = None, 0.0
+        if getattr(self, "gesture_sentry", None) is not None:
+            try:
+                gesture_name, progress = self.gesture_sentry.get_feedback()
+            except Exception:
+                gesture_name, progress = None, 0.0
+        elif hasattr(self, "_gesture_feedback"):
+            gesture_name, progress = self._gesture_feedback
+
+        progress = max(0.0, min(1.0, float(progress or 0.0)))
+        if progress <= 0.001:
+            return
+
+        font_size = int(12 * scale_y)
+        dot_cy = (by1 + by2) / 2.0
+        bar_pad_x = int(18 * scale_x)
+        bar_h = int(6 * scale_y)
+        bar_y2 = by2 - int(5 * scale_y)
+        bar_y1 = bar_y2 - bar_h
+
+        # In STANDBY: animate Open Palm progress across Palm Card
+        if is_standby and (gesture_name == "OPEN_PALM" or progress > 0.0):
+            track_w = (bx2 - bx1) - 2 * bar_pad_x
+            tx1 = bx1 + bar_pad_x
+            tx2 = bx2 - bar_pad_x
+            fill_w = max(4, int(track_w * progress))
+            fx2 = tx1 + fill_w
+
+            # 1. Dark track background
+            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(3 * scale_y), fill="#05263d", outline="")
+
+            # 2. Glowing fill gauge
+            fill_col = "#ffffff" if progress >= 0.98 else "#00f0ff"
+            glow_col = "#00ffaa"
+            self._create_rounded_rect(tx1 - 1, bar_y1 - 1, fx2 + 1, bar_y2 + 1, radius=int(3 * scale_y), fill=glow_col, outline="")
+            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(3 * scale_y), fill=fill_col, outline="")
+
+            # 3. Dynamic countdown badge text over the card
+            sec_held = min(3.0, progress * 3.0)
+            pct = int(progress * 100)
+            txt = f"✋ Holding... {sec_held:.1f}s / 3.0s ({pct}%)"
+            palm_text_x = (bx1 + bx2) / 2.0 + int(8 * scale_x)
+
+            # Dark cover pill behind text to keep it ultra-readable while holding
+            self._create_rounded_rect(
+                bx1 + int(40 * scale_x), by1 + int(6 * scale_y),
+                bx2 - int(10 * scale_x), by2 - int(12 * scale_y),
+                radius=int(10 * scale_y), fill="#00243d", outline="#00f0ff", width=1
+            )
+            self.canvas.create_text(
+                palm_text_x, dot_cy - int(3 * scale_y),
+                text=txt,
+                fill="#ffffff",
+                font=(FONT_FAMILY, font_size, "bold")
+            )
+
+        # In ACTIVE: animate Closed Fist progress across Fist Card
+        elif (not is_standby) and (gesture_name == "CLOSED_FIST" or progress > 0.0):
+            track_w = (sbx2 - sbx1) - 2 * bar_pad_x
+            tx1 = sbx1 + bar_pad_x
+            tx2 = sbx2 - bar_pad_x
+            fill_w = max(4, int(track_w * progress))
+            fx2 = tx1 + fill_w
+
+            # 1. Dark track background
+            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(3 * scale_y), fill="#331118", outline="")
+
+            # 2. Glowing crimson fill gauge
+            fill_col = "#ffffff" if progress >= 0.98 else "#ff4757"
+            glow_col = "#ff6b81"
+            self._create_rounded_rect(tx1 - 1, bar_y1 - 1, fx2 + 1, bar_y2 + 1, radius=int(3 * scale_y), fill=glow_col, outline="")
+            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(3 * scale_y), fill=fill_col, outline="")
+
+            # 3. Dynamic countdown badge text over the card
+            sec_held = min(3.0, progress * 3.0)
+            pct = int(progress * 100)
+            txt = f"✊ Holding... {sec_held:.1f}s / 3.0s ({pct}%)"
+            fist_text_x = (sbx1 + sbx2) / 2.0 + int(8 * scale_x)
+
+            # Dark cover pill behind text to keep it ultra-readable while holding
+            self._create_rounded_rect(
+                sbx1 + int(40 * scale_x), by1 + int(6 * scale_y),
+                sbx2 - int(10 * scale_x), by2 - int(12 * scale_y),
+                radius=int(10 * scale_y), fill="#420f18", outline="#ff4757", width=1
+            )
+            self.canvas.create_text(
+                fist_text_x, dot_cy - int(3 * scale_y),
+                text=txt,
+                fill="#ffffff",
+                font=(FONT_FAMILY, font_size, "bold")
+            )
 
     # shrunken, dedicated lower subtitle card with speaker pills, live status, and word wrap
     def _draw_subtitle_card(self, w: float, h: float, speaker: str, text: str, status_text: str, accent_col: str, card_y1: float):
@@ -2541,10 +2469,8 @@ class FaceUI:
         # active scanning indicator row
         steps_order = [
             "Camera Detected?", "Mic Detected?", "Speakers Detected?", "Raspberry Pi Detected?",
-            "listen.py Test Initiate", "Arduino Detected?", "arduino.ino Test Initiate",
-            "Motor Drivers Detected?", "Motor Driver Number", "Motors Detected?",
-            "Motor Number", "motors.py Test Initiate", "Ultrasound Sensor Detected?", "Ultrasound Number",
-            "Autonomous approach engaged?"
+            "listen.py Test Initiate", "MediaPipe Tasks Vision?", "Gesture Model Asset?",
+            "Vision Gesture Sentry?"
         ]
 
         if total_revealed < len(steps_order):

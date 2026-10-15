@@ -26,10 +26,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Endpointer v2 configuration
     "vad_mode": 2,
     "onset_snr_db": 6.0,
-    "continue_snr_db": 3.5,
-    "min_onset_rms": 220.0,
+    "continue_snr_db": 3.0,
+    "min_onset_rms": 30.0,
     "max_onset_rms": 1300.0,
-    "min_continue_rms": 150.0,
+    "min_continue_rms": 20.0,
     "onset_window": 8,
     "onset_required": 4,
     "speaker_ratio": 0.32,
@@ -255,8 +255,8 @@ class Endpointer:
         self.live_rms = 0.0
         self.live_vad = False
         self.live_floor = initial_seed
-        self.live_onset_thr = float(self.cfg.get("min_onset_rms", 220.0))
-        self.live_cont_thr = float(self.cfg.get("min_continue_rms", 150.0))
+        self.live_onset_thr = float(self.cfg.get("min_onset_rms", 30.0))
+        self.live_cont_thr = float(self.cfg.get("min_continue_rms", 20.0))
         self.live_silence_sec = 0.0
 
     def begin_turn(self, holdoff_sec: Optional[float] = None):
@@ -336,13 +336,13 @@ class Endpointer:
             self.live_floor = floor
 
             onset_snr_db = float(self.cfg.get("onset_snr_db", 6.0))
-            min_onset_rms = float(self.cfg.get("min_onset_rms", 220.0))
+            min_onset_rms = float(self.cfg.get("min_onset_rms", 30.0))
             max_onset_rms = float(self.cfg.get("max_onset_rms", 1300.0))
             onset_thr = float(np.clip(floor * (10.0 ** (onset_snr_db / 20.0)), min_onset_rms, max_onset_rms))
             self.live_onset_thr = onset_thr
 
-            cont_snr_db = float(self.cfg.get("continue_snr_db", 3.5))
-            min_continue_rms = float(self.cfg.get("min_continue_rms", 150.0))
+            cont_snr_db = float(self.cfg.get("continue_snr_db", 3.0))
+            min_continue_rms = float(self.cfg.get("min_continue_rms", 20.0))
             cont_base = max(floor * (10.0 ** (cont_snr_db / 20.0)), min_continue_rms)
             self.live_cont_thr = cont_base
 
@@ -437,15 +437,15 @@ class Endpointer:
         accepted = True
         reject_reason = ""
         min_voiced_frames = int(self.cfg.get("min_voiced_frames", 8))
-        min_onset_rms = float(self.cfg.get("min_onset_rms", 220.0))
+        min_onset_rms = float(self.cfg.get("min_onset_rms", 30.0))
 
         if not is_manual:
             if self.voiced_count < min_voiced_frames:
                 accepted = False
                 reject_reason = f"voiced_frames_too_low({self.voiced_count}<{min_voiced_frames})"
-            elif p90_rms < max(min_onset_rms, self.live_floor * 1.8):
+            elif p90_rms < max(min_onset_rms, self.live_floor * 1.35):
                 accepted = False
-                reject_reason = f"p90_rms_too_low({p90_rms:.1f}<{max(min_onset_rms, self.live_floor * 1.8):.1f})"
+                reject_reason = f"p90_rms_too_low({p90_rms:.1f}<{max(min_onset_rms, self.live_floor * 1.35):.1f})"
 
         self.result_audio = audio if accepted else None
         self.result_info = {

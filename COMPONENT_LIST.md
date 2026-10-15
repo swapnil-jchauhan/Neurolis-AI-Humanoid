@@ -1,440 +1,109 @@
 # Project Neurolis Component List
 
-Last updated: 2026-09-04
+Last updated: 2026-10-15
 
-This file tracks the hardware planned for Project Neurolis.
+This file tracks the hardware and physical inventory for Project Neurolis.
 
-Project context:
-
-- Swapnil is a development partner on Neurolis.
-- A senior/project lead is guiding final hardware decisions.
-- Unconfirmed hardware choices should stay marked as unresolved until confirmed.
+Project Context:
+- Developed by Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys.
+- Build Version: Stable High School Exhibition Build (Teleoperated 4WD + MediaPipe Gesture Sentry + Conversational Talkbot).
+- Autonomous roaming and person-following pipelines have been removed from the high-level brain for safety. Movement is 100% manually operated via remote control.
 
 ======================================================================
 1. MAIN COMPUTE AND CONTROL
 ======================================================================
 
-1. Raspberry Pi 5, 4GB RAM
+1. Raspberry Pi 5, 4GB/8GB RAM
    Quantity: 1
    Role:
-   - Main high-level brain.
-   - Handles voice, AI, camera, touchscreen UI, high-level decisions,
-     and serial commands to Arduino.
+   - Master high-level brain.
+   - Runs Python 3.13, MediaPipe gesture sentry, audio endpointer v2, Groq LLM brain, Edge-TTS/Piper voice engine, and 60 FPS Face UI.
    Notes:
-   - Needs stable high-current 5V power.
-   - Should use cooling for long exhibition runtime.
+   - Uses active cooling fan/heatsink to ensure continuous operation across exhibition hours.
+   - Powered via high-current 5V 5A step-down buck converter.
 
-2. Arduino Mega
+2. Arduino Mega 2560
    Quantity: 1
    Role:
-   - Low-level motor and sensor controller.
-   - Handles 4 non-encoder DC motors, 4 ultrasonic distance sensors, and immediate movement commands.
+   - Dedicated chassis and motor driver interface.
+   - Receives wireless RF/RC teleoperation signals from the student operator's remote controller.
+   - Directly drives 4x BTS7960 motor driver modules.
    Notes:
-   - Should handle movement safety independent of internet/API.
+   - Isolated from high-level AI brain to prevent software crashes from affecting motor safety.
 
-3. SD Card
+3. MicroSD Card (High Endurance 32GB/64GB)
    Quantity: 1
    Role:
-   - Raspberry Pi storage.
-   Notes:
-   - Use a reliable card for exhibition day.
+   - OS and software storage for Raspberry Pi 5.
 
-4. Raspberry Pi 5 Cooling Fan/Heatsink
+4. Raspberry Pi Active Cooler
    Quantity: 1
    Role:
-   - Thermal management.
-   Notes:
-   - Important for long runtime.
+   - Thermal regulation for continuous exhibition runtime.
 
 ======================================================================
-2. VOICE, SCREEN, AND INTERACTION
+2. VISION, DISPLAY, AND AUDIO INTERACTION
 ======================================================================
 
-1. Raspberry Pi 7-inch Touchscreen
+1. 7-inch Display (1024x600 HDMI/DSI)
    Quantity: 1
    Role:
-   - Face/UI display.
-   - Future `Talk to Neurolis` activation button.
-   - Expression states: idle, listening, thinking, speaking, happy,
-     confused, error.
-
-2. Raspberry Pi Camera Module 5MP
-   Quantity: 1
-   Role:
-   - Listed camera hardware.
+   - Dedicated 60 FPS animated OLED robot face monitor and subtitle screen.
+   - Displays real-time MediaPipe gesture HUD progress bar above subtitles.
    Notes:
-   - Final role needs confirmation because the current final plan now uses
-     a webcam for Neurolis vision.
-   - Keep listed for now because it is part of the known hardware inventory.
+   - Touch digitizer was broken during assembly. Touch interaction has been completely removed in software.
+   - All wake/standby control is handled hands-free via MediaPipe camera gestures.
 
-3. Webcam
+2. USB HD Webcam (720p / 1080p)
+   Quantity: 1 (Stationed on /dev/video0)
+   Role:
+   - Continuous Vision Sentry: Downscaled 320x240 frames processed by MediaPipe Tasks Gesture Recognizer in background thread (~15 FPS).
+     * ✋ Open Palm (held 3s): Wakes robot from Standby into active conversation.
+     * ✊ Closed Fist (held 3s): Forces active robot into Standby mode.
+   - On-Demand AI Vision: When user asks visual questions ("What am I holding?", "Look at this"), captures a single frame for Groq Vision analysis.
+
+3. Microphone (USB Mic / Phone Mic over ADB PipeWire)
    Quantity: 1
    Role:
-   - Final Neurolis camera for on-demand AI vision.
-   Notes:
-   - Activated only when the user asks a visual question.
-   - Example use: user asks "What am I holding?", Neurolis captures
-     one image and answers using Groq vision/multimodal API.
-   - Should be kept fast by capturing one frame and asking for a short reply.
-   - Should not run paid/API vision continuously.
-   - Not used for continuous obstacle detection.
-   - Not used as the main motor safety sensor.
+   - High-fidelity 16kHz mono audio input.
+   - Connected to Endpointer v2 and WebRTC VAD Level 2 for dynamic ambient noise floor tracking in noisy exhibition halls.
 
-4. Microphone
+4. Powered Speaker (USB / Bluetooth A2DP / 3.5mm Powered)
    Quantity: 1
    Role:
-   - Voice input.
-   Current assumption:
-   - Exact type unknown.
-   Preferred:
-   - USB microphone for Raspberry Pi and Python compatibility.
-   Avoid:
-   - 3.5mm microphone unless using a USB sound card.
-
-5. Speaker
-   Quantity: 1
-   Role:
-   - Voice output.
-   Current assumption:
-   - Exact setup unknown.
-   Important:
-   - Raspberry Pi cannot directly drive a passive speaker loudly/safely.
-   - Use an active speaker or amplifier module.
+   - Clean audio output for Edge-TTS neural speech and Piper offline voice synthesis.
 
 ======================================================================
-3. DRIVE SYSTEM
+3. DRIVE AND POWER SYSTEM
 ======================================================================
 
-1. DC 12V 100RPM Johnson DC Motor (No Encoders)
+1. DC 12V 100RPM Johnson DC Motors (No Encoders)
    Quantity: 4
    Role:
-   - 4WD Skid-Steer chassis (2 Left motors, 2 Right motors).
-   - Driven via 4x BTS7960 motor drivers.
-   - Distance and braking handled via vision box ratio and ultrasonics.
+   - 4-Wheel Drive (4WD) skid-steer chassis (2 Left motors, 2 Right motors).
+   - Manually driven via remote control teleoperation.
 
-2. BTS7960 43A Motor Driver
+2. BTS7960 43A High-Power H-Bridge Motor Drivers
    Quantity: 4
    Role:
-   - High-current DC motor drivers (1 driver per motor).
+   - High-current motor drivers (1 driver per Johnson DC motor) capable of handling heavy chassis loads without overheating.
 
-3. Wheels
-   Quantity: 4
+3. Heavy-Duty 4WD Aluminum Chassis & Wheels
+   Quantity: 1 chassis, 4 wheels
    Role:
-   - 4-Wheel Drive system.
+   - Physical platform carrying the humanoid torso, display, battery, and compute.
 
-4. Motor Bracket
-   Quantity: 4
+4. Wireless Teleoperation Remote & Receiver
+   Quantity: 1 pair
    Role:
-   - Motor mounting to chassis.
+   - Manual driver controls operated by student team during demonstrations.
 
-======================================================================
-4. SENSORS
-======================================================================
-
-1. HC-SR04 Ultrasonic Sensors (Scalable 16-Sensor God-Tier Bank System)
-   Quantity: Up to 16 total (auto-detects and seamlessly supports 4, 8, 12, or 16 plugged in)
-   Role:
-   - Full 360-degree perimeter collision avoidance:
-     * Bank 1 (Slots 0..3)  -> Base 4 Sensors (1 per side):
-       - Front 1: Trig 30, Echo 31
-       - Left 1:  Trig 32, Echo 33
-       - Right 1: Trig 34, Echo 35
-       - Rear 1:  Trig 36, Echo 37
-     * Bank 2 (Slots 4..7)  -> Expanded to 8 Sensors (2 per side):
-       - Front 2: Trig 38, Echo 39
-       - Left 2:  Trig 40, Echo 41
-       - Right 2: Trig 42, Echo 43
-       - Rear 2:  Trig 44, Echo 45
-     * Bank 3 (Slots 8..11) -> Expanded to 12 Sensors (3 per side):
-       - Front 3: Trig 46, Echo 47
-       - Left 3:  Trig 48, Echo 49
-       - Right 3: Trig 50, Echo 51
-       - Rear 3:  Trig 52, Echo 53
-     * Bank 4 (Slots 12..15)-> Expanded to 16 Sensors (4 per side):
-       - Front 4: Trig 54 (A0), Echo 55 (A1)
-       - Left 4:  Trig 56 (A2), Echo 57 (A3)
-       - Right 4: Trig 58 (A4), Echo 59 (A5)
-       - Rear 4:  Trig 60 (A6), Echo 61 (A7)
-   - Zero-Fuss Plug-and-Play: The code is pre-configured for all 16 sensors. Arduino auto-probes connected slots at boot and automatically configures 4, 8, 12, or 16 without needing code changes!
-   - Time-Sliced Bank Interleaving: Firing is interleaved 1 bank per tick (4 opposite-facing sensors: 1 per side), keeping CPU load light (<12ms) and completely eliminating acoustic echo cross-talk.
-   - Dual-Direction Hard Braking: Front obstacle <20cm stops forward motion; rear obstacle <20cm stops reverse motion. Independent hardware safety loop.
-
-3. SmartElex ToF Imager - VL53L5CX
-   Quantity: 1 planned
-   Role:
-   - Main planned object/proximity detection sensor.
-   - Gives an 8x8 multi-zone distance grid instead of a single distance point.
-   - Better for detecting whether something is actually close in front of Neurolis.
-   Notes:
-   - Selected for object detection.
-   - Best handled by Raspberry Pi because VL53L5CX requires firmware loading
-     and more memory than simple Arduino sensors.
-   - Pi should process the distance grid and send safe high-level decisions
-     to Arduino, such as STOP or MOVE.
-   - Use this for practical close-object detection before trusting camera logic.
-   - Still test carefully before connecting any real motor movement.
-
-======================================================================
-5. POWER SYSTEM
-======================================================================
-
-1. GenX 11.1V 3S 8000mAh LiPo Battery
+5. 12V High-Amperage Battery Pack
    Quantity: 1
    Role:
-   - Main robot battery.
-   Notes:
-   - Powers motors and electronics through proper regulation.
-   - Needs fuse, switch, safe charging, and safe storage.
+   - Dedicated high-current power for 4x Johnson motors and BTS7960 drivers.
 
-2. IMAX B6 Battery Charger
+6. 5V 5A High-Current Step-Down Buck Converter
    Quantity: 1
    Role:
-   - LiPo battery charger.
-   Notes:
-   - Use correct 3S balance charge mode.
-
-3. XL4015E1 5A Step-Down Module
-   Quantity: 1
-   Role:
-   - Voltage regulation.
-   Current assumption:
-   - Likely 5V/5.1V for low-voltage electronics.
-   Important:
-   - Must be measured with a multimeter before connecting electronics.
-   - Raspberry Pi 5 needs stable high-current 5V power.
-   - Do not casually power the Pi from a weak converter without testing.
-
-4. Power Switch
-   Quantity: 1
-   Role:
-   - Main power control.
-   Notes:
-   - Must be accessible and properly rated.
-
-5. Fuse Holder + Fuse
-   Quantity: 1
-   Role:
-   - Electrical protection.
-   Current status:
-   - Fuse rating unknown.
-   Important:
-   - Do not guess.
-   - Choose based on battery capability, motor stall current, wire gauge,
-     and total load.
-
-6. XT60 Connectors
-   Quantity: 2
-   Role:
-   - Battery/high-current power connectors.
-
-7. 8AWG Silicone Wire Red
-   Quantity: 1
-   Role:
-   - High-current positive wiring.
-
-8. 8AWG Silicone Wire Black
-   Quantity: 1
-   Role:
-   - High-current ground wiring.
-
-9. Heat Shrink Sleeve
-   Quantity: 1
-   Role:
-   - Insulation and protection for solder joints/connectors.
-
-======================================================================
-6. WIRING AND PROTOTYPING
-======================================================================
-
-1. Male-Male Jumper Wires
-   Quantity: 1 pack
-   Role:
-   - Signal/prototyping connections.
-   Warning:
-   - Do not use for motor or battery current.
-
-2. Male-Female Jumper Wires
-   Quantity: 1 pack
-   Role:
-   - Sensor/module wiring.
-   Warning:
-   - Do not use for motor or battery current.
-
-3. Breadboard / PCB
-   Quantity: 1
-   Role:
-   - Prototyping or final signal distribution.
-   Notes:
-   - Breadboard is fine for signals.
-   - Do not run motor current through a breadboard.
-   - Perfboard/PCB is better for reliable exhibition wiring.
-
-======================================================================
-7. CURRENT ASSUMPTIONS AND UNRESOLVED QUESTIONS
-======================================================================
-
-1. Third Johnson motor
-   Status:
-   - Unknown.
-   Question:
-   - Is it spare, third-drive, head/torso, arm, or another mechanism?
-
-2. Drive layout
-   Status:
-   - Unknown.
-   Question:
-   - Two-wheel differential drive or a different layout?
-
-3. Microphone type
-   Status:
-   - Unknown.
-   Preferred:
-   - USB microphone.
-
-4. Speaker/amplifier setup
-   Status:
-   - Unknown.
-   Requirement:
-   - Active speaker or amplifier module needed.
-
-5. Buck converter output
-   Status:
-   - Likely 5V/5.1V, but unconfirmed.
-   Required action:
-   - Measure before connecting electronics.
-
-6. Fuse rating
-   Status:
-   - Unknown.
-   Required action:
-   - Choose after motor current and total load are known.
-
-7. Common ground
-   Status:
-   - To be confirmed.
-   Note:
-   - Pi/Arduino/motor driver logic usually need common ground, but wiring
-     must be planned carefully.
-
-8. Chassis layout
-   Status:
-   - Unknown.
-   Required action:
-   - Confirm with senior/project lead.
-
-9. SmartElex VL53L5CX mounting location
-   Status:
-   - To be decided.
-   Current plan:
-   - Mount on the front body panel where it has a clear view ahead.
-   Requirement:
-   - Should look clean and should not be blocked by body panels, wires,
-     hands, decorations, or the touchscreen.
-
-10. Webcam / Raspberry Pi camera final role
-    Status:
-    - Partly confirmed.
-    Current plan:
-    - Webcam is final Neurolis hardware for on-demand AI vision only.
-    - Webcam is not just for PC testing.
-    - Do not use webcam/camera as the main motor safety sensor.
-    Remaining question:
-    - Should the Raspberry Pi Camera Module 5MP stay as backup/spare,
-      or be removed from the final build plan?
-
-======================================================================
-8. RESPONSIBILITY SPLIT
-======================================================================
-
-Raspberry Pi 5 should handle:
-
-- voice input
-- activation/session logic
-- Groq Whisper STT
-- Groq Chat replies
-- short-term memory
-- edge-tts or future TTS
-- camera/vision processing
-- VL53L5CX distance-grid processing
-- touchscreen UI and expressions
-- high-level decisions
-- serial commands to Arduino
-
-Arduino Mega should handle:
-
-- BTS7960 motor driver control
-- motor encoder reading
-- HC-SR04 ultrasonic readings
-- simple ToF readings if a simple ToF sensor is used
-- direct movement commands:
-  - FORWARD
-  - STOP
-  - LEFT
-  - RIGHT
-  - REVERSE
-- low-level safety stop behavior
-
-======================================================================
-9. SAFETY NOTES
-======================================================================
-
-- Do not power motors through the Raspberry Pi or Arduino.
-- Do not use jumper wires for high-current motor or battery wiring.
-- Use a fuse between the LiPo battery and main power distribution.
-- Measure buck converter output before connecting electronics.
-- Keep motor power and logic wiring organized to reduce random resets.
-- Use the IMAX B6 correctly in 3S balance charge mode.
-- Real movement safety should come from Arduino-read sensors.
-- Do not rely on Groq Vision or camera-only detection for motor safety.
-- During motor tests, lift the robot or keep wheels off the ground first.
-
-======================================================================
-10. PLANNED HARDWARE INTEGRATION ORDER
-======================================================================
-
-1. Confirm power architecture with senior/project lead.
-2. Confirm microphone and speaker/amplifier choices.
-3. Measure and set buck converter output.
-4. Test Raspberry Pi voice pipeline from stable power.
-5. Test Arduino Mega separately over USB.
-6. Test one BTS7960 with one motor.
-7. Read one motor encoder reliably on Arduino.
-8. Add serial command protocol between Pi and Arduino.
-9. Add `STOP` as the first command.
-10. Add ultrasonic sensors one at a time.
-11. Test SmartElex VL53L5CX on Raspberry Pi and read its 8x8 distance grid.
-12. Decide final close-object STOP threshold from real readings.
-13. Add VL53L0X/ToF sensor if still useful as backup or extra close sensor.
-14. Add on-demand camera vision for interactive questions.
-15. Add movement commands slowly:
-    - forward
-    - reverse
-    - left
-    - right
-16. Integrate screen states after voice behavior is stable.
-17. Run long-duration tests before exhibition day.
-
-======================================================================
-11. CHANGE LOG
-======================================================================
-
-- 2026-05-20:
-  - Created initial component list from supplied parts.
-
-- 2026-05-20:
-  - Added assumptions:
-    - third motor unknown
-    - USB microphone preferred
-    - speaker/amplifier unknown
-    - buck likely 5V/5.1V but must be measured
-    - fuse rating unknown until current draw is known
-    - senior/project lead should confirm final hardware decisions
-
-- 2026-05-25:
-  - Reformatted file into a plain, Notepad-friendly grouped list.
-
-- 2026-05-25:
-  - Added SmartElex ToF Imager - VL53L5CX as the selected planned
-    object/proximity detection sensor.
-  - Updated webcam role to final on-demand AI vision for interactive
-    questions, not PC testing and not continuous obstacle detection.
+   - Steps 12V battery power down to clean 5V to power the Raspberry Pi 5 safely with common ground.
