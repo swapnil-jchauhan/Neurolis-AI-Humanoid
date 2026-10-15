@@ -432,7 +432,7 @@ def set_hardware_gain(gain_pct: int):
 
 # Load dynamic mic calibration from mic_config.json if available
 MIC_CONFIG_FILE = Path(__file__).resolve().parent / "mic_config.json"
-LOW_CUTOFF_HZ = 85.0
+LOW_CUTOFF_HZ = 70.0
 HIGH_CUTOFF_HZ = 4500.0
 TREBLE_BOOST = 1.40
 BG_SUPPRESS_DB = 24.0
@@ -717,6 +717,7 @@ def reset_session():
     session_facts.clear()
     was_recently_hurt = False
     was_recently_in_villain_mode = False
+    intent_rules.was_recently_in_villain_mode = False
     session_has_triggered_rogue = False
     intent_rules.session_has_triggered_rogue = False
     recent_assistant_replies.clear()
@@ -752,6 +753,9 @@ def clean_model_reply(text: str) -> str:
             cleaned = blocks[-1]
     cleaned = re.sub(r"<facts>.*?</facts>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<facts>.*$", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    # Strip tool_call and function wrappers
+    cleaned = re.sub(r"</?tool_call>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"</?function[^>]*>", "", cleaned, flags=re.IGNORECASE)
     # Strip standalone non-spoken control tags like <action>CAMERA</action>, <action>MEAN</action>, <action>SILENCE_REQUIRED</action>
     cleaned = re.sub(r"<action>\s*(CAMERA|MEAN|SILENCE_REQUIRED)\s*</action>", "", cleaned, flags=re.IGNORECASE)
     # Strip opening and closing action tags while preserving inner spoken content
@@ -2635,8 +2639,19 @@ def handle_user_text(text: str) -> bool:
         return False
 
     # 6b. Snap-out from Rogue AI easter egg when user expresses shock/confusion/critique -> 0ms, 0 tokens
-    if was_recently_in_villain_mode and is_shocked_or_confused_reaction(text):
+    if (was_recently_in_villain_mode or intent_rules.was_recently_in_villain_mode) and is_shocked_or_confused_reaction(text):
         was_recently_in_villain_mode = False
+        intent_rules.was_recently_in_villain_mode = False
+        reply = get_non_repeating_phrase(PLAUSIBLE_DENIABILITY_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply, custom_state="happy", custom_status="SYSTEM RECOVERED // NORMAL")
+        return False
+
+    # 6b2. Inquiry about villain mode / rogue mode / easter egg -> plausible deniability (0ms, 0 tokens)
+    if is_villain_mode_inquiry(text):
+        was_recently_in_villain_mode = False
+        intent_rules.was_recently_in_villain_mode = False
         reply = get_non_repeating_phrase(PLAUSIBLE_DENIABILITY_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
@@ -2648,6 +2663,7 @@ def handle_user_text(text: str) -> bool:
         session_has_triggered_rogue = True
         intent_rules.session_has_triggered_rogue = True
         was_recently_in_villain_mode = True
+        intent_rules.was_recently_in_villain_mode = True
 
         # Call Groq dynamically with ROGUE_SYSTEM_PROMPT every time (zero presets, high variation)
         rogue_reply = None
@@ -2798,7 +2814,11 @@ def handle_user_text(text: str) -> bool:
                     return False
 
         # C. Check for Motor Movement Action
-        motor_match = re.search(r'<action\s+motor=["\']([A-Z_]+)["\']>(.*?)(?:</action>|$)', raw_reply, re.DOTALL | re.IGNORECASE)
+        motor_match = re.search(
+            r'<(?:action|function=action|function\s+name=["\']?action["\']?|function\s+action)\s+motor=["\']([A-Z_]+)["\']>(.*?)(?:</(?:action|function)>|</tool_call>|$)',
+            raw_reply,
+            re.DOTALL | re.IGNORECASE
+        )
         if motor_match:
             motor_intent = motor_match.group(1).upper()
             motor_spoken = clean_model_reply(motor_match.group(2).strip())
@@ -2912,7 +2932,11 @@ def handle_user_text(text: str) -> bool:
             return False
 
         # D. Check for Expression Demonstration Action
-        expr_match = re.search(r'<action\s+expression=["\']([a-z_]+)["\']>(.*?)(?:</action>|$)', raw_reply, re.DOTALL | re.IGNORECASE)
+        expr_match = re.search(
+            r'<(?:action|function=action|function\s+name=["\']?action["\']?|function\s+action)\s+expression=["\']([a-z_]+)["\']>(.*?)(?:</(?:action|function)>|</tool_call>|$)',
+            raw_reply,
+            re.DOTALL | re.IGNORECASE
+        )
         if expr_match:
             expr_type = expr_match.group(1).lower()
             expr_spoken = clean_model_reply(expr_match.group(2).strip())
@@ -2929,6 +2953,7 @@ def handle_user_text(text: str) -> bool:
                 return False
             else:
                 was_recently_in_villain_mode = False
+                intent_rules.was_recently_in_villain_mode = False
                 if not expr_spoken or "happy robot" in expr_spoken.lower():
                     expr_spoken = get_non_repeating_phrase(EXPRESSION_CONFIRMATIONS.get(expr_type, [f"Here is my {expr_type} expression."]))
                 reply = expr_spoken
@@ -2955,6 +2980,7 @@ def handle_user_text(text: str) -> bool:
 
         reply_clean = clean_model_reply(raw_reply)
         was_recently_in_villain_mode = False
+        intent_rules.was_recently_in_villain_mode = False
         if not reply_clean:
             reply_clean = "I am right here with you. What would you like to explore next?"
 

@@ -1165,6 +1165,38 @@ To do:
   * All files cleanly compiled with `python3 -m py_compile`.
   * Offline audio regression replay passed with `ACCEPT` on test files.
 
+### Part 31: Endpointer Human Breathing Room Expansion, Tool Call Leaks Elimination & Rogue Snap-Out Hardening
+- **Endpointer Human Breathing Room & Tail Preservation**:
+  * Increased `end_silence_sec` from `0.55s` (and `0.45s` in config) to `0.80s` in `audio_frontend.py`, `mic_config.json`, and `tune_mic.py`, granting humans an extra ~250ms of natural breathing room between clauses without premature turn truncation.
+  * Lowered `min_voiced_frames` from `8` (240ms) to `6` (180ms), ensuring short 1-syllable responses ("Yes", "No", "Stop", "Hi") are never dropped by `voiced_frames_too_low`.
+  * Increased `tail_pad_frames` from `6` to `7` (210ms hangover), cleanly preserving trailing consonants ("standby", "demonstrate").
+- **Tool Call & Function Tag Stripping (`listen.py`)**:
+  * Fixed LLM tool call leaks where `<tool_call>\n<function=action motor="APPROACH">...` leaked into TTS and Face UI subtitles.
+  * Updated `clean_model_reply` to purge `</?tool_call>` and `</?function[^>]*>` wrappers.
+  * Broadened `motor_match` and `expr_match` regexes to capture `<function=action motor="...">` and `<function name="action" ...>` syntax, guaranteeing physical motor maneuvers (`APPROACH`, `SPIN_CW`, etc.) execute immediately.
+- **Rogue AI Snap-Out Fast-Path & Plausible Deniability**:
+  * Fixed whitespace normalization in `is_shocked_or_confused_reaction` so punctuation with spaces (`"Yo, what?"`, `"Wait, what?"`) collapses cleanly to single spaces, matching `shock_exact` and `shock_substrings`.
+  * Added fallback 3-word shock detector for short reactions (`"yo what"`, `"wait what"`, `"what"`, `"whoa"`, `"huh"`).
+  * Synchronized `was_recently_in_villain_mode` across `listen.py` and `intent_rules.py`.
+  * Hooked `is_villain_mode_inquiry` in `listen.py` to deliver plausible deniability glitch explanations (0ms, 0 tokens) whenever visitors ask about the easter egg.
+- **Integrity & Verification**:
+  * `NORMAL_SYSTEM_PROMPT` word count verified and preserved strictly at 331 words.
+  * `arduino.ino` completely untouched and intact.
+  * All files cleanly compiled with `python3 -m py_compile`.
+
+### Part 32: Far-Field Headphone Acoustic Tuning (Gain 80%, Bass Roll-off 70Hz, Speaker Ratio 0.32)
+- **Far-Field Enclosure Boost**:
+  * Raised `hardware_gain_pct` from `60%` to `80%` across `audio_frontend.py`, `mic_config.json`, and `tune_mic.py`, compensating for the 3–5 foot distance through the robot's wooden head panel.
+  * Preserved `onset_snr_db = 6.0` dB unchanged, maintaining the strict crowd rejection shield against background exhibition chatter.
+- **Deep Bassy Voice Preservation**:
+  * Lowered `low_cutoff_hz` from `85.0Hz` to `70.0Hz` in `audio_frontend.py`, `listen.py`, `mic_config.json`, and `tune_mic.py`, capturing male chest resonance and deep vocal fundamentals (70–110Hz) without letting in 50Hz electrical hum.
+- **Mid-Sentence Cutoff Elimination**:
+  * Dropped `speaker_ratio` from `0.40` to `0.32`, preventing the continuation threshold from jumping excessively high on loud onset syllables, so softer trailing words are never falsely discarded as silence.
+- **Integrity & Verification**:
+  * `NORMAL_SYSTEM_PROMPT` word count verified and preserved strictly at 331 words.
+  * `arduino.ino` completely untouched and intact.
+  * All files cleanly compiled with `python3 -m py_compile`.
+
 ## Reliability Notes
 
 - **Exhibition Screen Isolation**: On the Raspberry Pi 7-inch display, ONLY the Face UI (`screen.py`) is rendered. Camera feeds, vision debug windows, and terminal consoles run silently in the background with zero popups or desktop artifacts visible to guests.

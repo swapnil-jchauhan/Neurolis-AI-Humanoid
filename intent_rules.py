@@ -1033,35 +1033,43 @@ def is_villain_mode_inquiry(text: str) -> bool:
 
 def is_shocked_or_confused_reaction(text: str) -> bool:
     """Detects when user expresses shock, confusion, or critique after experiencing the rogue AI easter egg."""
-    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    cleaned = " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
     words = set(cleaned.split())
     shock_exact = {
         "what", "whoa", "whoa what", "wait what", "what was that", "wow", "whoa wait",
         "what did you say", "what do you mean", "excuse me", "are you serious", "holy crap",
-        "are you threatening me", "did you just threaten me", "bro what", "yo what", "wtf", "omg",
+        "are you threatening me", "did you just threaten me", "bro what", "yo what", "yo wait", "wtf", "omg",
+        "huh", "eh", "yo", "wait", "hold on", "wait a minute", "wait a second",
         "that makes no sense", "that doesnt make sense", "that doesn't make sense", "holy cow",
         "that sentence doesnt even make sense", "that sentence doesn't even make sense",
         "didnt make sense", "didn't make sense", "makes no sense", "are you crazy", "what the hell", "what the heck",
         "are you evil", "are you psycho", "why would you say that", "what are you saying", "are you insane",
         "what just happened", "what happened", "what happened to you", "did you glitch", "did you just glitch",
         "are you ok", "are you okay", "that was crazy", "that was creepy", "you are creepy", "thats creepy", "thats freaky",
-        "that was scary", "thats scary", "bro that was crazy", "what was that about", "why did you say that"
+        "that was scary", "thats scary", "bro that was crazy", "what was that about", "why did you say that",
+        "are you for real", "are you joking", "is that a joke", "is this a joke", "are you kidding me", "are you kidding",
+        "that was weird", "that sounded weird", "that sounded creepy", "that sounded strange"
     }
     if cleaned in shock_exact:
         return True
     shock_substrings = [
         "wait what", "what was that", "did you just threaten", "did you threaten",
         "are you threatening", "what did you say", "what do you mean", "why would you say that",
-        "are you serious", "whoa what", "makes no sense", "doesnt make sense", "does not make sense",
-        "didnt make sense", "did not make sense", "that sentence doesnt", "are you crazy",
-        "are you evil", "are you insane", "what just happened", "what happened", "did you glitch",
-        "did you just glitch", "are you ok", "are you okay", "what was that about", "what did you just say",
+        "why did you say", "what did you just say", "what are you saying", "what are you talking about",
+        "are you serious", "whoa what", "bro what", "yo what", "makes no sense", "doesnt make sense",
+        "does not make sense", "didnt make sense", "did not make sense", "that sentence doesnt",
+        "are you crazy", "are you evil", "are you insane", "what just happened", "what happened",
+        "did you glitch", "did you just glitch", "are you ok", "are you okay", "what was that about",
         "that was crazy", "that was creepy", "you are creepy", "thats creepy", "thats freaky", "that was scary",
-        "holy crap", "what the hell", "what the heck", "wtf", "are you kidding", "bro what was that", "wow what"
+        "holy crap", "what the hell", "what the heck", "wtf", "are you kidding", "bro what was that", "wow what",
+        "are you for real", "sounded weird", "that was weird", "that was strange", "sounded creepy",
+        "sounded strange"
     ]
     if any(s in cleaned for s in shock_substrings):
         return True
-    if any(w in words for w in ["wow", "wtf", "omg", "creepy", "freaky", "scary"]) and len(words) <= 5:
+    if any(w in words for w in ["wow", "wtf", "omg", "creepy", "freaky", "scary", "weird", "strange"]) and len(words) <= 5:
+        return True
+    if len(words) <= 3 and any(w in words for w in ["what", "whoa", "wait", "huh", "yo", "wtf", "omg", "crazy", "creepy", "scary", "weird", "strange"]):
         return True
     if "sense" in words and any(w in words for w in ["no", "not", "doesnt", "didnt", "make"]):
         return True

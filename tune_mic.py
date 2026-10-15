@@ -363,10 +363,10 @@ class MicTunerApp:
         col_left.pack(side="left", fill="both", expand=True, padx=(0, 4))
 
         # Hardware Mic Gain Slider
-        self.gain_var = tk.IntVar(value=int(self.cfg.get("hardware_gain_pct", 60)))
+        self.gain_var = tk.IntVar(value=int(self.cfg.get("hardware_gain_pct", 80)))
         self._create_slider(
             col_left, "hardware_gain_pct", "Hardware Mic Gain (%)", self.gain_var, 10, 100, 1,
-            "System audio capture volume (wpctl/pactl). 60% default for phone mic.", self._on_gain_change
+            "System audio capture volume (wpctl/pactl). 80% optimized for phone mic in robot head.", self._on_gain_change
         )
 
         # WebRTC VAD Aggressiveness Mode (0 to 3)
@@ -405,14 +405,14 @@ class MicTunerApp:
         )
 
         # Dynamic Speaker Envelope Ratio
-        self.speaker_ratio_var = tk.DoubleVar(value=float(self.cfg.get("speaker_ratio", 0.40)))
+        self.speaker_ratio_var = tk.DoubleVar(value=float(self.cfg.get("speaker_ratio", 0.32)))
         self._create_slider(
             col_left, "speaker_ratio", "Dynamic Speaker Envelope Ratio", self.speaker_ratio_var, 0.20, 0.70, 0.05,
             "Ratio of close speaker's voice power to maintain continue threshold"
         )
 
         # End Silence Cutoff Seconds
-        self.end_silence_var = tk.DoubleVar(value=float(self.cfg.get("end_silence_sec", 0.55)))
+        self.end_silence_var = tk.DoubleVar(value=float(self.cfg.get("end_silence_sec", 0.80)))
         self._create_slider(
             col_left, "end_silence_sec", "End Silence Cutoff (Seconds)", self.end_silence_var, 0.30, 1.20, 0.05,
             "Continuous silence hangover before cutting off speech and sending to Whisper"
@@ -423,7 +423,7 @@ class MicTunerApp:
         col_right.pack(side="right", fill="both", expand=True, padx=(4, 0))
 
         # Low-Cut Filter Frequency
-        self.low_cut_var = tk.DoubleVar(value=float(self.cfg.get("low_cutoff_hz", 85.0)))
+        self.low_cut_var = tk.DoubleVar(value=float(self.cfg.get("low_cutoff_hz", 70.0)))
         self._create_slider(
             col_right, "low_cutoff_hz", "Low-Cut Bass Roll-off (Hz)", self.low_cut_var, 40.0, 250.0, 5.0,
             "Cuts sub-bass rumble & AC hum while preserving vocal warmth (85Hz+)"
@@ -878,17 +878,17 @@ class MicTunerApp:
         messagebox.showinfo(
             "Saved Successfully",
             f"Endpointer v2 & DSP configuration saved to mic_config.json!\n\n"
-            f"• Hardware Gain: {self.cfg.get('hardware_gain_pct', 60)}%\n"
+            f"• Hardware Gain: {self.cfg.get('hardware_gain_pct', 80)}%\n"
             f"• VAD Mode: {self.cfg.get('vad_mode', 2)}\n"
             f"• Onset SNR: {self.cfg.get('onset_snr_db', 6.0)} dB\n"
             f"• Continue SNR: {self.cfg.get('continue_snr_db', 3.5)} dB\n"
             f"• Min Onset RMS: {self.cfg.get('min_onset_rms', 220.0):.1f}\n"
             f"• Max Onset RMS: {self.cfg.get('max_onset_rms', 1300.0):.1f}\n"
-            f"• Dynamic Speaker Ratio: {self.cfg.get('speaker_ratio', 0.40):.2f}\n"
-            f"• End Silence Cutoff: {self.cfg.get('end_silence_sec', 0.55):.2f}s\n"
+            f"• Dynamic Speaker Ratio: {self.cfg.get('speaker_ratio', 0.32):.2f}\n"
+            f"• End Silence Cutoff: {self.cfg.get('end_silence_sec', 0.80):.2f}s\n"
             f"• Startup Holdoff: {self.cfg.get('startup_holdoff_sec', 0.45):.2f}s\n"
             f"• Echo Holdoff: {self.cfg.get('echo_holdoff_sec', 0.55):.2f}s\n"
-            f"• Bandpass: {self.cfg.get('low_cutoff_hz', 85.0):.0f}Hz - {self.cfg.get('high_cutoff_hz', 4500.0):.0f}Hz\n"
+            f"• Bandpass: {self.cfg.get('low_cutoff_hz', 70.0):.0f}Hz - {self.cfg.get('high_cutoff_hz', 4500.0):.0f}Hz\n"
             f"• Treble Boost: {self.cfg.get('treble_boost', 1.35):.2f}x\n"
             f"• AGC Max Scale: {self.cfg.get('agc_max_scale', 1.80):.2f}x\n\n"
             f"listen.py automatically reloads these values on every conversation turn."

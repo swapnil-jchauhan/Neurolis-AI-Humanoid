@@ -32,10 +32,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "min_continue_rms": 150.0,
     "onset_window": 8,
     "onset_required": 4,
-    "speaker_ratio": 0.40,
-    "end_silence_sec": 0.55,
-    "min_voiced_frames": 8,
-    "tail_pad_frames": 6,
+    "speaker_ratio": 0.32,
+    "end_silence_sec": 0.80,
+    "min_voiced_frames": 6,
+    "tail_pad_frames": 7,
     "startup_holdoff_sec": 0.45,
     "echo_holdoff_sec": 0.55,
     "first_turn_timeout_sec": 15.0,
@@ -43,11 +43,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "preroll_sec": 0.85,
     "manual_buffer_sec": 3.45,
     "max_record_sec": 9.0,
-    "hardware_gain_pct": 60,
+    "hardware_gain_pct": 80,
     "pw_target": "android-e3b0c44",
 
     # DSP and bandpass tuning
-    "low_cutoff_hz": 85.0,
+    "low_cutoff_hz": 70.0,
     "high_cutoff_hz": 4500.0,
     "treble_boost": 1.35,
     "agc_max_scale": 1.80,
@@ -149,8 +149,8 @@ def clean_audio_for_transcription(audio: np.ndarray, floor_rms: float,
         freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
         gain = np.ones_like(freqs, dtype=np.float32)
 
-        sub_mask = freqs < 85.0
-        gain[sub_mask] = np.clip((freqs[sub_mask] / 85.0) ** 2, 0.0, 1.0)
+        sub_mask = freqs < 70.0
+        gain[sub_mask] = np.clip((freqs[sub_mask] / 70.0) ** 2, 0.0, 1.0)
 
         high_mask = freqs > 5500.0
         gain[high_mask] = np.clip(1.0 - (freqs[high_mask] - 5500.0) / (8000.0 - 5500.0), 0.05, 1.0)
