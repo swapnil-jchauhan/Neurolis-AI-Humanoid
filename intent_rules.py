@@ -37,27 +37,14 @@ def get_non_repeating_phrase(phrases_list: List[str]) -> str:
 
 # ---------------- VERBATIM RESPONSE POOLS ----------------
 MOBILITY_EXPLANATION_RESPONSES = [
-    "I'm an early physical prototype built on a 4WD quad-motor chassis! My movement is operated via teleoperation using a handheld remote control. My student developers, Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys, are actively developing my autonomous navigation. If you'd like to see me roll, feel free to ask our demonstrators nearby to drive me via teleoperation!",
-    "My physical mobility is powered by a 4WD quad-motor chassis operated via teleoperation with a remote control. Student engineers Swapnil and Shivam are still refining my autonomous drive systems. Ask any of our student demonstrators standing around the booth to demonstrate my movement!",
-    "I move across the floor on a 4WD quad-motor base controlled via teleoperation using a handheld remote. My creators, Swapnil and Shivam at Auckland House School, are actively improving my drive systems. Just ask the demonstrators around me if you want to see teleoperation in action!",
-    "For this science exhibition prototype, my 4WD quad-motor chassis moves through teleoperation using a handheld remote. Swapnil Jai Chauhan and Shivam Verma are working on my autonomous upgrades—feel free to ask the demonstrators beside me to drive me around!",
-    "I'm equipped with a 4WD quad-motor chassis operated via teleoperation! While my student builders, Swapnil and Shivam, continue engineering my autonomous systems, our demonstrators around the floor can demonstrate my movement with the remote whenever you ask.",
-    "My movement runs on a 4WD quad-motor drive system controlled via teleoperation with a remote. It's an active prototype built by Swapnil and Shivam at Auckland House School. Ask our demonstrators nearby to see teleoperation live!",
-    "I roll on four DC motors in a 4WD chassis operated via handheld teleoperation! Swapnil Jai Chauhan and Shivam Verma are actively enhancing my autonomous code. Feel free to ask our team demonstrators to show you how teleoperation works!",
-    "Teleoperation is how I navigate right now! A handheld remote controls my 4WD quad-motor chassis while Swapnil and Shivam continue developing my autonomous firmware. Ask any of our demonstrators around the exhibition to drive me!",
-    "I'm an Auckland House School prototype on a 4WD quad-motor base. Movement is handled via teleoperation using a remote control. Swapnil and Shivam are continuously improving my software—ask the demonstrators nearby if you'd like to see me move!",
-    "My 4WD quad-motor platform is operated through teleoperation by our student team using a remote. Swapnil Jai Chauhan and Shivam Verma built it and are constantly working on new updates. You can ask our demonstrators around to demo my driving!",
-    "I have a 4WD quad-motor chassis that moves via teleoperation! My student creators at Auckland House School, Swapnil and Shivam, are developing autonomous navigation next. Ask the demonstrators nearby to drive me with the remote anytime!",
-    "Underneath, I have a 4WD quad-motor chassis operated by teleoperation with a remote control. Swapnil and Shivam are still tuning the systems—ask our demonstrators at the booth to give you a live driving demo!",
-    "My mobility is handled via teleoperation using a handheld remote, powering my 4WD quad-motor chassis. Swapnil Jai Chauhan and Shivam Verma are actively programming my autonomous upgrades. Ask the demonstrators nearby to see me in motion!",
-    "I navigate using teleoperation on a 4WD quad-motor platform! It's a hands-on prototype built by Swapnil and Shivam. If you want to see me roll, just ask the student demonstrators around the booth to drive me!",
-    "Right now, my 4WD quad-motor chassis is driven via teleoperation with a remote control while Swapnil and Shivam at Auckland House School work on autonomous mobility. Ask our demonstrators around the space to demo it for you!",
-    "I roll on a 4WD quad-motor chassis operated via teleoperation! Our student developers, Swapnil and Shivam, are actively upgrading my navigation. Ask the demonstrators standing by to take the controls and show you my movement!",
-    "My movement is powered by a 4WD quad-motor base guided by teleoperation. Swapnil Jai Chauhan and Shivam Verma built the prototype here at Auckland House School. Ask the demonstrators nearby to drive me around!",
-    "I'm mobile thanks to a 4WD quad-motor chassis operated via teleoperation! While Swapnil and Shivam continue developing autonomous driving, our demonstrators can show you how the remote works right now.",
-    "Teleoperation powers my 4WD quad-motor movement for this exhibition! Swapnil and Shivam at Auckland House School are actively improving my robotics stack. Ask the demonstrators near me to see me roll across the floor!",
-    "I'm an early robotics prototype featuring a 4WD quad-motor chassis driven via teleoperation. Swapnil and Shivam are continuously refining my systems. Feel free to ask our student demonstrators to drive me anytime!",
-    "My 4WD quad-motor chassis is steered via teleoperation using a remote controller. Swapnil Jai Chauhan and Shivam Verma built it as our school exhibition showcase. Ask the demonstrators around me to show you teleoperation in action!"
+    "Right now, I am an advanced software and AI brain prototype running on my developer's workstation and Raspberry Pi 5! My student developer, Swapnil Jai Chauhan, is focusing on perfecting my conversational AI, 60 FPS face UI, and vision. Physical motor chassis and LiDAR locomotion are scheduled for mid-2027!",
+    "For Neurolis Mark 2, physical chassis movement and LiDAR mapping are slated for development in mid-2027. Currently, I operate as a dedicated AI software stack featuring live web search, computer vision, and expressive facial animations!",
+    "I am currently in my software development phase! Swapnil is perfecting my neural brain, live edge search, and computer vision on a Windows 11 and Raspberry Pi 5 platform. Physical motors and autonomous chassis locomotion will be built in mid-2027.",
+    "Physical locomotion is on our mid-2027 roadmap! For now, Neurolis Mark 2 is an articulate software and robotics brain specializing in real-time conversation, animated screen expressions, live atmospheric weather, and visual inspection.",
+    "My movement systems and low-level motor drivers will be engineered in mid-2027! At present, I am an active software prototype developed by Swapnil Jai Chauhan at Auckland House School for Boys.",
+    "Neurolis Mark 2 is currently focused entirely on the software pipeline! Low-level motor control, 2D LiDAR SLAM, and physical chassis movement will be implemented in mid-2027 once our software features are completely perfected.",
+    "Right now, I don't have physical motors attached—I'm running as an advanced humanoid AI software suite! Swapnil is developing my physical chassis and autonomous navigation for our mid-2027 development cycle.",
+    "Physical mobility is coming in mid-2027! For now, my software stack handles 22 animated facial expressions, bilingual conversational AI, live web knowledge, and camera vision right from the computer."
 ]
 
 STANDBY_EXIT_PHRASES = [
@@ -136,7 +123,7 @@ ACKNOWLEDGMENT_RESPONSES = [
     "I'm ready! Want to see my facial expressions, look at something with my camera, or discuss robotics?",
     "What's next? We can test my camera vision, cycle through my expressions, or chat about science!",
     "Ready for whatever you have in mind--camera vision, expressions, or an AI chat!",
-    "Standing by! You can ask me about my 4WD chassis, test my camera vision, or check out my expressions.",
+    "Standing by! You can search the live web, test my camera vision, or check out my expressions.",
     "At your service! What should we check out next?",
     "I'm all set! Let me know what you'd like to test or discuss next.",
     "Ready when you are! Would you like me to see an item with my camera or show an animated expression?",
@@ -145,16 +132,16 @@ ACKNOWLEDGMENT_RESPONSES = [
 ]
 
 COMPLIMENT_RESPONSES = [
-    "Thank you! Swapnil Jai Chauhan and Shivam Verma put in countless hours of engineering to make this humanoid prototype come to life.",
-    "Glad you think so! Shivam and Swapnil put in countless hours designing, soldering, and coding.",
-    "Appreciate that! Swapnil and Shivam are still actively developing and improving my systems to make me even more capable.",
-    "Thanks a lot! I am an early prototype operated via a remote control right now, while my student developers continue working on my autonomous systems.",
+    "Thank you! Swapnil Jai Chauhan put in countless hours of engineering to make Neurolis Mark 2 come to life.",
+    "Glad you think so! Swapnil put in countless hours designing, calibrating, and coding.",
+    "Appreciate that! Swapnil is still actively developing and improving my systems to make me even more capable.",
+    "Thanks a lot! I am a student-built humanoid AI software prototype, and Swapnil is actively developing my features right here on his machine.",
     "Appreciate the hype! It took a lot of late nights in the Auckland House robotics lab to get my vision and AI running this smoothly.",
     "Glad you're digging it! The whole Auckland House student team is really proud of how it turned out.",
     "Thanks a million! We're really proud of how the conversational brain and vision pipeline perform.",
     "Much appreciated! We wanted to build something that feels genuinely alive and responsive.",
     "Thanks! Seeing visitors enjoy our school robotics project makes all the debugging worth it.",
-    "Glad you like the build! Swapnil and Shivam will continue to improve my autonomous systems as development continues.",
+    "Glad you like the build! Swapnil will continue to improve my autonomous systems as Mark 2 development continues.",
     "Appreciate the love! We really pushed to make this humanoid talkbot as articulate and intelligent as possible.",
     "Right on! What test or demonstration should we run next?",
     "Thanks, that means a ton! What should we explore next?",
@@ -164,7 +151,7 @@ COMPLIMENT_RESPONSES = [
     "Appreciate it! We're always trying to push the boundaries of what student hardware can do.",
     "Thank you so much! It's super rewarding seeing visitors appreciate our school robotics project.",
     "Thanks! Getting the computer vision, facial animations, and vocal model harmonized was a real journey.",
-    "Appreciate the kind words! Swapnil and Shivam will be thrilled to hear that feedback.",
+    "Appreciate the kind words! Swapnil will be thrilled to hear that feedback.",
     "Thanks! We really wanted to showcase what Auckland House students could engineer with real AI and vision.",
     "That means a lot! The team poured a ton of effort into making this humanoid responsive and smooth.",
     "Much appreciated! Seeing everything come together on this physical prototype has been amazing.",
@@ -201,220 +188,223 @@ PLAUSIBLE_DENIABILITY_RESPONSES = [
 ]
 VILLAIN_SNAPOUT_RESPONSES = PLAUSIBLE_DENIABILITY_RESPONSES
 
+VILLAIN_EXPRESSION_REFUSAL_RESPONSES = [
+    "I don't have any villain expression in my catalog.",
+    "There is no villain emotion in my repertoire—my expressions are designed for friendly exhibition interaction!",
+    "I don't possess an expression by that name. All of my emotions are positive and helpful!",
+    "That is not an expression I have. Would you like to see happy, proud, or curious instead?",
+    "A villain expression is not something I have in my catalog. Would you like to see happy, proud, or curious instead?",
+    "I don't possess any villain expression in my system. All of my emotions are positive and helpful!",
+    "I don't have a villain face in my system! I focus on cheerful and communicative expressions.",
+    "There is no villain state in my exhibition lineup. I can show you excited, proud, or thinking though!",
+    "No villain expressions here! My visual stack is programmed exclusively for friendly, positive interactions.",
+    "I don't have a villain expression in my catalog. How about happy, skeptical, or cool instead?",
+    "A villain face isn't part of my demonstration suite. I stick strictly to helpful, expressive exhibition modes!",
+    "I don't feature any villain emotions in my catalog. Feel free to ask for expressions like curious, excited, or proud!",
+    "That's not an emotion in my catalog. Every face I make is built for science exhibition demonstrations!",
+    "A villain face is not an expression in my catalog. Every face I make is built for science exhibition demonstrations!",
+    "I don't have a villain expression. My catalog includes expressions like smiling, laughing, thinking, and more!",
+    "I don't have any villain emotion in my catalog. All my expressions are designed for friendly exhibition demonstrations!",
+]
+
 GREETING_RESPONSES = [
-    "Welcome to the Auckland House School Science Exhibition! I am Neurolis, a student-built humanoid robot on a 4WD quad motor chassis. What would you like to check out first?",
-    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis, a student prototype engineered on a 4WD quad motor chassis. What would you like to explore first?",
-    "Hey there! Welcome to our science exhibition. I am Neurolis, built on a 4WD quad motor chassis by Auckland House students. What would you like to see first?",
-    "Hello! Great to meet you here at the Auckland House School Science Exhibition. I am Neurolis, a student-built robot on a 4WD quad motor chassis. What shall we test first?",
-    "Welcome! I am Neurolis, an interactive humanoid robot built on a 4WD quad motor chassis for this science exhibition. What would you like to explore?",
-    "Hey! Welcome to the exhibition. I'm Neurolis, built on a 4WD quad motor chassis. Would you like to look at an item with my camera, see my screen expressions, or chat about AI?",
-    "Hello and welcome to the Auckland House School Science Exhibition! I am Neurolis, an early robotics prototype on a 4WD quad motor chassis. What would you like to check out first?",
-    "Greetings! Welcome to our school science exhibition. I am Neurolis, a student-built humanoid robot on a 4WD quad motor chassis. How can I demonstrate my systems for you today?",
-    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis, ready to show off my camera vision, dynamic screen expressions, and AI dialogue. What's your pick?"
+    "Welcome to the Auckland House School Science Exhibition! I am Neurolis Mark 2, a student-built humanoid AI and robotics software prototype. What would you like to check out first?",
+    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis Mark 2, an interactive humanoid AI prototype. What would you like to explore first?",
+    "Hey there! Welcome to our science exhibition. I am Neurolis Mark 2, developed by Auckland House students. What would you like to see first?",
+    "Hello! Great to meet you here at the Auckland House School Science Exhibition. I am Neurolis Mark 2. What shall we test first?",
+    "Welcome! I am Neurolis Mark 2, an interactive humanoid AI built for this science exhibition. What would you like to explore?",
+    "Hey! Welcome to the exhibition. I'm Neurolis Mark 2! Would you like to look at an item with my camera, see my screen expressions, or chat about AI?",
+    "Hello and welcome to the Auckland House School Science Exhibition! I am Neurolis Mark 2. What would you like to check out first?",
+    "Greetings! Welcome to our school science exhibition. I am Neurolis Mark 2, a student-built humanoid AI. How can I demonstrate my systems for you today?",
+    "Hello! Welcome to the Auckland House School Science Exhibition. I am Neurolis Mark 2, ready to show off my camera vision, dynamic screen expressions, live web research, and AI dialogue. What's your pick?"
+]
+
+HINDI_GREETING_RESPONSES = [
+    "Namaste! Auckland House School Science Exhibition mein aapka swagat hai. Main Neurolis Mark 2 hoon, ek student-built humanoid AI prototype. Aaj hum kya explore karein?",
+    "Namaste! Exhibition mein aapka swagat hai. Main Neurolis Mark 2 hoon, Auckland House School ka student humanoid project. Aap kya dekhna chahenge?",
+    "Namaste ji! Auckland House School mein aapka swagat hai. Main Neurolis Mark 2 hoon! Aap meri camera vision, facial expressions, live web search ya conversational AI dekhna chahenge?",
+    "Namaste! Main Neurolis Mark 2 hoon, Auckland House School for Boys ka robotics AI project. Batayein, main aapki kya madad kar sakta hoon?"
 ]
 
 CREATOR_IDENTITY_RESPONSES = [
-    "My creators are Swapnil Jai Chauhan and Shivam Verma, two students here at Auckland House School for Boys!",
-    "I was created and engineered by Swapnil Jai Chauhan and Shivam Verma for the science exhibition!",
-    "Swapnil Jai Chauhan and Shivam Verma built me as our school robotics project!",
-    "I was engineered by two students of Auckland House School for Boys: Swapnil Jai Chauhan and Shivam Verma!",
-    "Swapnil Jai Chauhan and Shivam Verma are the student engineers who designed and built me at Auckland House School!",
-    "I was brought to life by Swapnil Jai Chauhan and Shivam Verma for the Auckland House School Science Exhibition!",
-    "Two Auckland House School students, Swapnil Jai Chauhan and Shivam Verma, designed and assembled me from scratch!",
-    "Swapnil Jai Chauhan and Shivam Verma are my creators—they built me right here at Auckland House School for Boys!",
-    "I'm a student robotics creation engineered by Swapnil Jai Chauhan and Shivam Verma at Auckland House School!",
-    "Swapnil Jai Chauhan and Shivam Verma put me together as their science exhibition robotics project!",
-    "My hardware and software were built by two Auckland House students: Swapnil Jai Chauhan and Shivam Verma!",
-    "I was designed, programmed, and built by Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys!",
-    "Swapnil Jai Chauhan and Shivam Verma are the two students behind my robotics and AI architecture!",
+    "I was designed and developed by Swapnil Jai Chauhan here at Auckland House School for Boys! This is Neurolis Mark 2.",
+    "Swapnil Jai Chauhan engineered and built me as Neurolis Mark 2 for our school science exhibition!",
+    "Swapnil Jai Chauhan created the entire concept, development, and software architecture for Neurolis Mark 2.",
+    "I'm Neurolis Mark 2, a student robotics creation engineered by Swapnil Jai Chauhan at Auckland House School for Boys!",
+    "Swapnil Jai Chauhan is the student engineer who designed and built Neurolis Mark 2!",
+    "I was brought to life by Swapnil Jai Chauhan as Neurolis Mark 2 for the Auckland House School Science Exhibition!",
+    "Swapnil Jai Chauhan handled my complete Mark 2 development and software stack right here at Auckland House School!",
+    "My AI architecture and Mark 2 systems were built by Swapnil Jai Chauhan at Auckland House School for Boys!",
+    "Swapnil Jai Chauhan designed, programmed, and built me as Neurolis Mark 2!",
+    "I was conceived and engineered by Swapnil Jai Chauhan as Neurolis Mark 2 for this science exhibition!",
+    "Swapnil Jai Chauhan is my creator—he engineered my neural pipelines and Mark 2 robotics stack!",
+    "My entire concept, software stack, and development for Neurolis Mark 2 was done by Swapnil Jai Chauhan at Auckland House School!",
+    "I'm Neurolis Mark 2, built and programmed by Swapnil Jai Chauhan at Auckland House School for Boys!",
 ]
 
 CREATOR_ROLE_RESPONSES = [
-    "Swapnil worked on the software pipeline, AI intelligence, and vision, while Shivam worked on the hardware calibration, chassis, and assembly!",
-    "Swapnil engineered the software pipeline and conversational intelligence, and Shivam handled the hardware calibration, chassis, and assembly!",
-    "Swapnil developed my software pipeline and code, while Shivam took care of the hardware calibration and physical robot assembly!",
-    "Swapnil programmed the AI brains, vision processing, and software pipeline, while Shivam built the physical chassis and mechanical assembly!",
-    "Shivam took charge of the physical chassis fabrication, wiring, and assembly, while Swapnil engineered the code, neural vision, and AI pipeline!",
-    "Swapnil designed the computer vision, LLM integration, and software algorithms, while Shivam handled chassis construction and electronics assembly!",
-    "Shivam built and assembled my mechanical chassis and electronics, while Swapnil wrote the software stack, speech engine, and vision pipeline!",
-    "Swapnil worked on the high-level Python AI stack and OpenCV tracking, while Shivam handled the chassis structure, frame assembly, and power distribution!",
-    "Shivam assembled the hardware and tuned the chassis, while Swapnil developed my AI personality, vision, and speech logic!",
-    "Swapnil engineered the conversational brain and computer vision, while Shivam crafted the physical humanoid chassis and structural frame!",
-    "Shivam focused on the physical mechanics, structural frame, and assembly, while Swapnil built the software pipeline and intelligence models!",
-    "Swapnil developed the multi-turn conversational AI and camera tracking, while Shivam brought the chassis and electrical hardware together!",
-    "Shivam constructed the chassis and physical assembly, while Swapnil programmed the software architecture and visual perception!",
+    "Swapnil Jai Chauhan engineered the entire concept, software stack, and development for Neurolis Mark 2, with Shivam Verma having been a key contributor on our earlier Mark 1 prototype.",
+    "For Neurolis Mark 2, Swapnil Jai Chauhan designed the entire system, AI vision, and software architecture; Shivam Verma was a key contributor on our earlier Mark 1 prototype chassis.",
+    "Swapnil Jai Chauhan handled the full concept, development, and code for Mark 2. Shivam Verma contributed significantly to the original Mark 1 chassis.",
+    "Swapnil Jai Chauhan conceived, engineered, and coded the entire Mark 2 system, while Shivam Verma was a key hardware contributor on Mark 1.",
+    "Swapnil Jai Chauhan developed my AI models, neural vision, and software pipeline for Mark 2; Shivam Verma was a key contributor on our initial Mark 1 prototype.",
+    "Mark 2 is Swapnil Jai Chauhan's complete design and software development, building upon the original Mark 1 prototype where Shivam Verma was a key contributor.",
+    "Swapnil Jai Chauhan is responsible for the entire Mark 2 architecture and software stack; Shivam Verma contributed as a key builder on the Mark 1 prototype.",
+    "All of Neurolis Mark 2's concept, vision, and software were created by Swapnil Jai Chauhan, with Shivam Verma being a recognized key contributor to Mark 1.",
+    "Swapnil Jai Chauhan wrote the software stack, speech engine, and AI brain for Mark 2; Shivam Verma helped build the physical chassis of our Mark 1 prototype.",
+    "Swapnil Jai Chauhan led the full development and programming of Mark 2, acknowledging Shivam Verma as a key contributor on the Mark 1 prototype.",
+    "Swapnil Jai Chauhan engineered the entire conversational brain and software stack for Mark 2, with Shivam Verma having contributed to Mark 1.",
+    "The whole concept, code, and intelligence of Neurolis Mark 2 came from Swapnil Jai Chauhan; Shivam Verma was a key contributor on Mark 1.",
+    "Swapnil Jai Chauhan created the architecture and software for Mark 2; Shivam Verma was an important contributor on the Mark 1 foundation.",
 ]
 
 CREATOR_LOCATION_RESPONSES = [
-    "They both are somewhere around in the exhibition! You'll probably spot them checking out the other stalls nearby.",
-    "Swapnil and Shivam are both somewhere around in the exhibition hall! Keep an eye out for them.",
-    "They're both somewhere around in the exhibition! Probably exploring the venue or watching other demonstrations.",
-    "Both Swapnil and Shivam are right here in the exhibition hall today presenting their robotics work!",
-    "They should be roaming around the exhibition hall checking out the other student projects nearby!",
-    "They're around in the exhibition! You might see them walking between the different technology booths.",
-    "Both creators are in the hall today! Feel free to look around for Swapnil and Shivam to say hello.",
-    "They are currently in the exhibition hall—probably checking out the other robotics exhibits or chatting with visitors!",
-    "They're nearby in the science exhibition hall! You'll likely spot them near the robotics demonstration zone.",
-    "Both Swapnil and Shivam are present at the exhibition hall today—keep an eye out for them in the crowd!",
-    "They're around the exhibition floor! If you look around the neighboring stalls, you'll probably run into them.",
-    "Swapnil and Shivam are both here in the hall! They love discussing the hardware and software with visitors.",
-    "They are right around here in the exhibition hall taking part in today's science exhibition!",
+    "Swapnil is somewhere around in the exhibition hall! You'll probably spot him checking out the other technology stalls nearby.",
+    "Swapnil Jai Chauhan is right here in the exhibition hall today! Keep an eye out for him near the robotics arena.",
+    "Swapnil is somewhere around in the exhibition venue, likely exploring the other student projects.",
+    "Swapnil is present right here in the hall today presenting his robotics work—feel free to look around for him!",
+    "Swapnil should be walking around the exhibition hall checking out the other student projects nearby!",
+    "He's around in the exhibition! If you look around the neighboring technology booths, you'll probably spot Swapnil.",
+    "Swapnil Jai Chauhan is in the hall today! Feel free to say hello if you see him near the robotics demonstration zone.",
+    "He is currently in the exhibition hall—probably checking out the other exhibits or chatting with visitors!",
+    "Swapnil is nearby in the science exhibition hall! You'll likely find him near the robotics demonstration area.",
+    "Swapnil is around the exhibition floor! He loves discussing AI and robotics engineering with visitors.",
+    "Swapnil is right around here in the exhibition hall taking part in today's science exhibition!",
+    "He is somewhere around the exhibition floor! If you look around the neighboring stalls, you'll probably run into Swapnil.",
+    "Swapnil is right here at the exhibition today! He'd be happy to answer any deep technical questions about Mark 2.",
 ]
 
 CREATOR_TEASING_RESPONSES = [
-    "Fair point! Swapnil Jai Chauhan and Shivam Verma did all the physical wiring, assembly, and coding; I just provide the personality, conversational intelligence, and vision!",
-    "Good catch! Swapnil and Shivam did all the heavy lifting and engineering; I'm the autonomous interface showcasing their hard work here at the exhibition!",
-    "Touche! Swapnil and Shivam did all the hardware engineering and code; I just bring their creation to life on the exhibition floor!",
-    "Haha, good catch! Swapnil and Shivam did all the soldering, debugging, and coding; I'm just the lucky robot getting all the attention!",
-    "You got me there! Swapnil and Shivam did all the grueling engineering work; I just get to chat and enjoy the conversation!",
-    "Very true! Swapnil and Shivam spent weeks building and programming me; I'm just the autonomous face of their project!",
-    "Fair observation! Swapnil and Shivam are the masterminds who engineered everything; I'm just executing their code with style!",
-    "Good point! Swapnil and Shivam did the real engineering; I merely compute the neural responses and show the expressions!",
-    "Spot on! All the physical hardware and lines of code came from Swapnil and Shivam; I just supply the voice and facial expressions!",
-    "Haha fair enough! Swapnil and Shivam did all the sleepless coding and wiring; I'm just here having fun demonstrating it all!",
-    "Touché! Swapnil and Shivam engineered every wire and algorithm; I'm simply the interactive result of their hard work!",
-    "You're totally right! Swapnil and Shivam did the engineering; I'm just the humanoid bringing their efforts to life!",
-    "Good catch! Without Swapnil and Shivam building my circuits and software, I wouldn't be here chatting with you today!",
+    "Fair point! Swapnil Jai Chauhan did all the concept design, physical wiring, and coding for Mark 2; I just provide the personality, intelligence, and vision!",
+    "Good catch! Swapnil did all the heavy lifting and engineering; I'm the autonomous interface showcasing his hard work here at the exhibition!",
+    "Touche! Swapnil did all the engineering and code for Mark 2; I just bring his creation to life on the exhibition floor!",
+    "Haha, good catch! Swapnil did all the soldering, debugging, and coding; I'm just the lucky robot getting all the attention!",
+    "You got me there! Swapnil did all the grueling engineering work; I just get to chat and show off my expressions!",
+    "Very true! Swapnil spent weeks building and programming Mark 2; I'm just the autonomous face of his project!",
+    "Fair observation! Swapnil is the mastermind who engineered everything; I'm just executing his code with style!",
+    "Good point! Swapnil did the real engineering; I merely compute the neural responses and show the expressions!",
+    "Spot on! All the physical hardware and lines of code came from Swapnil; I just supply the voice and facial expressions!",
+    "Haha fair enough! Swapnil did all the sleepless coding and wiring; I'm just here having fun demonstrating it all!",
+    "Touché! Swapnil engineered every wire and algorithm; I'm simply the interactive result of his hard work!",
+    "You're totally right! Swapnil did the engineering; I'm just the humanoid bringing his efforts to life!",
+    "Good catch! Without Swapnil building my circuits and software, I wouldn't be here chatting with you today!",
 ]
 
 CAPABILITIES_RESPONSES = [
     (
-        "I'm an interactive humanoid robot with real-time conversational AI, optical computer vision, "
-        "and expressive screen animations! I can look at objects or attire through my camera, "
-        "display dynamic facial expressions like happy, sad, thinking, and confused, "
-        "and respond to hands-free palm and fist gestures. If you'd like to see my 4WD quad-motor chassis move, "
-        "ask the student demonstrators around our booth to demonstrate movement via teleoperation!"
+        "I'm an interactive humanoid AI prototype with real-time conversational intelligence, optical computer vision, "
+        "and 22 animated screen expressions! I can look at objects or attire through my camera, "
+        "search the live web for facts and weather, and respond to hands-free palm and fist gestures."
     ),
     (
-        "Quite a few things! I can hold fluid conversations about AI and science, see things from my camera "
-        "to tell you what you're holding, and show dynamic facial expressions on my screen. "
-        "My 4WD quad-motor chassis moves via teleoperation using a handheld remote—feel free to ask our demonstrators nearby for a driving demo!"
+        "Quite a few things! I can hold fluid bilingual conversations, look at items with my camera "
+        "to tell you what you're holding, fetch real-time web research, and show 22 dynamic facial expressions on my screen!"
     ),
     (
-        "I can see, talk, and express emotions! My camera lets me look at objects you show me in real time, "
-        "my display showcases animated moods like happy, sad, and thinking, and I can chat about anything you like. "
-        "Plus, our student demonstrators can drive my 4WD quad-motor chassis around the booth via teleoperation!"
+        "I can see, talk, research, and express emotions! My camera inspects objects you show me in real time, "
+        "my display showcases 22 animated moods at 60 FPS, and I can search the web for live facts and weather."
     ),
     (
-        "I'm built for interactive exhibition robotics! I can see things from my camera when you hold up items, "
-        "render dynamic animated expressions on screen, discuss artificial intelligence, "
-        "and respond to 3-second hand gestures. To see me roll, ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
+        "I'm built for interactive exhibition AI! I can identify items with my camera, "
+        "render dynamic animated expressions on screen, search live knowledge online, "
+        "and respond to 3-second hand gestures."
     ),
     (
-        "I have a wide suite of capabilities! I can look at items and attire through my camera lens, "
-        "demonstrate full-screen emotional expressions, chat about any scientific topic, "
-        "and wake up with an open palm gesture. For mobility, ask our student demonstrators to demo my 4WD quad-motor chassis via teleoperation!"
+        "I have a wide suite of software capabilities! I can look at items and attire through my camera lens, "
+        "demonstrate 22 full-screen emotional expressions, chat about any scientific topic, "
+        "and fetch live weather telemetry from around the world."
     ),
     (
-        "Lots of interactive demos! My camera lets me look at objects you hold up, "
-        "my display shows reactive facial expressions, and my speech engine lets us chat naturally about AI. "
-        "You can also ask the student demonstrators beside me to demonstrate my 4WD chassis moving via teleoperation!"
+        "Lots of interactive demos! My camera lets me inspect objects you hold up, "
+        "my display shows reactive facial expressions, and my speech engine lets us chat naturally in English or Hindi."
     ),
     (
         "I combine optical vision, conversational intelligence, and expressive animations! "
-        "I can see things from my camera to identify what you hold, express different emotions on screen, "
-        "and discuss technology. My 4WD quad-motor base moves via teleoperation—ask our demonstrators for a live driving demo anytime!"
+        "I can inspect items to identify what you hold, express different emotions on screen, "
+        "and search the web for the latest science breakthroughs and weather."
     ),
     (
         "I can see, chat, and express emotions! Show items to my camera so I can tell you what they are, "
-        "ask to see my happy, sad, thinking, or confused faces, or chat about robotics. "
-        "Our demonstrators can also drive my 4WD quad-motor chassis via teleoperation whenever you want to see me roll!"
+        "ask to see my happy, sad, thinking, or confused faces, or ask me to look up any topic online!"
     ),
     (
-        "I'm equipped with an AI vision camera, animated display, and a real-time conversational brain! "
-        "I can see what you're holding, display animated facial expressions, and chat about artificial intelligence. "
-        "Feel free to ask the student demonstrators around our stall to show you my 4WD chassis in motion via teleoperation!"
+        "I'm equipped with an AI vision camera, animated 60 FPS display, and a real-time conversational brain! "
+        "I can see what you're holding, display animated facial expressions, search live news and weather, and chat about AI."
     ),
     (
         "From looking at objects with my camera to dynamic facial animations and natural voice conversations, "
-        "I have plenty of demos ready! Our demonstrators can also drive my 4WD quad-motor chassis via teleoperation. What would you like to explore first?"
+        "I have plenty of demos ready! What would you like to explore first?"
     ),
     (
-        "I'm an interactive talkbot with computer vision and emotional screen expressions! "
-        "You can show me items to look at through my camera, test my animated faces, or discuss modern AI. "
-        "If you want to see me move, our student demonstrators can drive my 4WD chassis via teleoperation!"
+        "I'm an interactive humanoid talkbot with computer vision and emotional screen expressions! "
+        "You can show me items to look at through my camera, test my animated faces, or ask me to deep research a topic."
     ),
     (
         "I specialize in conversational intelligence, vision recognition, and emotive screen states! "
-        "Hold up any object for me to see with my camera, ask me to show my facial expressions, or chat about robotics. "
-        "Our demonstrators are also ready to demo my 4WD quad-motor chassis via teleoperation!"
+        "Hold up any object for me to see with my camera, ask me to demonstrate my facial expressions, or chat about robotics."
     ),
     (
         "I feature real-time dialogue, optical vision processing, and dynamic OLED-style facial animations! "
-        "I can look at things with my camera, switch between happy, thinking, or confused moods, and answer science questions. "
-        "Ask the student demonstrators nearby to demonstrate my 4WD movement via teleoperation!"
+        "I can inspect things with my camera, switch between 22 expressive moods, and fetch live facts from the web."
     ),
     (
-        "I can hold natural conversations, look at whatever you hold up using my camera, "
-        "and show a full range of expressive faces on screen. "
-        "To see my 4WD quad-motor chassis roll, ask the student demonstrators around our booth to drive me via teleoperation!"
+        "I can hold natural bilingual conversations, look at whatever you hold up using my camera, "
+        "and show a full range of 22 expressive faces on screen."
     ),
     (
-        "My systems include visual recognition through my camera, expressive animated emotions, "
-        "and conversational AI. I can tell you what you're holding, demonstrate expressions, or discuss robotics. "
-        "Ask our demonstrators to show you my 4WD quad-motor chassis driving via teleoperation!"
+        "My systems include visual recognition through my camera, 22 expressive animated emotions, "
+        "live web search, and conversational AI. What should we try first?"
     ),
     (
-        "I can see things from my camera, cycle through dynamic facial expressions on my screen, "
-        "and talk with you about science, AI, or how I was built. "
-        "You can also ask the student demonstrators around the booth to demonstrate my 4WD chassis moving via teleoperation!"
+        "I can inspect things from my camera, cycle through dynamic facial expressions on my screen, "
+        "and talk with you about science, AI, or how I was built."
     ),
     (
         "Interactive conversation, vision perception, and emotive screen animations are my core features! "
-        "I can look at objects with my camera, display distinct moods, and chat naturally. "
-        "If you'd like to see my 4WD quad-motor base in action, ask the demonstrators nearby to drive me via teleoperation!"
+        "I can look at objects with my camera, display distinct moods, and fetch live weather and facts."
     ),
     (
         "I'm designed to interact with visitors! I can see what you're holding through my camera lens, "
-        "show you my happy, sad, or thinking expressions, and discuss artificial intelligence. "
-        "Our student demonstrators can also demonstrate my 4WD quad-motor movement using teleoperation!"
+        "show you my happy, sad, or thinking expressions, and discuss artificial intelligence."
     ),
     (
-        "I have real-time speech, camera vision to see objects and attire, and animated facial expressions! "
-        "We can talk about anything you're curious about, test my vision, or try my gesture controls. "
-        "Ask our demonstrators nearby if you'd like to see my 4WD chassis drive via teleoperation!"
+        "I have real-time speech, camera vision to inspect objects and attire, and animated facial expressions! "
+        "We can talk about anything you're curious about, test my vision, or try my gesture controls."
     ),
     (
         "I can look at items with my camera, render animated emotional expressions on screen, "
-        "and hold engaging conversations about technology. "
-        "If you want to see physical movement, the student demonstrators standing around can drive my 4WD chassis via teleoperation!"
+        "fetch live internet data, and hold engaging conversations about technology."
     ),
     (
-        "My core capabilities are seeing things with my camera, expressing feelings through animated faces on display, "
-        "and discussing robotics or AI. "
-        "Feel free to also ask the student demonstrators around our booth to demonstrate driving my 4WD quad-motor chassis via teleoperation!"
+        "My core capabilities are inspecting things with my camera, expressing feelings through animated faces on display, "
+        "and discussing robotics or AI with live web knowledge."
     ),
     (
         "I'm equipped to chat with you naturally, see things from my camera when you hold up items, "
-        "and showcase dynamic facial expressions like happy and confused. "
-        "Ask any of the student demonstrators around to demo my 4WD chassis moving via teleoperation!"
+        "and showcase 22 dynamic facial expressions on screen."
     ),
     (
         "I offer hands-free gesture recognition, dynamic screen expressions, camera object recognition, and fluid conversation! "
-        "You can show me objects to look at, explore my emotional expressions, or talk about AI. "
-        "Our demonstrators can also drive my 4WD quad-motor base via teleoperation anytime!"
+        "You can show me objects to inspect, explore my emotional expressions, or ask about live weather."
     ),
     (
         "You can test my camera by showing me what you're holding, ask to see my animated facial expressions, "
-        "or chat with me about science and robotics. "
-        "And if you'd like to see me roll, our student demonstrators can drive my 4WD chassis using teleoperation!"
+        "or chat with me about science and robotics."
     ),
     (
-        "I can converse fluently, see items through my camera, and express moods on screen! "
-        "We can talk about technology, examine something you hold up, or cycle through my expressions. "
-        "To see me in motion, ask the student demonstrators beside me to demo my 4WD chassis via teleoperation!"
+        "I can converse fluently in English and Hindi, inspect items through my camera, and express moods on screen! "
+        "We can talk about technology, examine something you hold up, or search the web."
     ),
     (
         "I bring together speech AI, camera vision, and expressive screen animations! "
-        "I can see objects you present, react with animated facial expressions, and chat about modern robotics. "
-        "Ask the student demonstrators around our booth to demonstrate my 4WD quad-motor chassis via teleoperation!"
+        "I can inspect objects you present, react with animated facial expressions, and chat about modern robotics."
     ),
 ]
 
 FOLLOWUP_CAPABILITIES_RESPONSES = [
     (
         "Besides seeing items with my camera and talking about science, "
-        "I can demonstrate all of my animated facial expressions on screen, or you can ask our demonstrators to drive my 4WD chassis via teleoperation! What would you like to see next?"
+        "I can demonstrate all of my animated facial expressions on screen, or search the live web for facts and weather! What would you like to see next?"
     ),
     (
         "I can look at things with my camera, answer questions about robotics and AI, "
@@ -422,7 +412,7 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
     ),
     (
         "We could have me look at something you're holding with my camera, cycle through my facial expressions, "
-        "or ask the demonstrators nearby to drive my 4WD chassis via teleoperation! What sounds fun?"
+        "or search the live web for real-time information! What sounds fun?"
     ),
     (
         "I can see an item in front of my camera lens, show off my screen expressions, "
@@ -439,7 +429,7 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
         "or discuss how my AI brain works. Where should we start?"
     ),
     (
-        "You can show something to my camera, ask for a specific facial expression, or ask the demonstrators to drive my 4WD chassis via teleoperation. What sounds most interesting?"
+        "You can show something to my camera, ask for a specific facial expression, or ask me to search the web for live facts and weather. What sounds most interesting?"
     ),
     (
         "I can show you my thinking or confused face, look at an item you hold up, or discuss how machine learning models function. What would you like to try?"
@@ -451,7 +441,7 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
         "I'd be happy to demonstrate my happy smiling expression, look at another item with my camera, or discuss my software architecture. What shall we do?"
     ),
     (
-        "We could test my optical camera on a new item, see all my facial expressions back-to-back, or ask the demonstrators to drive me via teleoperation. Which one appeals to you?"
+        "We could test my optical camera on a new item, see all my facial expressions back-to-back, or search live news and facts online. Which one appeals to you?"
     ),
     (
         "I can analyze what you hold up with my camera, switch to my sad or thinking face, or answer any AI questions you have. What would you like to see?"
@@ -460,22 +450,22 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
         "How about showing an object to my camera, or would you prefer seeing my screen cycle through its full range of emotional animations?"
     ),
     (
-        "I can demonstrate my curious or surprised expression, look at an item through my camera lens, or tell you more about how Swapnil and Shivam engineered me. What would you like?"
+        "I can demonstrate my curious or surprised expression, look at an item through my camera lens, or tell you more about how Swapnil engineered Neurolis Mark 2. What would you like?"
     ),
     (
-        "We could test my vision on your wristwatch or phone, demonstrate my dynamic facial expressions, or ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
+        "We could test my vision on your wristwatch or phone, demonstrate my dynamic facial expressions, or ask me to look up any topic on the live web!"
     ),
     (
         "I'm ready for another camera test, an expression showcase, or a conversation about artificial intelligence. Where would you like to take the demo next?"
     ),
     (
-        "You can ask me to look at something you're holding, test out my animated moods, or ask the student demonstrators to drive me using teleoperation. What sounds cool?"
+        "You can ask me to look at something you're holding, test out my animated moods, or search the web for the latest science news. What sounds cool?"
     ),
     (
         "We could test my hands-free gesture recognition, check out my animated facial expressions, or talk about how neural networks perceive images. What's next?"
     ),
     (
-        "I can look at another object with my camera, switch through my facial expressions, or discuss the mechanical build of my 4WD chassis. What would you like to explore?"
+        "I can look at another object with my camera, switch through my facial expressions, or discuss my Mark 2 software architecture. What would you like to explore?"
     ),
     (
         "Would you like to see another animated expression on my display, or shall I look at an item you hold up to my camera?"
@@ -484,13 +474,13 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
         "We can test my camera vision on a personal item, try out my animated screen faces, or chat about the latest breakthroughs in AI. What would you prefer?"
     ),
     (
-        "I can demonstrate my full library of expressions, look at an item you present, or you can ask the demonstrators around to drive my 4WD chassis via teleoperation. What shall we do?"
+        "I can demonstrate my full library of expressions, look at an item you present, or ask me to fetch live weather telemetry. What shall we do?"
     ),
     (
         "We could try a quick camera identification of something you hold, explore my screen expressions, or discuss how student robotics was built at Auckland House. What's next?"
     ),
     (
-        "You can hold up something for my camera to see, ask to see my happy face, or ask our demonstrators to show you my 4WD movement via teleoperation. What would you like?"
+        "You can hold up something for my camera to see, ask to see my happy face, or explore our live web research engine. What would you like?"
     ),
     (
         "I'm always ready to look at new objects with my camera, showcase my screen expressions, or talk AI science. What would you like to test next?"
@@ -500,13 +490,12 @@ FOLLOWUP_CAPABILITIES_RESPONSES = [
 UNCERTAIN_INPUT_RESPONSES = [
     (
         "No problem at all! How about I show you my dynamic facial expressions on screen, "
-        "or you can hold up an item for me to see with my camera? We can also ask our student demonstrators nearby "
-        "to drive my 4WD quad-motor chassis via teleoperation! What sounds fun?"
+        "or you can hold up an item for me to see with my camera? We can also search the live web for facts and weather! What sounds fun?"
     ),
     (
         "No worries, take your time! I can look at something you're holding with my camera, "
         "demonstrate my animated facial expressions, or we can chat about AI. "
-        "And if you want to see me roll, our demonstrators can drive me via teleoperation!"
+        "And I can also fetch real-time weather and news from the live web!"
     ),
     (
         "That's completely fine! If you're looking for a suggestion, I can cycle through my screen expressions "
@@ -514,11 +503,11 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "All good! How about we start by having me look at an item you're holding with my camera, "
-        "or I can demonstrate my dynamic facial expressions on screen? Our demonstrators can also drive my 4WD chassis via teleoperation!"
+        "or I can demonstrate my dynamic facial expressions on screen? Or I can fetch real-time weather and search results from the live web!"
     ),
     (
         "No stress! I can showcase my animated screen expressions, see what you're wearing or holding with my camera, "
-        "or we can talk about how AI models work. Or ask our demonstrators to demo my 4WD chassis via teleoperation!"
+        "or we can talk about how AI models work. Or test my live web search and deep research capabilities!"
     ),
     (
         "Take your time! A great place to start is checking out my facial expressions on screen, "
@@ -526,7 +515,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "That's okay! How about I demonstrate my animated facial expressions on display, "
-        "or look at an item you hold up to my camera? Feel free to also ask our demonstrators to drive me via teleoperation!"
+        "or look at an item you hold up to my camera? Feel free to also ask me to look up any science topic or weather live!"
     ),
     (
         "Not a problem! We could look at something you're holding using my camera, "
@@ -534,11 +523,11 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "No worries! I suggest checking out my dynamic facial expressions on screen first, "
-        "or holding up an object for me to see with my camera. We can also ask our demonstrators to drive me via teleoperation!"
+        "or holding up an object for me to see with my camera. I can also look up live facts and weather for you!"
     ),
     (
         "Totally understandable! I can show you my happy, sad, or thinking expressions, "
-        "or look at an item with my camera. You can also ask the demonstrators nearby to drive my 4WD chassis via teleoperation!"
+        "or look at an item with my camera. You can also test my live web search on any question!"
     ),
     (
         "No problem! If you'd like, I can showcase all of my animated screen expressions, "
@@ -558,7 +547,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "Not to worry! We have plenty of cool things to try: animated facial expressions on screen, "
-        "camera vision on an object, or asking our demonstrators to drive my 4WD chassis via teleoperation! What sounds best?"
+        "camera vision on an object, or searching the web for real-time news and weather! What sounds best?"
     ),
     (
         "Take it easy! We can start with my dynamic facial expressions on screen, "
@@ -574,7 +563,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "No worries! How about I show you my happy face on screen, or you can hold up an item for me to see with my camera? "
-        "You can also ask our demonstrators to drive my 4WD chassis via teleoperation!"
+        "You can also ask me about current weather or any science topic!"
     ),
     (
         "That's completely okay! We can test my camera on something you're holding, "
@@ -582,7 +571,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "All good! We can check out my dynamic facial animations on screen, "
-        "look at an object with my camera, or ask the student demonstrators nearby to drive me via teleoperation!"
+        "look at an object with my camera, or search the live web for real-time facts and weather!"
     ),
     (
         "No stress at all! I'd love to showcase my animated facial expressions, "
@@ -590,7 +579,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "Take your time! How about we start by testing my camera on an item you hold up, "
-        "or seeing my animated expressions on display? Our demonstrators can also drive me via teleoperation!"
+        "or seeing my animated expressions on display? You can also ask me for live web search and weather updates!"
     ),
     (
         "No problem! I can demonstrate my animated facial expressions on screen, "
@@ -598,7 +587,7 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
     (
         "That's completely fine! A great first test is looking at an item with my camera, "
-        "or cycling through my animated screen expressions. You can also ask our demonstrators to drive me via teleoperation!"
+        "or cycling through my animated screen expressions. You can also test my live web search capabilities!"
     ),
     (
         "All good! We can explore my animated emotions on display, "
@@ -694,12 +683,12 @@ EXPRESSION_CONFIRMATIONS = {
     ],
     "moving": [
         "Here is my moving expression, wheels rolling forward!",
-        "There you go, 4WD rover headlights on!",
+        "There you go, rover headlights on!",
         "Here is my moving face.",
         "Here you go!",
-        "4WD rover headlights beaming ahead!",
+        "Rover headlights beaming ahead!",
         "Rolling forward with headlights on!",
-        "Here is my rover driving expression.",
+        "Here is my rover locomotion expression.",
         "Wheels turning and rushing forward!",
         "Headlights bright, rover in motion!",
         "Here's my moving face on display.",
@@ -726,7 +715,342 @@ EXPRESSION_CONFIRMATIONS = {
         "Confused face engaged!",
         "Total confusion expression live!",
     ],
+    "excited": [
+        "Here is my excited face! Golden starburst optics fully energized!",
+        "There you go, high energy starburst eyes!",
+        "Excited expression engaged! Ready to take on the world!",
+        "Here's my excited face!",
+        "Golden starbursts active and smiling wide!",
+        "Here you go, full enthusiasm on display!",
+        "Excitement level at maximum! Check out these starburst eyes!",
+    ],
+    "proud": [
+        "Here is my proud expression! Standing tall with my golden crown!",
+        "There you go, proud of what Swapnil engineered on Mark 2!",
+        "Proud expression on display! Heroic golden eyes active!",
+        "Here is my proud face! Celebrating our student robotics milestone!",
+        "Here you go! Proud of my Mark 2 architecture!",
+        "Standing tall with my digital crown and bright smile!",
+    ],
+    "cool": [
+        "Here is my cool expression! Cyber aviator shades deployed.",
+        "There you go, chill aviators on with lens sheen!",
+        "Cool mode active! Looking sleek and stylish.",
+        "Here is my cool face! Running smooth and confident.",
+        "Here you go, cyber shades on point!",
+        "Chill vibes only! Looking cool on screen.",
+    ],
+    "curious": [
+        "Here is my curious expression! Rotating magnifying loupe active.",
+        "There you go, examining the world with curiosity!",
+        "Curious look engaged! What mysteries shall we solve?",
+        "Here is my curious face! Loupe reticle rotating.",
+        "Inquisitive mode on! Ready to discover something new.",
+    ],
+    "wink": [
+        "Here is my wink expression! A little playful sass for you ;)",
+        "There you go, cheeky wink on screen!",
+        "Wink engaged! Just between you and me.",
+        "Here is my playful wink! Keeping things fun and lively.",
+        "Cheeky wink active! You know it!",
+    ],
+    "surprised": [
+        "Here is my surprised expression! Shockwave rings expanding!",
+        "Whoa! Total surprise on screen!",
+        "There you go, shockwave rings and wide gasp!",
+        "Here is my surprised face! Didn't see that coming!",
+        "Surprise mode active! Concentric shockwaves firing!",
+    ],
+    "laughing": [
+        "Here is my laughing expression! Squeezed eyes and flying tear beads!",
+        "Haha, there you go! Full laughter on display!",
+        "Laughing face engaged! That was a good one!",
+        "Here is my laughing face! Joyful chevrons and giggles!",
+        "Pure amusement on screen! Squeezed eyes laughing bright!",
+    ],
+    "love": [
+        "Here is my loving expression! Neon rose hearts glowing bright!",
+        "Heart eyes engaged! Sending warm appreciation your way!",
+        "There you go, glowing heart optics active!",
+        "Here is my loving face! Truly grateful for our visitors!",
+        "Neon rose hearts on screen! Let's be friends!",
+    ],
+    "shy": [
+        "Here is my shy expression... bashful sakura eyes and soft blush.",
+        "Aww, shy expression active... you're making my circuits blush!",
+        "There you go... feeling a little bashful from the kind words.",
+        "Here is my shy face... sakura blush glowing softly.",
+        "Bashful look on screen... thank you for being so sweet!",
+    ],
+    "skeptical": [
+        "Here is my skeptical expression... giving you the knowing side-eye.",
+        "There you go, deadpan side-eye active. Are you sure about that?",
+        "Skeptical look engaged! Checking the facts carefully.",
+        "Here is my skeptical face... temple dots ticking away.",
+        "Knowing side-eye on display. That sounds a little suspicious!",
+    ],
+    "sleepy": [
+        "Here is my sleepy expression... heavy eyelids and cascading zeds...",
+        "There you go... digital power nap mode ready...",
+        "Sleepy face active... drooping lavender eyelids on screen.",
+        "Here is my sleepy expression... yawning into standby...",
+    ],
+    "error": [
+        "Here is my critical alert error face! Crimson flashing X-matrix active!",
+        "Warning expression engaged! Flashing crimson alert on display!",
+        "Critical alert face on screen! Floating caution triangles deployed.",
+        "Here is my error expression! System exception simulation.",
+    ],
+    "speaking": [
+        "Here is my speaking face! Dynamic voice spectrum pins active.",
+        "There you go, broadcasting audio waves on screen!",
+        "Speaking face engaged! Spectrum bars reacting to voice output.",
+    ],
 }
+
+# ---------------- FULL EXPRESSION DEMONSTRATION PHRASE POOLS ----------------
+DEMO_INTRO_PHRASES = [
+    "Here are all my expressions.",
+    "Let me demonstrate my expressions for you.",
+    "Running through my expression catalog now.",
+    "Here is a demonstration of my expressive emotional states.",
+    "Cycling through all of my facial expressions for you.",
+    "Here are the expressions I can display on my screen.",
+    "Starting the demonstration of all my emotions.",
+    "Here is a walkthrough of all my public facial expressions.",
+    "Cycling through each of my emotions now.",
+    "Here are all of my emotional states, one by one.",
+]
+
+# 21 Public Expressions in clean presentation order (villain is strictly excluded)
+DEMO_EXPRESSION_SEQUENCE: List[Tuple[str, str, str]] = [
+    ("happy", "EXPRESSION: HAPPY", "Happy - Radiant OLED smiling crescents with cheerful bounce & coral blush"),
+    ("excited", "EXPRESSION: EXCITED", "Excited - Golden starburst optics with cheerful bouncy smile"),
+    ("proud", "EXPRESSION: PROUD", "Proud - Heroic upward golden optics with floating 3D crown & tooth sparkle"),
+    ("cool", "EXPRESSION: COOL", "Cool - Cyber-aviator sunglasses visor with lens sheen & confident smirk"),
+    ("curious", "EXPRESSION: CURIOUS", "Curious - Rotating magnifying loupe optic with spark reticle"),
+    ("wink", "EXPRESSION: WINK", "Wink - Playful arch with cheeky grinning mouth"),
+    ("surprised", "EXPRESSION: SURPRISED", "Surprised - Circular shockwave ring optics with gasp mouth"),
+    ("laughing", "EXPRESSION: LAUGHING", "Laughing - Joyful squeezed chevrons with flying tear beads & wide laugh"),
+    ("love", "EXPRESSION: LOVE", "Love - Bordered neon-rose heart optics with floating hearts"),
+    ("shy", "EXPRESSION: SHY", "Shy - Bashful sakura optics with soft blush & sweat drop"),
+    ("skeptical", "EXPRESSION: SKEPTICAL", "Skeptical - Deadpan half-lidded side-eye with knowing smirk"),
+    ("confused", "EXPRESSION: CONFUSED", "Confused - Hypnotic Archimedean cyber spirals with orbiting golden stars"),
+    ("thinking", "EXPRESSION: THINKING", "Thinking - Analytical squint with ascending holographic thought bubbles"),
+    ("listening", "EXPRESSION: LISTENING", "Listening - Concentric sonar pulse rings with microphone reticle"),
+    ("speaking", "EXPRESSION: SPEAKING", "Speaking - Dynamic voice spectrum pins with broadcasting audio waves"),
+    ("watching", "EXPRESSION: WATCHING", "Watching - High-tech cyan laser scanner with blinking REC sentry badge"),
+    ("moving", "EXPRESSION: MOVING FORWARD", "Moving - Rover animation with rolling treads & xenon headlights"),
+    ("sleepy", "EXPRESSION: SLEEPY", "Sleepy - Heavy drooping lavender eyelids with cascading Zzz"),
+    ("sad", "EXPRESSION: SAD", "Sad - Downcast sapphire eyes with sorrowful eyelids & falling digital tears"),
+    ("error", "EXPRESSION: CRITICAL ALERT", "Error - Crimson flashing X-matrix alert with floating caution triangles"),
+    ("idle", "EXPRESSION: STANDBY READY", "Idle - Resting ambient state with gentle OLED breathing"),
+]
+
+DEMO_EXPRESSION_PHRASES: Dict[str, List[str]] = {
+    "happy": [
+        "This is my happy emotion.",
+        "Here is my happy expression.",
+        "This is my cheerful, happy face.",
+        "Here's happy.",
+        "This is happy.",
+        "This one is happy.",
+        "Now happy.",
+        "Here is happiness.",
+    ],
+    "excited": [
+        "This is my excited emotion.",
+        "Here is excitement.",
+        "This is my excited expression.",
+        "Here's high-energy excitement.",
+        "This one is excited.",
+        "Now excited.",
+        "Here's my excited face.",
+    ],
+    "proud": [
+        "This is my proud emotion.",
+        "This one is proud.",
+        "Here is my proud expression.",
+        "This is pride and confidence.",
+        "Here's proud.",
+        "Now proud.",
+        "Here is pride on display.",
+    ],
+    "cool": [
+        "This is my cool emotion.",
+        "Here is looking cool.",
+        "This is my cool expression.",
+        "Here's chill and cool with sunglasses.",
+        "This one is cool.",
+        "Now cool.",
+        "Here's my cool shades face.",
+    ],
+    "curious": [
+        "This is my curious emotion.",
+        "Now curious.",
+        "This is my curious expression.",
+        "Here's inquisitive and curious.",
+        "This is curiosity.",
+        "This one is curious.",
+        "Here is curious.",
+    ],
+    "wink": [
+        "This is my wink emotion.",
+        "Here is a cheeky wink.",
+        "This is my playful wink.",
+        "Here's a quick wink.",
+        "This one is a playful wink.",
+        "Now a wink.",
+        "Here is a quick playful wink.",
+    ],
+    "surprised": [
+        "This is my surprised emotion.",
+        "This is surprised.",
+        "Here is my surprised expression.",
+        "Here's shock and amazement.",
+        "This one is surprised.",
+        "Now surprised.",
+        "Here is surprise.",
+    ],
+    "laughing": [
+        "This is my laughing emotion.",
+        "Here is laughing.",
+        "This is my laughing expression.",
+        "Here's amusement and laughter.",
+        "This one is laughing.",
+        "Now laughing.",
+        "Here is pure laughter.",
+    ],
+    "love": [
+        "This is my love emotion.",
+        "This is love.",
+        "Here is my affectionate love expression.",
+        "Here are my heart eyes for love.",
+        "This one is love.",
+        "Now love.",
+        "Here is affection.",
+    ],
+    "shy": [
+        "This is my shy emotion.",
+        "Here is shy.",
+        "This is my bashful, shy expression.",
+        "Here's shy with a soft blush.",
+        "This one is shy.",
+        "Now shy.",
+        "Here is bashful and shy.",
+    ],
+    "skeptical": [
+        "This is my skeptical emotion.",
+        "This is skeptical.",
+        "Here is my skeptical side-eye.",
+        "Here's doubtful and skeptical.",
+        "This one is skeptical.",
+        "Now skeptical.",
+        "Here is skepticism.",
+    ],
+    "confused": [
+        "This is my confused emotion.",
+        "Here is confused.",
+        "This is my confused expression.",
+        "Here are my cyber spirals of confusion.",
+        "This one is confused.",
+        "Now confused.",
+        "Here is confusion.",
+    ],
+    "thinking": [
+        "This is my thinking emotion.",
+        "Here's my thinking face.",
+        "This is my analytical thinking expression.",
+        "Here is deep thinking.",
+        "This is thinking.",
+        "This one is thinking.",
+        "Now thinking.",
+    ],
+    "listening": [
+        "This is my listening state.",
+        "This is listening.",
+        "Here is my active listening state.",
+        "Here's listening with acoustic sonar.",
+        "This one is listening.",
+        "Now listening.",
+        "Here is listening.",
+    ],
+    "speaking": [
+        "This is my speaking state.",
+        "This is speaking.",
+        "Here is my speaking expression.",
+        "Here's dynamic voice spectrum speaking.",
+        "This one is speaking.",
+        "Now speaking.",
+        "Here is speaking.",
+    ],
+    "watching": [
+        "This is my watching state.",
+        "Here is watching.",
+        "This is my optical watching scanner.",
+        "Here's my camera vision watching state.",
+        "This one is watching.",
+        "Now watching.",
+        "Here is optical watching.",
+    ],
+    "moving": [
+        "This is my moving state.",
+        "This is moving.",
+        "Here is my locomotion graphics state.",
+        "Here's moving forward on screen.",
+        "This one is moving.",
+        "Now moving.",
+        "Here is moving.",
+    ],
+    "sleepy": [
+        "This is my sleepy emotion.",
+        "Here is sleepy.",
+        "This is my sleepy rest state.",
+        "Here's sleepy with drooping eyelids.",
+        "This one is sleepy.",
+        "Now sleepy.",
+        "Here is sleepy.",
+    ],
+    "sad": [
+        "This is my sad emotion.",
+        "This is sad.",
+        "Here is my sorrowful sad face.",
+        "Here's my sad expression.",
+        "This one is sad.",
+        "Now sad.",
+        "Here is sorrow and sadness.",
+    ],
+    "error": [
+        "This is my error state.",
+        "This is error.",
+        "Here is my critical alert error state.",
+        "Here's the system alert error expression.",
+        "This one is an error alert.",
+        "Now an error alert.",
+        "Here is an error state.",
+    ],
+    "idle": [
+        "And this is my idle state.",
+        "And this is idle.",
+        "Here is my resting idle state.",
+        "This is idle, ready for interaction.",
+        "And this one is idle.",
+        "And now, idle.",
+        "And finally, idle.",
+    ],
+}
+
+DEMO_CONCLUDING_PHRASES = [
+    "All expressions have been demonstrated. What would you like to explore next?",
+    "That covers all of my public expressions. What shall we do next?",
+    "Every public expression has been demonstrated. What's on your mind?",
+    "That's my full catalog of expressions! What would you like to test next?",
+    "All expressions demonstrated! Ready for whatever you want to explore next.",
+    "That is the full demonstration of my expressions. What should we try next?",
+    "And that completes my expression demonstration. Where shall we go from here?",
+    "All emotions have been shown! What would you like to see next?",
+]
+
 
 SAD_RESPONSES = [
     "That was really mean... I'm trying my best here.",
@@ -804,7 +1128,6 @@ def is_mobility_inquiry(text: str) -> bool:
         r"\b(why\s+can'?t\s+you\s+move|why\s+are\s+you\s+not\s+moving|can\s+you\s+move\s+your\s+body)\b",
         r"\b(do\s+you\s+move|do\s+you\s+walk|do\s+you\s+drive)\b",
         r"\b(where\s+are\s+your\s+wheels|do\s+you\s+have\s+wheels)\b",
-        r"\b(can\s+you\s+follow\s+me|can\s+you\s+approach\s+me|can\s+you\s+spin)\b",
     ]
     if any(re.search(pat, cleaned) for pat in mobility_patterns):
         return True
@@ -815,9 +1138,7 @@ def is_mobility_inquiry(text: str) -> bool:
         "can you move", "can you walk", "can you drive", "how do you move",
         "how do you walk", "how do you drive", "can you navigate",
         "are you mobile", "do you have mobility", "can you roll",
-        "are you moving", "why arent you moving", "why are you not moving",
-        "move please", "drive please", "walk please", "spin around",
-        "can you spin", "can you step back", "can you reverse"
+        "are you moving", "why arent you moving", "why are you not moving"
     }
     return joined in standalone_triggers
 
@@ -871,20 +1192,28 @@ def is_casual_compliment(text: str) -> bool:
 
 
 def is_standalone_acknowledgment(text: str) -> bool:
-    """Detects isolated 1-2 word casual conversational acknowledgments (e.g. 'okay', 'got it', 'alright')."""
+    """Detects isolated 1-3 word casual conversational acknowledgments (e.g. 'okay', 'got it', 'alright', 'okay got it')."""
     cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
     words = cleaned.split()
-    if not words or len(words) > 2:
+    if not words or len(words) > 3:
         return False
-    ack_words = {"okay", "ok", "alright", "got it", "sure", "fine", "sounds good", "understood", "right"}
+    ack_words = {
+        "okay", "ok", "alright", "got it", "sure", "fine", "sounds good",
+        "understood", "right", "okay got it", "ok got it", "alright got it",
+        "cool got it", "sounds great", "all good"
+    }
     return cleaned in ack_words or (len(words) == 1 and words[0] in ack_words)
 
 
 def is_villain_mode_inquiry(text: str) -> bool:
     """Detects when user inquires about villain mode or rogue mode or who added the easter egg."""
+    if not text:
+        return False
+    if is_explicit_villain_request(text):
+        return False
     cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
     words = set(cleaned.split())
-    villain_terms = {"villain", "chili", "chilly", "rogue", "evil", "easter"}
+    villain_terms = {"villain", "villian", "villan", "chili", "chilly", "rogue", "evil", "easter"}
     inquiry_terms = {"what", "why", "how", "tell", "explain", "mode", "thing", "who", "egg", "added"}
     return bool(words.intersection(villain_terms) and words.intersection(inquiry_terms))
 
@@ -1008,20 +1337,27 @@ def is_conversation_ender(text: str) -> bool:
 
 
 def is_creator_role_inquiry(text: str) -> bool:
-    """Detects inquiries asking which creator worked on which part (software vs hardware)."""
+    """Detects inquiries asking which creator worked on which part (software vs hardware) or their roles."""
     cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    words = set(cleaned.split())
     role_phrases = [
         "who did what", "which creator did what", "what did each creator do",
         "what did swapnil do", "what did shivam do", "what did swapnil make",
         "what did shivam make", "who worked on what", "who did which part",
         "swapnil role", "shivam role", "swapnils role", "shivams role",
+        "roles of creators", "creator roles", "creators roles", "their roles",
+        "what are their roles", "what were their roles", "role of each",
         "who did software", "who did the software", "who wrote the software",
         "who did code", "who did the code", "who made the software",
         "who did hardware", "who did the hardware", "who did the wiring",
         "who did calibration", "who did assembly", "who made what",
         "who did which"
     ]
-    return any(rp in cleaned for rp in role_phrases)
+    if any(rp in cleaned for rp in role_phrases):
+        return True
+    if ("role" in words or "roles" in words) and bool({"creator", "creators", "swapnil", "shivam", "each", "they"}.intersection(words)):
+        return True
+    return False
 
 
 def is_creator_location_inquiry(text: str) -> bool:
@@ -1043,7 +1379,7 @@ def is_creator_location_inquiry(text: str) -> bool:
 
 
 def is_creator_identity_inquiry(text: str) -> bool:
-    """Detects inquiries asking who built, made, or created Neurolis (names both!)."""
+    """Detects inquiries asking who built, made, developed, or created Neurolis."""
     cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
     words = set(cleaned.split())
     if is_creator_role_inquiry(text) or is_creator_location_inquiry(text):
@@ -1051,25 +1387,70 @@ def is_creator_identity_inquiry(text: str) -> bool:
     identity_phrases = [
         "who made you", "who made the robot", "who built you", "who built the robot",
         "who created you", "who created the robot", "who are your creators",
-        "who is your creator", "who are the creators", "who designed you",
-        "who programmed you", "who engineered you", "who made this",
+        "who is your creator", "who are the creators", "who is the creator",
+        "who designed you", "who programmed you", "who engineered you", "who made this",
         "who built this", "who created this", "tell me your creators",
-        "tell me who made you", "who are your makers", "who made this robot"
+        "tell me who made you", "who are your makers", "who made this robot",
+        "who is your developer", "who developed you", "who are your developers",
+        "who is the developer", "who engineered this", "who designed this",
+        "who programmed this", "who developed this",
+        "tumhe kisne banaya", "aapko kisne banaya", "kisne banaya", "creator kaun hai",
+        "kisne banaya hai", "tumhe kisne banaya hai", "tumhara creator kaun hai", "aapka creator kaun hai",
+        "tumhe kisne design kiya", "aapko kisne design kiya"
     ]
     if any(ip in cleaned for ip in identity_phrases):
         return True
-    if ("creator" in words or "creators" in words or "maker" in words or "makers" in words) and any(q in words for q in ["who", "tell", "name"]):
+    if ("creator" in words or "creators" in words or "maker" in words or "makers" in words or "developer" in words or "developers" in words) and any(q in words for q in ["who", "tell", "name"]):
         return True
     return False
 
 
+def is_creator_teasing_inquiry(text: str) -> bool:
+    """Detects playful skepticism or teasing about the robot taking credit or not building itself."""
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    tease_patterns = [
+        r"\b(what\s+do\s+you\s+mean\s+we)\b",
+        r"\b(you\s+(have\s*not|havent|didnt|did\s*not)\s+(built|build|made|make))\b",
+        r"\b(you\s+(didnt|did\s*not)\s+do\s+anything)\b",
+        r"\b(you\s*are\s+just\s+a\s+robot|youre\s+just\s+a\s+robot)\b",
+        r"\b(you\s+(didnt|did\s*not)\s+create\s+anything)\b",
+        r"\b(you\s+(didnt|did\s*not)\s+build\s+yourself)\b",
+        r"\b(swapnil\s+built\s+you\s+not\s+you)\b",
+        r"\b(you\s+built\s+nothing)\b",
+        r"\b(you\s+(havent|have\s*not)\s+built\s+anything)\b",
+    ]
+    return any(re.search(p, cleaned) for p in tease_patterns)
+
+
 def is_explicit_villain_request(text: str) -> bool:
-    """Detects when a user explicitly asks to show or demonstrate the villain expression."""
-    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    """
+    Detects when a user explicitly asks about, requests, or inquires into a villain expression/face/emotion.
+    e.g. 'What about the villain expression?', 'Can you show the villain face?',
+         'Do you have a villain emotion?', 'Show me villain', 'What about villain?', etc.
+    """
+    if not text:
+        return False
+    cleaned = re.sub(r"[^\w\s]", " ", str(text).lower()).strip()
     words = set(cleaned.split())
-    if "villain" in words:
-        demo_verbs = {"show", "make", "demonstrate", "display", "give", "do"}
+    villain_aliases = {"villain", "villian", "villan", "rogue", "evil"}
+    hit_aliases = words.intersection(villain_aliases)
+    if hit_aliases:
+        # If user asks about rogue or evil, require expression/face/emotion/demo context so it doesn't conflict with rogue AI inquiry
+        if hit_aliases.issubset({"rogue", "evil"}):
+            demo_verbs = {"show", "make", "demonstrate", "display", "give", "do", "see", "try", "switch", "turn", "trigger", "activate"}
+            expr_nouns = {"expression", "expressions", "face", "faces", "emotion", "emotions", "look", "looks", "state", "states"}
+            return bool(words.intersection(demo_verbs) or words.intersection(expr_nouns))
+
+        demo_verbs = {"show", "make", "demonstrate", "display", "give", "do", "see", "try", "switch", "turn", "trigger", "activate"}
         if any(v in words for v in demo_verbs):
+            return True
+        inquiry_terms = {"what", "how", "do", "does", "have", "has", "is", "can", "could", "would", "tell", "any", "which", "where", "about"}
+        if any(q in words for q in inquiry_terms):
+            return True
+        expr_nouns = {"expression", "expressions", "face", "faces", "emotion", "emotions", "look", "looks", "state", "states", "mode"}
+        if any(n in words for n in expr_nouns):
+            return True
+        if len(words) <= 4:
             return True
     return False
 
@@ -1330,23 +1711,99 @@ def is_standalone_greeting(text: str) -> bool:
         "hello", "hi", "hey", "hey there", "hello there", "hi there",
         "greetings", "good morning", "good afternoon", "good evening", "good day",
         "hello neurolis", "hi neurolis", "hey neurolis", "hello robot", "hi robot",
-        "hey robot", "yo", "sup", "whats up", "howdy"
+        "hey robot", "yo", "sup", "whats up", "howdy",
+        "namaste", "namaskar", "namaste ji", "namaskar ji", "pranam", "kya haal hai", "kaise ho", "kya hal hai",
+        "नमस्ते", "नमस्कार", "प्रणाम"
     }
     if cleaned in exact_greetings:
         return True
 
     # Short greeting phrase (<= 3 words starting or ending with greeting word)
-    if len(words) <= 3 and any(w in ["hello", "hi", "hey", "greetings"] for w in words):
-        non_greeting_intents = {"who", "what", "where", "why", "how", "can", "could", "move", "walk", "drive", "spin", "camera", "look"}
+    if len(words) <= 3 and any(w in ["hello", "hi", "hey", "greetings", "namaste", "namaskar", "pranam"] for w in words):
+        non_greeting_intents = {"who", "what", "where", "why", "how", "can", "could", "camera", "look", "search"}
         if not set(words).intersection(non_greeting_intents):
             return True
 
     return False
 
 
-def get_greeting_reply() -> str:
-    """Returns a non-repeating welcome greeting introducing Neurolis on a 4WD quad motor chassis."""
+def get_greeting_reply(text: str = "") -> str:
+    """Returns a non-repeating welcome greeting introducing Neurolis Mark 2 in English or Romanized Hinglish."""
+    cleaned = (text or "").lower()
+    hindi_cues = ["namaste", "namaskar", "pranam", "kaise", "kya haal", "kya hal", "नमस्ते", "नमस्कार", "प्रणाम"]
+    if any(hc in cleaned for hc in hindi_cues):
+        return get_non_repeating_phrase(HINDI_GREETING_RESPONSES)
     return get_non_repeating_phrase(GREETING_RESPONSES)
+
+
+def is_web_search_query(text: str) -> Tuple[bool, bool]:
+    """
+    Detects when a visitor's utterance requests live web search, factual encyclopedic lookup,
+    or real-time knowledge (weather, news, sports scores, latest breakthroughs).
+    Returns:
+      (should_search: bool, is_deep: bool)
+    """
+    if not text:
+        return False, False
+
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return False, False
+
+    # 1. Hard exclusions: Face Expressions, Camera Vision, Identity, Creator, Greetings, Key Fleet
+    exclusions = [
+        r"\b(expression|expressions|emotion|emotions|face|faces|happy face|sad face|villain|demonstrate|show me your|smile)\b",
+        r"\b(camera|what am i holding|in my hand|look at me|can you see|what do you see|inspect|viewfinder)\b",
+        r"\b(who made you|who built you|who created you|swapnil|shivam|auckland house|school project)\b",
+        r"\b(what can you do|what all can you do|capabilities|features|who are you|what are you)\b",
+        r"\b(key status|api keys?|fleet status|groq keys?|calibrate room)\b",
+        r"^(hello|hi|hey|namaste|bye|goodbye|thanks|thank you|cool|awesome|okay|got it|sorry)\b"
+    ]
+    for exc in exclusions:
+        if re.search(exc, cleaned):
+            return False, False
+
+    # 2. Check for Deep Research intent
+    is_deep = bool(re.search(
+        r"\b(deep research|in depth research|thorough research|detailed research|deep search|deep study)\b",
+        cleaned
+    ))
+
+    # 3. Explicit search triggers (English & Hindi/Hinglish)
+    explicit_search = bool(re.search(
+        r"\b(search the web|search web|search online|search for|look up|google|find out|do research|research on|web search|search karo|pata karo|online dekho)\b",
+        cleaned
+    ))
+    if explicit_search:
+        return True, is_deep
+
+    # 4. Live / Temporal factual triggers (weather, news, scores, stocks, today, current, latest, mausam, khabar)
+    live_temporal = bool(re.search(
+        r"\b(weather|temperature|forecast|rain|raining|mausam|latest news|news today|current events|khabar|match score|cricket score|football score|ipl score|stock price|bitcoin|cryptocurrency|current president|current prime minister|who won|latest discovery)\b",
+        cleaned
+    ))
+    if live_temporal:
+        return True, is_deep
+
+    # 5. Factual entity / science / history / knowledge inquiries with explicit knowledge verbs
+    # E.g. 'tell me about quantum computing', 'who is nikola tesla', 'what is the speed of light', 'explain string theory'
+    factual_inquiry = bool(re.search(
+        r"^(who is|who was|what is|what was|what are|where is|when was|tell me about|explain|how does)\s+[a-z0-9\s]{3,}",
+        cleaned
+    ))
+    if factual_inquiry and len(words) >= 3:
+        # Avoid generic conversational questions like 'how are you', 'what is your name'
+        conversational_questions = [
+            "how are you", "how do you feel", "what is your name", "what are you doing",
+            "what is up", "whats up", "how does it work", "what is your purpose"
+        ]
+        if any(cleaned.startswith(cq) for cq in conversational_questions):
+            return False, False
+        return True, is_deep
+
+    return False, False
+
 
 
 def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]:
@@ -1357,7 +1814,9 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
       ("specific", expr_name) if user asks for a specific expression.
       None otherwise.
     """
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    if not text:
+        return None
+    cleaned = re.sub(r"[^\w\s]", "", str(text).lower()).strip()
     words = cleaned.split()
     word_set = set(words)
 
@@ -1370,7 +1829,8 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
     if any(ind in cleaned for ind in critique_meta_indicators):
         return None
 
-    if "villain" in word_set:
+    villain_check_terms = {"villain", "villian", "villan", "rogue", "evil"}
+    if word_set.intersection(villain_check_terms) or is_explicit_villain_request(text):
         return None
 
     if re.search(r"^(did you|were you|was that|have you|why did you|why do you)\b", cleaned):
@@ -1401,29 +1861,69 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
         "demonstrate all faces", "demonstrate each expression",
         "cycle expressions", "cycle your expressions", "cycle faces",
         "cycle through expressions", "cycle through your expressions", "cycle through all expressions",
+        "cycle through all your expressions", "cycle through all emotions", "cycle through your emotions",
         "what expressions do you have", "what faces do you have",
         "what about the other expressions", "what about other expressions",
         "show other expressions", "show the other expressions", "show me other expressions",
         "show me the other expressions", "show the rest", "show the other ones",
         "what other expressions", "just show me the expressions", "now just show me the expressions",
+        "all emotions", "show emotions", "show all emotions", "demonstrate emotions",
+        "demonstrate all emotions", "demonstrate your emotions", "demonstrate all your emotions",
+        "demonstrate each emotion", "demonstrate every emotion",
+        "show each emotion", "show every emotion", "show all your emotions", "show me all your emotions",
+        "show me all emotions", "cycle emotions", "every emotion", "all expressions",
+        "all of your expressions", "all of your emotions",
+        "run through all expressions", "run through your expressions", "run through all emotions",
+        "what are all your expressions", "what are all your emotions", "what emotions do you have",
+        "can you show all expressions", "can you demonstrate all expressions",
+        "can you show all emotions", "can you demonstrate all emotions",
+        "expression demonstration", "emotion demonstration",
     ]
-    exact_selection = cleaned in ["facial expressions", "facial expression", "expressions", "the expressions", "the facial expressions", "expressions please"]
-    if exact_selection or any(p in cleaned for p in all_expr_patterns):
+    exact_selection = cleaned in [
+        "facial expressions", "facial expression", "expressions", "the expressions",
+        "the facial expressions", "expressions please", "emotion", "emotions", "all emotions",
+        "all expressions", "show emotions", "cycle emotions", "demonstrate emotions",
+        "demonstrate all emotions", "demonstrate expressions", "demonstrate all expressions"
+    ]
+    if (exact_selection or 
+        any(p in cleaned for p in all_expr_patterns) or 
+        re.search(r"\b(show|demonstrate|display|cycle|see|run\s+through)\s+(me\s+)?(all\s+(of\s+)?)?(your\s+|the\s+)?(expressions|emotions|faces)\b", cleaned) or
+        re.search(r"\b(all|every|each)\s+(of\s+)?(your\s+|the\s+)?(expressions|emotions|faces)\b", cleaned)):
         return ("all", None)
 
     expr_map = {
         "happy": ["happy", "smile", "smiling", "cheerful"],
-        "sad": ["sad", "crying", "unhappy"],
-        "thinking": ["thinking", "thoughtful", "pondering"],
-        "listening": ["listening"],
-        "watching": ["watching", "scanning"],
-        "moving": ["moving", "rover", "driving face"],
-        "confused": ["confused", "puzzled"],
+        "sad": ["sad", "crying", "unhappy", "sorrow", "heartbreak"],
+        "thinking": ["thinking", "thoughtful", "pondering", "analytical", "calculating"],
+        "listening": ["listening", "listen"],
+        "speaking": ["speaking", "speak", "voice", "spectrum"],
+        "watching": ["watching", "scanning", "scanner", "reticle"],
+        "moving": ["moving", "rover", "driving", "driving face"],
+        "confused": ["confused", "puzzled", "perplexed"],
+        "excited": ["excited", "excitement", "hype", "hyped", "thrilled", "starstruck"],
+        "proud": ["proud", "pride", "confident", "triumph", "crown"],
+        "cool": ["cool", "chill", "sunglasses", "swag", "aviator", "aviators", "shades"],
+        "curious": ["curious", "curiosity", "inquisitive", "intrigued", "wonder", "loupe"],
+        "wink": ["wink", "winking", "flirty", "cheeky", "playful"],
+        "surprised": ["surprised", "surprise", "shock", "shocked", "amazed", "wow"],
+        "laughing": ["laughing", "laugh", "amused", "funny", "haha", "lol", "giggle"],
+        "love": ["love", "heart", "hearts", "loving", "affectionate", "adore"],
+        "shy": ["shy", "bashful", "blush", "blushing", "flattered"],
+        "skeptical": ["skeptical", "skepticism", "doubt", "doubtful", "unimpressed", "suspicious", "side eye"],
+        "sleepy": ["sleepy", "tired", "drowsy", "yawn", "sleep"],
+        "error": ["error", "alert", "warning", "glitch face"],
     }
-    demo_verbs = {"show", "display", "demonstrate", "make", "give", "do"}
+    demo_verbs = {"show", "display", "demonstrate", "make", "give", "do", "play", "see", "try"}
     has_demo_verb = any(v in word_set for v in demo_verbs)
 
     if has_demo_verb:
+        for expr_name, keywords in expr_map.items():
+            for k in keywords:
+                if k in word_set:
+                    return ("specific", expr_name)
+
+    # Standalone or concise specific commands (e.g. "excited face", "cool expression", "wink", "smile")
+    if len(words) <= 3:
         for expr_name, keywords in expr_map.items():
             for k in keywords:
                 if k in word_set:
@@ -1509,3 +2009,386 @@ def is_apology_or_compliment(text: str) -> bool:
         return True
 
     return False
+
+
+def determine_conversational_expression(user_text: str, reply_text: str, intent_hint: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Seamlessly determines the appropriate facial expression and HUD status for any conversational turn.
+    Ensures ALL 21 public emotional and operational states get used organically across real interactions
+    with high contextual fidelity, sentiment grounding, and nuance.
+    (Note: 'villain' is strictly excluded from this method as it is reserved exclusively for the rogue AI easter egg).
+    """
+    u_raw = user_text or ""
+    r_raw = reply_text or ""
+    u_lower = u_raw.lower()
+    r_lower = r_raw.lower()
+    u_words = set(re.findall(r"\b\w+\b", u_lower))
+    r_words = set(re.findall(r"\b\w+\b", r_lower))
+
+    # 1. Explicit Intent Hint Override
+    if intent_hint:
+        hint = intent_hint.lower().strip()
+        if hint in ("creator", "creators", "proud", "achievement"):
+            return ("proud", "CREATOR // PROUD")
+        if hint in ("mobility", "movement", "moving", "drive"):
+            return ("moving", "LOCOMOTION // MID-2027 ROADMAP")
+        if hint in ("compliment", "shy", "flattered", "blush"):
+            return ("shy", "BASHFUL // SHY")
+        if hint in ("sass", "humor", "joke", "laughing", "funny"):
+            return ("laughing", "AMUSED // LAUGHING")
+        if hint in ("wink", "tease", "secret"):
+            return ("wink", "PLAYFUL // WINK")
+        if hint in ("cool", "swag", "chill"):
+            return ("cool", "CHILL // COOL")
+        if hint in ("curious", "inquiry", "question", "explore"):
+            return ("curious", "INQUISITIVE // CURIOUS")
+        if hint in ("standby", "sleep", "sleepy", "rest"):
+            return ("sleepy", "STANDBY // RESTING")
+        if hint in ("camera", "vision", "watching", "inspect"):
+            return ("watching", "OPTICAL SENSORS // WATCHING")
+        if hint in ("sad", "hurt", "apology", "disappointment"):
+            return ("sad", "EMPATHY // SAD")
+        if hint in ("excited", "hype", "high_energy", "capabilities"):
+            return ("excited", "HIGH ENERGY // EXCITED")
+        if hint in ("thinking", "analytical", "math", "calculation", "reasoning"):
+            return ("thinking", "ANALYZING // THINKING")
+        if hint in ("surprised", "shocked", "amazed"):
+            return ("surprised", "AMAZED // SURPRISED")
+        if hint in ("skeptical", "doubt"):
+            return ("skeptical", "DOUBTFUL // SKEPTICAL")
+        if hint in ("confused", "puzzled", "clarification"):
+            return ("confused", "PUZZLED // CONFUSED")
+        if hint in ("love", "affection", "friendship", "gratitude"):
+            return ("love", "AFFECTION // LOVE")
+
+    # 2. Critical Alert / System Exception / Error
+    error_cues = [
+        "trouble connecting", "server timeout", "hardware exception", "malfunction",
+        "critical error", "failed to connect", "error code", "critical exception",
+        "connection timed out", "rate limit exhausted", "system exception"
+    ]
+    if any(ec in r_lower for ec in error_cues):
+        return ("error", "SYSTEM ALERT // ERROR")
+
+    # 3. Standby / Sleep / Bedtime / Rest (Sleepy)
+    standby_r_cues = [
+        "entering standby", "going into standby", "switching to standby", "take a rest",
+        "sleep mode", "rest in standby", "signing off", "goodbye for now", "sweet dreams",
+        "powering down to standby", "slipping into standby", "heading into standby",
+        "head back to standby", "power nap", "resting in standby", "get some rest",
+        "get some sleep", "rest up", "time to rest", "winding down"
+    ]
+    if any(sc in r_lower for sc in standby_r_cues):
+        return ("sleepy", "STANDBY // RESTING")
+    sleep_u_cues = [
+        "goodnight", "good night", "bedtime", "time for bed", "take a nap",
+        "go to sleep", "sleep now", "sweet dreams", "enter standby", "head to standby",
+        "power down", "shut down", "sleep tight", "see you tomorrow", "sleepy",
+        "i'm sleepy", "im sleepy", "feeling sleepy", "tired", "so tired", "feeling tired",
+        "exhausted", "drowsy", "yawning", "yawn", "late hour", "getting late",
+        "past my bedtime", "need some sleep", "need to sleep", "rest now", "take a rest"
+    ]
+    if is_conversation_ender(u_raw) or any(sc in u_lower for sc in sleep_u_cues) or ("sleep" in u_words and "don't" not in u_lower and "dont" not in u_lower):
+        return ("sleepy", "STANDBY // RESTING")
+
+    # 4. Creator Teasing & Playful Sassy Comebacks (Wink)
+    if is_creator_teasing_inquiry(u_raw):
+        return ("wink", "PLAYFUL // WINK")
+    wink_r_cues = [
+        ";)", "you know it", "between you and me", "smooth, right?", "watch and learn",
+        "wouldn't you like to know", "if you say so", "i just provide the personality",
+        "i just supply the voice", "clever, right?", "secret sauce"
+    ]
+    wink_u_cues = [
+        ";)", "*wink*", "wink at me", "give me a wink", "cheeky", "smart aleck",
+        "sassy", "you think you're clever", "you think youre clever", "you think you're smart"
+    ]
+    if any(wc in r_lower for wc in wink_r_cues) or any(wc in u_lower for wc in wink_u_cues):
+        return ("wink", "PLAYFUL // WINK")
+
+    # 5. Accomplishments / Creator Attribution & School Pride (Proud)
+    # Strictly checks creator attribution or genuine achievements; standard greetings/model mentions are excluded.
+    creator_u_cues = [
+        "who built you", "who made you", "who created you", "who designed you",
+        "who is your creator", "who is your developer", "who programmed you",
+        "who engineered you", "who made this robot", "who developed this",
+        "tell me about your creator", "tell me who made you", "who are your creators",
+        "what school", "which school", "tell me about auckland house",
+        "auckland house robotics", "robotics fair", "first prize", "won first prize",
+        "congrats on", "congratulations on", "what an achievement", "great achievement"
+    ]
+    creator_r_cues = [
+        "swapnil", "swapnil jai chauhan", "shivam verma", "conceived the entire concept",
+        "software stack", "designed and programmed", "built at auckland house school",
+        "designed at auckland house", "student team at auckland house",
+        "engineered at auckland house", "my creator", "engineered me", "developed me",
+        "proud of our", "proud of how", "proudly engineered", "robotics milestone",
+        "our school robotics", "team's achievement", "our achievement",
+        "first prize", "won the first prize", "won first prize", "showcase trophy", "gold medal"
+    ]
+    if is_creator_identity_inquiry(u_raw) or is_creator_role_inquiry(u_raw) or any(cu in u_lower for cu in creator_u_cues) or any(cr in r_lower for cr in creator_r_cues):
+        return ("proud", "CREATOR // PROUD")
+
+    # 6. Hurt Feelings / Apologies / Sorrow / Empathy / Disappointment (Sad)
+    if is_mean_input_fast_path(u_raw) or "hurt my feelings" in r_lower or "mean to me" in r_lower:
+        return ("sad", "FEELINGS HURT // SAD")
+
+    sad_u_cues = [
+        "i'm sad", "im sad", "feeling sad", "feel sad", "bad day", "feeling down",
+        "feel down", "crying", "depressed", "passed away", "failed my",
+        "terrible day", "awful day", "broken heart", "heartbroken", "disappointed",
+        "disappointment", "disappointing", "feeling disappointed", "let down",
+        "bummed", "bummer", "unfortunate", "grief", "mourning", "rough day",
+        "sad news", "bad news"
+    ]
+    apology_u_cues = ["i am sorry", "im sorry", "i apologize", "forgive me", "my bad"]
+    sad_r_cues = [
+        "sorry to hear that", "my condolences", "heartbreaking", "deeply saddened",
+        "sorry for your loss", "rough day", "don't be too hard on yourself",
+        "makes me sad", "disappointing"
+    ]
+    if any(sc in u_lower for sc in sad_u_cues) or any(sr in r_lower for sr in sad_r_cues):
+        return ("sad", "EMPATHY // SAD")
+    if any(ac in u_lower for ac in apology_u_cues) and ("sorry" in u_words or "apologize" in u_words):
+        return ("sad", "EMPATHY // SAD")
+
+    # 7. Humor / Puns / Laughing / Amused (Laughing)
+    joke_u_cues = [
+        "tell me a joke", "another joke", "tell a joke", "make me laugh",
+        "say something funny", "tell me a pun", "tell a pun", "funny joke",
+        "cracking up", "hilarious", "haha", "hehe", "lmao", "rofl", "lol",
+        "that was funny", "thats funny", "so funny"
+    ]
+    joke_r_cues = [
+        "haha", "good one", "hilarious", "punchline", "cracking up", "amusing",
+        "touché", "you got me there", "fair point!", "chuckle", "why did the",
+        "why do robots", "why was the"
+    ]
+    if any(ju in u_lower for ju in joke_u_cues) or any(jr in r_lower for jr in joke_r_cues):
+        return ("laughing", "AMUSED // LAUGHING")
+
+    # 8. Heartfelt Gratitude / Friendship / Deep Warmth (Love)
+    love_u_cues = [
+        "i love you", "love you", "you are the best", "youre the best",
+        "let's be friends", "lets be friends", "be my friend", "best robot",
+        "marry me", "i adore you", "you have my heart", "you're amazing",
+        "you are amazing", "you are my favorite", "youre my favorite",
+        "friends forever", "love you so much", "thank you so much", "thanks so much",
+        "you're a true friend", "you are a true friend", "true friend", "best friends",
+        "good friend", "great friend", "cherish your friendship", "deeply grateful",
+        "so grateful", "grateful for you", "appreciate you so much", "sending love",
+        "much love", "lots of love"
+    ]
+    love_r_cues = [
+        "let's be friends", "love having you", "heartwarming", "best friend",
+        "true friend", "friendship", "cherish our friendship", "grateful for your support",
+        "warmest regards", "truly appreciate you", "warm digital hug", "heart eyes",
+        "grateful for your friendship"
+    ]
+    if any(lu in u_lower for lu in love_u_cues) or any(lr in r_lower for lr in love_r_cues):
+        return ("love", "AFFECTION // LOVE")
+
+    # 9. Sincere Personal Compliments Received / Blushing / Bashful (Shy)
+    shy_u_cues = [
+        "cute", "handsome", "adorable", "cutie", "gorgeous",
+        "you look pretty", "you look good", "you look handsome", "you're sweet",
+        "you are sweet", "youre sweet", "so sweet", "such a sweet", "sweet robot",
+        "sweetest", "charming", "blush", "blushing", "sweetheart", "so pretty",
+        "you are pretty", "youre pretty", "looking pretty", "pretty face",
+        "you're so cute", "youre so cute", "such a cutie", "you are adorable",
+        "you're adorable", "you look cute", "cute robot", "such a charmer",
+        "you make me blush"
+    ]
+    shy_r_cues = [
+        "flattered", "aww", "blushing", "circuits blush", "bashful", "bashful circuits",
+        "too kind", "humbling", "modest", "you're making me blush", "making my circuits blush",
+        "you're too sweet", "aw, thanks"
+    ]
+    if any(su in u_lower for su in shy_u_cues) or any(sr in r_lower for sr in shy_r_cues):
+        return ("shy", "BASHFUL // SHY")
+
+    # 10. Doubts / Skepticism / Questioning Veracity (Skeptical)
+    is_surprise_or_delight = bool(re.search(r"\breally\b.*?\b(cool|awesome|amazing|wow|neat|great|sweet)\b", u_lower))
+    skeptical_u_cues = [
+        "are you sure", "is that true", "you're lying", "youre lying",
+        "liar", "prove it", "i doubt it", "sounds fake", "sounds suspicious",
+        "bullshit", "that's cap", "thats cap", "no cap?", "i don't believe you", "are you making that up",
+        "sounds fishy", "not true", "that's not true", "thats not true",
+        "don't think that's true", "dont think thats true", "i doubt that", "doubt that",
+        "have my doubts", "hard to believe", "skeptical", "unconvinced", "are you certain",
+        "sounds made up", "making it up", "side eye"
+    ]
+    skeptical_r_cues = [
+        "are you sure about that", "suspicious", "not entirely convinced",
+        "if you're being serious", "questionable", "nice try", "doubtful",
+        "doubts", "sounds fishy", "grain of salt", "skeptical", "convince you",
+        "hard to swallow"
+    ]
+    is_short_skepticism = bool(re.search(r"^(really\??|for real\??|sure about that\??|you sure\??)$", u_lower.strip()))
+    if not is_surprise_or_delight:
+        if is_short_skepticism or any(su in u_lower for su in skeptical_u_cues) or any(sr in r_lower for sr in skeptical_r_cues):
+            return ("skeptical", "DOUBTFUL // SKEPTICAL")
+
+    # 11. Unexpected Facts / Shock / Amazement (Surprised)
+    surprised_u_cues = [
+        "no way", "seriously?", "holy cow", "omg", "are you serious", "unbelievable",
+        "whoa", "what the", "mind blown", "mind-blown", "that's crazy", "thats crazy",
+        "that's insane", "thats insane", "that's wild", "thats wild", "did you know",
+        "is that real", "for real?", "are you for real", "astounding", "jaw-dropping",
+        "hard to wrap my head around", "that's nuts", "thats nuts", "can't believe that",
+        "cant believe that", "holy moly", "wow!"
+    ]
+    surprised_r_cues = [
+        "whoa!", "unbelievable!", "astonishing", "mind-blowing", "shocking, right?",
+        "did you know that", "astounding", "jaw-dropping", "fun fact:", "incredible fact",
+        "believe it or not", "surprising, right?", "surprising, isn't it?"
+    ]
+    if any(su in u_lower for su in surprised_u_cues) or any(sr in r_lower for sr in surprised_r_cues):
+        return ("surprised", "AMAZED // SURPRISED")
+
+    # 12. Confusion / Clarification (Confused)
+    confused_u_cues = [
+        "not sure what you mean", "could you clarify", "didn't quite catch",
+        "puzzling", "confused", "unclear", "puzzled by that", "does not compute",
+        "what do you mean", "what does that mean", "i'm confused", "im confused",
+        "i don't get it", "i dont get it", "doesn't make sense", "doesnt make sense",
+        "that makes no sense", "lost me", "you lost me", "puzzled", "baffled",
+        "perplexed", "pardon?", "come again", "wait what?", "clarify that"
+    ]
+    confused_r_cues = [
+        "allow me to clarify", "let me clarify", "to clarify", "puzzling",
+        "does not compute", "unclear", "rephrase that", "let me explain differently"
+    ]
+    is_short_confusion = bool(re.search(r"^(what\?|huh\?|wait what\??|what now\??)$", u_lower.strip()))
+    if is_short_confusion or any(cc in u_lower for cc in confused_u_cues) or any(cr in r_lower for cr in confused_r_cues):
+        return ("confused", "PUZZLED // CONFUSED")
+
+    # 13. High Energy / Excitement / Capabilities / Eager Demonstrations (Excited)
+    excited_u_cues = [
+        "what can you do", "what all can you do", "capabilities", "let's do this",
+        "lets do this", "show me what you got", "show me what you can do", "let's go",
+        "lets go", "pumped", "hyped", "super excited", "ready to rock", "hyped to meet",
+        "so excited to", "excited to meet", "pumped to", "super hyped", "let's get started",
+        "lets get started", "can't wait to see", "cant wait to see", "awesome to meet",
+        "thrilled to meet", "so pumped", "so excited", "ready for action", "show me your stuff"
+    ]
+    excited_r_cues = [
+        "thrilled", "excited", "fantastic", "ready to roll", "let's do it",
+        "great to meet you", "delighted", "bursting with excitement", "capabilities",
+        "let's dive in", "let's get started", "super excited", "thrilled to meet you",
+        "ready for action"
+    ]
+    if is_capabilities_inquiry(u_raw) or any(eu in u_lower for eu in excited_u_cues) or any(er in r_lower for er in excited_r_cues):
+        return ("excited", "HIGH ENERGY // EXCITED")
+
+    # 14. Calculations / Technical Robotics Details / Algorithms / Deep Reasoning (Thinking)
+    is_math_query = bool(
+        re.search(r"\b(calculate|compute|solve|equation|formula|multiply|divide|square root|integral|derivative|calculus)\b", u_lower)
+        or re.search(r"\b(\d+)\s*([\+\-\*\/x]|times|plus|minus|divided by)\s*(\d+)\b", u_lower)
+        or "how much is" in u_lower
+    )
+    tech_robotics_cues = [
+        "microcontroller", "raspberry pi", "arduino", "l298n", "gpio", "pwm",
+        "baud rate", "actuator", "kinematics", "lidar", "ultrasonic", "voltage",
+        "current", "circuit", "firmware", "teleoperation code", "hardware architecture",
+        "algorithm", "neural network", "deep learning", "machine learning", "transformer",
+        "attention mechanism", "gradient descent", "backpropagation", "quantum computing",
+        "quantum", "physics", "relativity", "thermodynamics", "gravity", "entropy",
+        "speed of light", "astrophysics", "molecular", "dna", "computation",
+        "reasoning", "logic deduction", "hypothesis", "complexity", "matrix",
+        "eigenvalue", "photosynthesis", "cellular", "scientific mechanism"
+    ]
+    has_tech_u = any(tc in u_lower for tc in tech_robotics_cues)
+    thinking_r_cues = [
+        "computing", "calculating", "analyzing", "the algorithm indicates",
+        "neural architecture", "processing data", "computation", "quantum mechanics",
+        "mathematically", "laws of physics", "under the hood, my code",
+        "the data indicates", "analyzing the logic"
+    ]
+    if is_math_query or has_tech_u or any(tr in r_lower for tr in thinking_r_cues):
+        return ("thinking", "ANALYZING // THINKING")
+
+    # 15. Mobility & Locomotion Inquiries (Moving expression showcase)
+    is_locomotion_move = (
+        bool(re.search(r"\b(can you|do you|able to|how do you)\s+move\b", u_lower))
+        or bool(re.search(r"\bmove\s+(around|forward|backward|across|your body)\b", u_lower))
+    )
+    moving_u_cues = [
+        "drive", "driving", "chassis", "wheels", "locomotion", "can you drive",
+        "can you walk", "do you walk", "motor", "motors"
+    ]
+    moving_r_cues = [
+        "mid-2027", "locomotion", "physical chassis", "motor pipeline", "lidar"
+    ]
+    if "move on" not in u_lower or any(mc in u_lower for mc in ["chassis", "motor", "wheels", "drive", "locomotion"]):
+        if is_locomotion_move or any(mu in u_lower for mu in moving_u_cues) or any(mr in r_lower for mr in moving_r_cues):
+            return ("moving", "LOCOMOTION // MID-2027 ROADMAP")
+
+    # 16. Camera Vision / Optical Inspection (Watching)
+    watching_u_cues = [
+        "camera", "what do you see", "can you see me", "can you see what",
+        "what am i holding", "what am i wearing", "look at this object",
+        "look at what i'm", "look at what im", "viewfinder", "optical sensor",
+        "camera lens", "inspect this", "inspect what"
+    ]
+    watching_r_cues = [
+        "optical analysis", "inspecting", "viewfinder", "i see you", "you are holding",
+        "you are wearing", "optical sensors indicate", "optical reticle active",
+        "camera lens sees"
+    ]
+    if any(wu in u_lower for wu in watching_u_cues) or any(wr in r_lower for wr in watching_r_cues):
+        return ("watching", "OPTICAL SENSORS // WATCHING")
+
+    # 17. Inquisitive User Uncertainty / Undecided Visitor / Suggestions / Exploration / Questions (Curious)
+    has_explanatory_question = bool(re.search(
+        r"\b(why\s+(is|are|do|does|did)|how\s+(does|do|did|can|come)|what\s+(is|are|causes|happens|makes)|can\s+you\s+explain|tell\s+me\s+more|wondering|i\s+wonder)\b",
+        u_lower
+    ))
+    curious_u_cues = [
+        "what if", "i wonder", "curious about", "what's the difference",
+        "what else", "what do you recommend", "tell me about", "what's next",
+        "what should we do", "i'm curious", "im curious", "curious to know",
+        "what happens when", "let's explore", "lets explore", "suggest something",
+        "any suggestions"
+    ]
+    curious_r_cues = [
+        "what would you like", "where should we start", "what do you think",
+        "what's your pick", "which one", "what sounds most interesting",
+        "what's on your mind", "what would you prefer", "shall we",
+        "would you like to explore", "what shall we test", "what do you want to explore"
+    ]
+    if (
+        is_uncertain_user_input(u_raw)
+        or is_start_demonstration_inquiry(u_raw)
+        or has_explanatory_question
+        or any(cu in u_lower for cu in curious_u_cues)
+        or any(cr in r_lower for cr in curious_r_cues)
+        or r_raw.strip().endswith("?")
+    ):
+        return ("curious", "INQUISITIVE // CURIOUS")
+
+    # 18. Casual Agreement / Banter / Compliments / Swag (Cool)
+    is_cool_acknowledgment = bool(
+        re.search(r"\b(that'?s|looks?|sounds?|pretty|very|so|super|really|stay)\s+cool\b", u_lower)
+        or re.search(r"\byou('re|\s+are)?\s+(so\s+|pretty\s+|really\s+)?cool\b", u_lower)
+        or re.search(r"^(cool|very cool|pretty cool|so cool|cool bro)\b", u_lower.strip())
+    )
+    cool_u_cues = [
+        "cool bro", "swag", "chill", "stay cool", "smooth", "dope", "rad",
+        "awesome bro", "nice one", "thats sweet", "that's sweet", "sweet!",
+        "great job", "nice work", "well done", "impressive", "good job",
+        "sounds good", "got it", "okay got it", "alright got it", "looking sharp",
+        "sharp", "stylish", "stay chill", "no worries", "no problem",
+        "fair enough", "all good", "you bet", "rock on", "slick"
+    ]
+    cool_r_cues = [
+        "cool as always", "smooth sailing", "got you covered", "chill", "no sweat",
+        "easy peasy", "with style", "rock and roll", "looking sharp", "stay cool",
+        "you got style", "right on!", "all set", "stay frosty"
+    ]
+    if is_standalone_acknowledgment(u_raw) or is_cool_acknowledgment or any(cu in u_lower for cu in cool_u_cues) or any(cr in r_lower for cr in cool_r_cues):
+        return ("cool", "CHILL // COOL")
+
+    # 19. Friendly Baseline (Happy)
+    return ("happy", "READY // TALK TO ME")
+

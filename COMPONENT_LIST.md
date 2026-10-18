@@ -1,13 +1,13 @@
 # Project Neurolis Component List
 
-Last updated: 2026-10-15
+Last updated: 2026-10-18
 
 This file tracks the hardware and physical inventory for Project Neurolis.
 
 Project Context:
-- Developed by Swapnil Jai Chauhan and Shivam Verma at Auckland House School for Boys.
-- Build Version: Stable High School Exhibition Build (Teleoperated 4WD + MediaPipe Gesture Sentry + Conversational Talkbot).
-- Autonomous roaming and person-following pipelines have been removed from the high-level brain for safety. Movement is 100% manually operated via remote control.
+- Developed by Swapnil Jai Chauhan (Sole Architect & Developer, Neurolis Mark II; Mark 1 prototype chassis contributed by Shivam Verma) at Auckland House School for Boys.
+- Build Version: Neurolis Mark II Software Development Phase (Windows 11 Workstation & Raspberry Pi 5 Verification).
+- The codebase is currently in a 100% software-first architecture. Physical motor drivers, BTS7960 H-bridges, 12V Johnson DC motors, and 2D LiDAR SLAM locomotion will be developed in mid-2027.
 
 ======================================================================
 1. MAIN COMPUTE AND CONTROL

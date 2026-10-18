@@ -1,134 +1,141 @@
 <div align="center">
 
-# Project Neurolis
+# Project Neurolis Mark II
 
-### *An interactive, 4-foot AI humanoid robot with expressive 60 FPS OLED face, conversational voice, vision gesture control, and 4WD teleoperated mobility.*
+### *An advanced humanoid AI software stack featuring a 22-expression 60 FPS OLED face UI, bilingual voice intelligence with emotional prosody, real-time live web search, and hands-free vision gesture control.*
 
 [![Python](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12%20|%203.13-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%205%20|%20Linux%20|%20Windows%20PC-0078D4?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://raspberrypi.com)
-[![Groq AI](https://img.shields.io/badge/AI%20Engine-Groq%20Whisper%20&%20Qwen%2027B-F55036?style=for-the-badge&logo=fastapi&logoColor=white)](https://groq.com)
-[![Vision](https://img.shields.io/badge/Vision%20Sentry-MediaPipe%20Gestures-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://developers.google.com/mediapipe)
-[![Chassis](https://img.shields.io/badge/Chassis-4WD%20Teleoperated-00ff88?style=for-the-badge)](https://github.com)
-[![Status](https://img.shields.io/badge/Status-Stable%20High%20School%20Build-00f0ff?style=for-the-badge)](https://github.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2011%20|%20Raspberry%20Pi%205-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://raspberrypi.com)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-Groq%20LPU%20%7C%2014--Key%20Pool-F55036?style=for-the-badge&logo=fastapi&logoColor=white)](https://groq.com)
+[![Voice](https://img.shields.io/badge/Voice-Bilingual%20%7C%20Emotional%20Prosody-00f0ff?style=for-the-badge)](https://github.com)
+[![Vision](https://img.shields.io/badge/Vision-MediaPipe%20Gestures-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://developers.google.com/mediapipe)
+[![Phase](https://img.shields.io/badge/Phase-Mark%20II%20Software%20Active-00ff88?style=for-the-badge)](https://github.com)
 
 <br/>
 
 > [!IMPORTANT]
-> **Under continuous development, though slowed down. New and improved systems and features will be worked on in the future, this project is still very alive.**
+> **Work on Project Neurolis Mark II has officially commenced on the software side!**  
+> Developed on a Windows 11 primary workstation and verified/tested on Raspberry Pi 5. The physical motor pipeline, BTS7960 drivers, Johnson DC motors, and 2D LiDAR SLAM locomotion will be developed in **mid-2027**.
 
 </div>
 
 ---
 
-## Current Build Status: Stable Exhibition Architecture
+## Overview & Development Strategy: Software-First Excellence
 
-For our high school science exhibition at Auckland House School for Boys, we made the deliberate engineering decision to fall back to a **much safer, rock-solid, and dependable build**. 
+Following the successful demonstration of the Mark 1 prototype at Auckland House School for Boys, **Project Neurolis Mark II** represents a full-scale architectural evolution.
 
-The autonomous movement pipeline was overly complex, fragile, and prone to breaking in dynamic, crowded hall environments. At the same time, an accidental hardware incident cracked our capacitive touch digitizer, making touchscreen buttons unusable.
-
-Rather than running unreliable autonomous code or risking collisions, we simplified the system to ensure 100% stability:
-1. **Mobility**: Completely removed all autonomous roaming, approach, and person-following algorithms. The 4WD chassis is now operated via **Full Manual Remote Control (Teleoperation)**, keeping movement 100% safe and human-guided.
-2. **Hands-Free Control**: Replaced broken touchscreen buttons with a continuous **MediaPipe Vision Hand Gesture Sentry**:
-   * ✋ **Open Palm held for 3 seconds** &rarr; Wakes Neurolis up into active conversation (`LISTENING...`).
-   * ✊ **Closed Fist held for 3 seconds** &rarr; Forces Neurolis into `STANDBY` mode.
-   * Features a live visual progress fill gauge on screen above the subtitle card.
-3. **Conversational Talkbot**: Fully focused on natural dialogue, expressive facial emotion, real-time auditory endpointer filtering, and on-demand camera visual inspection.
+Rather than wrestling with fragile mechanical hardware during rapid AI iteration, Mark II adopts a **strict software-first engineering paradigm**:
+1. **Windows 11 Workstation Development**: Fast iteration, real-time DSP tuning, multi-model AI testing, and 60 FPS vector animation rendering.
+2. **Raspberry Pi 5 Target Verification**: Continuous edge testing to ensure all audio, vision, gesture, and display pipelines run with sub-1.0s latency on embedded Linux.
+3. **Mid-2027 Locomotion Roadmap**: All physical motor controller code, BTS7960 H-bridges, 12V Johnson DC motors, and 2D LiDAR SLAM navigation are officially scheduled for physical fabrication and integration in **mid-2027**. Until then, the software stack is maintained 100% clean of premature or unverified motor commands.
 
 ---
 
-## System Architecture
+## Mark II Software Architecture
 
 ```
-                       ┌──────────────────────────────────────────────┐
-                       │        Raspberry Pi 5 (or PC Simulation)     │
-                       │──────────────────────────────────────────────│
-                       │  • MediaPipe Tasks Vision Gesture Sentry     │
-                       │    (✋ Open Palm Wake / ✊ Closed Fist Standby)│
-                       │  • Endpointer v2 + WebRTC VAD Noise Gate     │
-                       │  • Groq Whisper Speech-to-Text (STT)         │
-                       │  • Groq Qwen 27B Fast LLM Intelligence      │
-                       │  • 14-Key Fleet Auto-Rotation Engine         │
-                       │  • Edge-TTS 7.3.1 + Piper Offline Voice      │
-                       │  • 60 FPS Animated OLED Face UI (7" Screen)  │
-                       │  • On-Demand Groq Vision Camera Inspection   │
-                       └──────────────────────────────────────────────┘
-
-                                      [PHYSICALLY ISOLATED]
-
-                       ┌──────────────────────────────────────────────┐
-                       │           4WD Teleoperated Chassis           │
-                       │──────────────────────────────────────────────│
-                       │  • Arduino Mega / Dedicated Controller       │
-                       │  • 4x BTS7960 43A High-Power Motor Drivers   │
-                       │  • 4x 12V Johnson Non-Encoder DC Motors      │
-                       │  • Wireless Remote Control Receiver (RF/RC)  │
-                       │  • Full Manual Driver Control (Zero Hazard)  │
-                       └──────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       PROJECT NEUROLIS MARK II                          │
+│        Primary Workstation: Windows 11  |  Edge Target: Raspberry Pi 5  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  [INPUT PERCEPTION]                                                     │
+│  ├── USB Camera (/dev/video0)                                           │
+│  │   ├── MediaPipe Tasks Gesture Sentry (✋ Wake / ✊ Standby)          │
+│  │   └── On-Demand Groq Vision Snapshot Analyzer                        │
+│  │                                                                      │
+│  └── 16kHz Studio Audio In                                              │
+│      ├── Dynamic Rolling Noise Floor Tracker (Auditorium-grade)         │
+│      ├── Sub-Utterance Vocal Tunnel DSP Bandpass (85Hz - 5.5kHz)        │
+│      └── Groq Whisper Large v3 (Zero-Hallucination Bilingual STT)       │
+│                                                                         │
+│  [COGNITIVE CORE & KNOWLEDGE]                                           │
+│  ├── 14-Key Groq LPU Auto-Rotating Fleet Manager (api_pool.py)          │
+│  ├── Low-Latency Qwen 27B Conversational LLM Engine                     │
+│  ├── Zero-Token Local Fast-Paths (Greetings, Capabilities, Diagnostics) │
+│  └── Live Edge Knowledge Engine (edge_search.py)                        │
+│      ├── Instant Atmospheric Telemetry (wttr.in)                        │
+│      ├── Wikipedia Encyclopedic Entity Summaries                        │
+│      └── DuckDuckGo Real-Time Web Search & Deep Research                │
+│                                                                         │
+│  [EXPRESSIVE OUTPUT ENGINES]                                            │
+│  ├── 60 FPS HyperSmooth Face UI (screen.py)                             │
+│  │   ├── 22 Animated Pixar/EMO-Grade Vector Emotion States              │
+│  │   ├── Live Gesture Hold Progress Bar & Mutually Exclusive HUD        │
+│  │   └── High-Contrast Subtitles with Romanized Hinglish Translation    │
+│  │                                                                      │
+│  └── Bilingual Speech Synthesis with Emotional Prosody                  │
+│      ├── Microsoft Edge Neural TTS (AndrewMultilingual & MadhurNeural)   │
+│      ├── ChatGPT-Style Pitch/Rate Dynamic Modulation                    │
+│      └── Piper Neural Offline Local Fallback (en_US-lessac-low.onnx)   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Core Capabilities & Features
 
-### 1. Hands-Free Vision Gesture Sentry (MediaPipe Tasks)
-* Operates continuously in the background using the USB camera on `/dev/video0`.
-* Downscaled 320x240 RGB frames processed at ~15 FPS with minimal CPU overhead.
+### 1. 22 Emotive Vector Face Expressions (`screen.py`)
+Built from the ground up using pure scale-invariant Tkinter vector geometry rendering at a locked 60 FPS on pure space black (`#040711`):
+* **Core Emotional States**: `IDLE`, `HAPPY`, `SAD`, `CONFUSED`, `THINKING`, `LISTENING`, `SPEAKING`, `WATCHING`, `MOVING`, `ERROR`, `VILLAIN`.
+* **Extended Mark II Emotions**: `EXCITED`, `PROUD`, `COOL`, `CURIOUS`, `WINK`, `SURPRISED`, `LAUGHING`, `LOVE`, `SHY`, `SKEPTICAL`, `SLEEPY`.
+* **Contextual Emotion Engine**: Analyzes conversation sentiment in real-time, mapping topics dynamically (e.g. Creator accomplishments &rarr; `PROUD`, witty comebacks &rarr; `WINK`, flattery &rarr; `SHY`, deep reasoning &rarr; `THINKING`).
+* **Synchronous Expression Demonstration**: A guided voice-and-face presentation cycling all 21 public expressions side-by-side with varied natural phrasing.
+* **Rogue AI Easter Egg (`VILLAIN`)**: A single-session sci-fi narrative mode with CRT scanlines and ghostly split-optic chromatic ghosting, strictly locked out of public demonstration loops.
+
+### 2. Studio Bilingual Voice & Emotional Prosody (ChatGPT Voice Style)
+* **Bilingual English & Hindi STT**: Uses unconstrained Groq Whisper with custom bilingual prefix priming (`Namaste, aap kaise hain? Hello, how are you?`), accurately transcribing pure English, Hindi, and code-mixed Hinglish without phonetic hallucinations.
+* **Studio-Grade Neural Voices**:
+  * English: `en-US-AndrewMultilingualNeural` (natural, human-like breath, warm cadence).
+  * Hindi: `hi-IN-MadhurNeural` (rich, articulate male voice).
+* **Dynamic Emotional Prosody**: Adjusts pitch and speech tempo in real-time based on the active emotion (e.g. cheeky winks gain $+8\text{Hz}$ pitch and $+16\%$ tempo; sad responses drop $-6\text{Hz}$ and slow down; rogue AI drops $-16\text{Hz}$ for an ominous delivery).
+* **Romanized Hinglish Subtitles**: Automatically transliterates Devanagari text into clean Romanized Hinglish for instant on-screen readability.
+
+### 3. Real-Time Live Web Search & Knowledge Engine (`edge_search.py`)
+* **100% Free & Keyless Edge Architecture**:
+  * *Live Weather*: Instant atmospheric telemetry via `wttr.in` for live temperature, humidity, and forecast updates.
+  * *Wikipedia REST API*: Low-latency encyclopedic summaries for scientific, historical, and technical concepts.
+  * *DuckDuckGo Search (`ddgs`)*: Real-time search for breaking news, current events, and deep research topics.
+* **Sub-80 Token Salience Filter**: Injected search context is condensed into a concise snippet (< 60 words), keeping Groq prompt token usage strictly under 80 tokens with zero residual memory footprint.
+
+### 4. Hands-Free MediaPipe Vision Gesture Sentry (`gesture_sentry.py`)
+* Runs in a background thread at ~15 FPS on downscaled 320x240 RGB frames from `/dev/video0`.
 * **3-Second Hold Validation**:
-  * In **Standby**: An open palm held continuously for 3.0 seconds wakes the robot. Closed fists are ignored.
-  * In **Active**: A closed fist held continuously for 3.0 seconds forces the robot into standby. Open palms are ignored.
-* **Live On-Screen HUD**: Animated progress bar visually fills above the subtitles as the gesture is held, providing immediate feedback.
+  * In **Standby**: ✋ **Open Palm held for 3.0s** wakes the robot into active conversation.
+  * In **Active**: ✊ **Closed Fist held for 3.0s** forces the robot into standby.
+* **Mutually Exclusive Progress HUD**: Dynamic on-screen fill gauge provides visual countdown feedback without text overlapping or visual clipping.
 
-### 2. Auditorium-Tuned Acoustic Endpointer (Endpointer v2)
-* Built specifically for high-noise venues like school auditoriums, science halls, and busy cafeterias (65–75 dBA).
-* **Rolling Ambient Noise Floor Tracking**: Computes median ambient room energy over a 66-frame (~2.0s) window to dynamically set speech onset threshold at $+6\text{ dB}$ SNR ($\text{floor} \times 2.0$).
-* **Dynamic Speaker Hangover**: While the visitor speaks, the continuation threshold rises dynamically to $32\%$ of the speaker's median volume, preventing background crowd chatter from keeping the recording open.
-* **Zero Shouting Required**: Normal conversational speech ($450\text{--}800\text{ RMS}$) is accepted cleanly, while distant chatter ($120\text{--}220\text{ RMS}$) is rejected.
-* **Sub-Utterance Vocal Tunnel Filter**: Performs FFT bandpass ($85\text{Hz}\text{--}5500\text{Hz}$) with a $+2.6\text{ dB}$ consonant presence shelf ($2.0\text{kHz}\text{--}4.0\text{kHz}$) across the entire audio array before passing to Whisper.
+### 5. Auditorium-Grade Dynamic Acoustic Endpointer (Endpointer v2)
+* Built specifically for high-noise venues like school auditoriums, exhibitions, and STEM halls (65–75 dBA).
+* **Rolling Ambient Noise Floor Tracking**: Tracks median room energy over a 66-frame (~2.0s) window to dynamically set speech onset at $+6\text{ dB}$ SNR ($\text{floor} \times 2.0$), rejecting distant crowd murmur while picking up conversational voice effortlessly.
+* **Vocal Tunnel Filter**: Real-time FFT bandpass ($85\text{Hz}\text{--}5500\text{Hz}$) with a $+2.6\text{ dB}$ consonant presence shelf ($2.0\text{kHz}\text{--}4.0\text{kHz}$).
 
-### 3. High-Speed Conversational Intelligence (Groq Qwen 27B)
-* Sub-second conversational responses powered by Groq LPUs.
-* **Dynamic 14-Key Auto-Rotation**: Automatically balances and rotates across up to 14 Groq API keys (`GROQ_API_KEY_1` to `GROQ_API_KEY_14`). When a key encounters a rate limit (HTTP 429), it instantly fails over to the next standby key without crashing.
-* **Zero-Token Fast-Paths**: Standalone greetings ("Hello", "Hi"), uncertainty queries, and key status inquiries ("Which key is active?") execute locally with 0ms latency and 0 API tokens.
-* **Safe, Polite Student Tone**: Natural, articulate personality representing Auckland House School for Boys. Knows its creators (Swapnil Jai Chauhan & Shivam Verma) and explains its prototype systems only when asked or praised.
-
-### 4. Dual-Engine Speech Synthesis (Online + Local Offline)
-* **Primary (Edge-TTS 7.3.1)**: Crystal-clear neural voice (`en-US-ChristopherNeural`) synthesized in memory with parallel sentence pipelining for sub-1.5s speech playback.
-* **Instant Offline Contingency (Piper Neural TTS)**: If internet drops or DNS fails, synthesizes speech locally via Piper (`en_US-lessac-low.onnx`) directly through `sounddevice` with zero timeouts.
-
-### 5. 60 FPS Animated OLED Face Engine (`screen.py`)
-* Minimalist emissive cyber face on pure space black (`#040711`).
-* **7 Expressive Emotional States**:
-  * `IDLE`: Calm cyan glowing eyes with natural breathing cadence.
-  * `HAPPY`: Cheerful emerald smiling crescents ($\cap \;\; \cap$) with smooth bounce.
-  * `SAD`: Sapphire downcast eyes with an animated falling digital teardrop.
-  * `CONFUSED`: Spinning cyber vortex spirals with orbital stars.
-  * `THINKING`: Analytical squint with rotating quantum data rings.
-  * `SPEAKING`: Voice-reactive eye squash/stretch synced with audio playback.
-  * `WATCHING`: Optical viewfinder reticle brackets with scanning laser sweep.
-* Real-time dual-color subtitles: `[YOU]` in mint green, `[NEUROLIS]` in cyan.
-
-### 6. On-Demand Visual Inspection (Groq Vision)
-* Ask *"What am I holding?"*, *"Look at this"*, or *"What is in my hand?"*.
-* Neurolis switches to its `WATCHING` expression, captures a single snapshot from the camera, and provides a quick, concise answer using Groq Vision.
+### 6. Dynamic 14-Key Groq LPU Auto-Rotation Pool (`api_pool.py`)
+* Auto-balances requests across up to 14 Groq API keys (`GROQ_API_KEY_1` to `GROQ_API_KEY_14`).
+* On encountering rate limits (HTTP 429), it switches keys in ~10ms without dropping the user's conversation.
 
 ---
 
-## Hardware Specification
+## Hardware & Target Deployment
 
-| Category | Component | Role & Notes |
+| Subsystem | Current Mark II Software Stack | Mid-2027 Physical Locomotion Target |
 | :--- | :--- | :--- |
-| **Compute Brain** | **Raspberry Pi 5 (4GB or 8GB)** | Runs Python 3.13, MediaPipe gesture sentry, audio endpointer, AI brain, and face UI. |
-| **Camera** | **USB HD Webcam (720p / 1080p)** | Stationed on `/dev/video0`. Runs background MediaPipe gesture detection and on-demand AI vision. |
-| **Audio In** | **USB Microphone / Phone Mic over ADB** | High-fidelity 16kHz mono audio input connected to PipeWire / ALSA. |
-| **Audio Out** | **Powered Speaker (USB or Bluetooth)** | Audio playback for Edge-TTS and Piper speech synthesis. |
-| **Face Display** | **7-inch Display (1024x600)** | Dedicated to 60 FPS animated Face UI and gesture progress HUD. |
-| **Chassis** | **4WD Skid-Steer Aluminum Base** | 4x 12V Johnson DC motors and 4x BTS7960 high-power drivers. |
-| **Chassis Control** | **Manual RC / Wireless Teleoperation** | Controlled manually by the student demonstrator via remote control. |
-| **Chassis Power** | **12V High-Amperage Battery Pack** | Independent power supply for motors and drivers. |
+| **Primary Workstation** | **Windows 11 PC (Fast Prototyping)** | Core AI brain & telemetry station |
+| **Edge Compute** | **Raspberry Pi 5 (Debian Bookworm)** | Onboard SBC running Linux aarch64 |
+| **Face Display** | **7-inch Display (1024x600)** | Emissive 60 FPS vector face & HUD |
+| **Optical Vision** | **USB HD Webcam (720p / 1080p)** | MediaPipe gesture tracking & Groq vision |
+| **Microphone** | **USB Studio Microphone / Audio Array** | Dynamic noise-floor acoustic endpointer |
+| **Audio Output** | **Powered Speaker (USB / Bluetooth)** | Dual-engine neural voice output |
+| **Locomotion Chassis** | *Clean Software Phase (No motors active)* | **4WD Skid-Steer Aluminum Chassis** |
+| **Motor Drivers** | *Not connected in current phase* | **4x BTS7960 43A H-Bridge Drivers** |
+| **DC Motors** | *Not connected in current phase* | **4x 12V Johnson High-Torque DC Motors** |
+| **LiDAR Navigation** | *Not connected in current phase* | **2D LiDAR Scanner (360° SLAM Autonomy)** |
 
 ---
 
-## Setup & Installation
+## Setup & Quickstart
 
 ### 1. Clone the Repository
 ```bash
@@ -137,11 +144,15 @@ cd Neurolis-AI-Humanoid
 ```
 
 ### 2. Configure Environment & Dependencies
-On Raspberry Pi 5 (Raspberry Pi OS Bookworm) or Linux:
 ```bash
-# Create and activate virtual environment
-python3 -m venv myenv
-source myenv/bin/activate
+# Python 3.10+ virtual environment
+python -m venv venv
+
+# On Windows:
+venv\Scripts\activate
+
+# On Raspberry Pi 5 / Linux:
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -154,38 +165,44 @@ GROQ_API_KEY_1=gsk_your_primary_key_here
 GROQ_API_KEY_2=gsk_your_backup_key_here
 ```
 
-### 4. Run Neurolis
+### 4. Run Project Neurolis Mark II
 ```bash
-# Standard Launch (Voice + Camera Gesture Sentry + Face UI)
+# Full Interactive Launch (Voice + Gesture Sentry + 60 FPS Face UI)
 python listen.py
 
-# Text-Only Mode (Bypasses microphone; for quiet terminal testing)
+# Text-Only Simulation Mode (Quiet terminal testing without mic)
 python listen.py --text
 ```
 
 ---
 
-## Project Roadmap & Future Vision
+## Project Roadmap
 
-While we simplified the current build for safety and reliability at the exhibition, Project Neurolis remains under active development.
+### Phase 1: Software Stack Perfection (Late 2026 - Early 2027) [ACTIVE]
+- [x] 22 hyper-expressive 60 FPS OLED vector face expressions
+- [x] Bilingual English + Hindi speech synthesis with ChatGPT-style emotional prosody
+- [x] Zero-hallucination bilingual Whisper STT with Indic phonetic scrubber
+- [x] Live edge web search and weather telemetry engine (`edge_search.py`)
+- [x] MediaPipe Tasks vision hand gesture sentry (✋ Wake / ✊ Standby)
+- [x] Auditorium-tuned dynamic acoustic endpointer (Endpointer v2)
+- [x] Dynamic 14-Key Groq LPU auto-rotation pool with rate-limit failover
+- [x] Purge all legacy Arduino controller code and obsolete motor commands
 
-* [x] MediaPipe Tasks vision gesture sentry (✋ Wake / ✊ Standby)
-* [x] Auditorium-grade dynamic noise floor acoustic endpointer (Endpointer v2)
-* [x] 14-Key Groq API pool with sequential rate-limit failover
-* [x] Edge-TTS 7.3.1 integration with Piper offline contingency
-* [x] 60 FPS animated OLED facial expression engine
-* [ ] Hardware repair: Replace broken capacitive touch digitizer
-* [ ] Modular motor interface: Clean, isolated teleoperation serial bridge
-* [ ] Next-gen obstacle avoidance: Proximity-based safety halt for manual teleoperation
-* [ ] Re-evaluating autonomous navigation: Implementing safer, slower, and more predictable movement algorithms in future revisions
+### Phase 2: Physical Locomotion & Robotics Hardware (Mid-2027)
+- [ ] Low-level motor controller pipeline on Raspberry Pi 5 / microcontrollers
+- [ ] 4x BTS7960 43A motor driver integration with 12V Johnson DC motors
+- [ ] 2D LiDAR scanner integration (RPLiDAR A1 / C1) for 360° indoor SLAM
+- [ ] Safe, obstacle-aware autonomous navigation and docking
+- [ ] Full humanoid physical chassis assembly and power distribution
 
 ---
 
 <div align="center">
 
-### Built with pride by Swapnil Jai Chauhan & Shivam Verma
-**Auckland House School for Boys — Science Exhibition Prototype**
+### Designed & Developed by Swapnil Jai Chauhan
+*Concept, Software Architecture, AI Brain, Vision Pipeline, and Face Engine*  
+*(Early Mark 1 physical prototype chassis contributed by Shivam Verma)*
 
-*Simplicity and rock-solid reliability over fragile complexity.*
+**Auckland House School for Boys**
 
 </div>

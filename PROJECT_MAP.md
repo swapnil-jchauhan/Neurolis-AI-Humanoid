@@ -1,18 +1,19 @@
 # Project Neurolis: Engineering Architecture & Development Chronicle
 
-Last Updated: 2026-10-15  
-Status: **Stable High School Exhibition Build (Under Active Development)**  
-Authors: **Swapnil Jai Chauhan & Shivam Verma**  
+Last Updated: 2026-10-18  
+Status: **Neurolis Mark II Software Development Commenced (Windows 11 Workstation & Raspberry Pi 5 Verification)**  
+Authors: **Swapnil Jai Chauhan** (Sole Lead Architect & Developer, Neurolis Mark II) & **Shivam Verma** (Mark 1 Prototype Contributor)  
 Institution: **Auckland House School for Boys**  
 
 > [!IMPORTANT]
-> **Under continuous development, though slowed down. New and improved systems and features will be worked on in the future, this project is still very alive.**
+> **Work on Project Neurolis Mark II has officially commenced on the software side!**  
+> Developed on a Windows 11 primary workstation and verified/tested on Raspberry Pi 5. The physical motor pipeline, BTS7960 drivers, Johnson DC motors, and 2D LiDAR SLAM locomotion are scheduled for **mid-2027**.
 
 ---
 
 ## Executive Summary
 
-Project Neurolis is an interactive 4-foot AI humanoid robot designed for science exhibitions, academic demonstrations, and STEM research. Built on a distributed compute model, Neurolis combines a high-level Python AI brain on a Raspberry Pi 5 with an expressive 60 FPS animated OLED facial UI, hands-free MediaPipe vision gesture control, auditorium-tuned acoustic voice endpointing, Groq-powered multi-key conversational intelligence, and an independently teleoperated 4WD chassis.
+Project Neurolis is an interactive AI humanoid robot designed for science exhibitions, academic demonstrations, and STEM research. Project Neurolis Mark II is currently in an intensive **software-first development phase**, engineered on a Windows 11 primary workstation and tested on Raspberry Pi 5. It combines an expressive 22-state 60 FPS animated OLED facial UI, hands-free MediaPipe vision gesture control, auditorium-tuned acoustic voice endpointing, Groq-powered multi-key conversational intelligence, bilingual speech synthesis with ChatGPT-style emotional prosody, and a real-time live web search and weather engine (`edge_search.py`). All physical motor and LiDAR locomotion features are planned for mid-2027.
 
 This document serves as the complete architectural map, historical chronicle, and technical specification of the project: detailing where we started, what we built, where we encountered failure, the engineering pivots we executed, and where the project stands today.
 
@@ -94,13 +95,13 @@ Real-world robotics is brutally unforgiving. As we prepared for live deployment,
 
 Rather than letting these setbacks derail the project, we made decisive, disciplined engineering pivots to guarantee a stable, dependable, and safe exhibition build:
 
-### Pivot 1: Stripped All Autonomous Movement & Switched to Full Manual Teleoperation
-* **Action**: We completely purged all autonomous movement code from the high-level brain (`listen.py`):
-  * Deleted `motors.py`.
-  * Removed autonomous roam mode, sentry approach mode, person-following (`FOLLOW`), spin, and step-back routines.
+### Pivot 1: Stripped All Motor Commands, Purged Arduino Code, & Adopted Software-First Paradigm
+* **Action**: We completely purged all motor commands, movement exclusions, and legacy Arduino code from the repository:
+  * Deleted `motor_controller.ino` and `motors.py`.
+  * Removed autonomous roam mode, sentry approach mode, person-following (`FOLLOW`), spin, step-back routines, and teleoperation driving dialogues.
   * Purged all motor action parsing (`<action motor="...">`), intent classification prompts, and motor fast-paths.
-* **The New Mobility Reality**: The 4WD chassis is now operated via **Full Manual Remote Control (Teleoperation)** through a dedicated Arduino RF/RC receiver.
-* **Result**: Movement is 100% safe, reliable, and predictable. The student operator drives the robot manually during demonstrations, completely eliminating any risk of collision, sensor confusion, or runaway motion.
+* **The Software-First Engineering Phase**: Project Neurolis Mark II is currently a pure software stack running on a Windows 11 primary workstation and verified/tested on Raspberry Pi 5.
+* **The Mid-2027 Locomotion Roadmap**: Physical motor controller pipelines, BTS7960 high-power H-bridges, 12V Johnson DC motors, and 2D LiDAR SLAM indoor navigation are officially scheduled for mid-2027. Developing the physical hardware will occur after the software pipeline (conversational AI, vision, live web search, bilingual voice modulation, 60 FPS vector emotions) is perfected.
 
 ### Pivot 2: Hands-Free MediaPipe Vision Gesture Sentry
 * **Action**: To solve the broken touchscreen problem, we turned our USB camera into a hands-free interaction controller using **Google MediaPipe Tasks Vision Gesture Recognizer** (`gesture_sentry.py`):
@@ -131,10 +132,10 @@ Neurolis-AI-Humanoid/
 ├── gesture_sentry.py       # Background MediaPipe Tasks Hand Gesture Recognition Worker
 ├── audio_frontend.py       # Endpointer v2: Dynamic Noise Floor, WebRTC VAD, & DSP Filter
 ├── api_pool.py             # 14-Key Dynamic Groq API Key Pool & Auto-Rotation Manager
+├── edge_search.py          # Live Knowledge Engine: Weather (wttr.in), Wikipedia, & DuckDuckGo
 ├── intent_rules.py         # Response pools, greetings, fast-path intent matching, & personality
 ├── mic_config.json         # Calibrated audio thresholds, cutoff frequencies, & gain settings
 ├── gesture_recognizer.task # Official MediaPipe Tasks gesture classification model asset
-├── motor_controller.ino    # Arduino sketch for manual wireless remote control (teleoperation)
 ├── assets/                 # Sound effects, Piper offline model, and UI graphics
 │   └── piper/              # en_US-lessac-low.onnx neural TTS model
 ├── README.md               # Public project documentation & quickstart guide
@@ -143,33 +144,95 @@ Neurolis-AI-Humanoid/
 ```
 
 ### Active Core Features:
-1. **Interactive Conversational Talkbot**: Articulate student presenter identity, grounded in Auckland House School for Boys, explaining its systems truthfully when asked.
+1. **Interactive Conversational Talkbot & Mark II Creator Grounding**: Articulate student presenter identity, grounded in Auckland House School for Boys. Attributed solely to Swapnil Jai Chauhan as creator and lead developer for Neurolis Mark 2 (concept, hardware integration, vision pipeline, software stack), recognizing Shivam Verma as a key contributor on the earlier Mark 1 prototype when asked about roles. Unprompted creator disclosure is strictly prohibited on general greetings.
 2. **Hands-Free Gesture Activation**: MediaPipe ✋ Open Palm wake / ✊ Closed Fist standby with 3.0s hold safety and on-screen progress indicator.
-3. **Expressive 60 FPS Face UI**: 7 emotional states, natural eye blinking, voice-synced mouth squashing, and real-time dual-color subtitles.
+3. **Project Neurolis Mark II Emotive Face Engine (`screen.py`)**: 22 hyper-expressive, cute, catchy, and pixel-perfect animated robotic states (Pixar/EMO-grade visual punch with scale-invariant Tkinter vector rendering):
+   - `IDLE`: Dynamic cybernetic eyebrows with dual-layer neon bloom and micro LED ticks, cardinal iris HUD ring ticks (12, 3, 6, 9 o'clock), breathing optic core, triple Pixar specular glints, and resting chin sensor with twin cyan LED nodes.
+   - `HAPPY`: Radiant smiling crescents ($\cap \;\; \cap$) with soft neon bloom, pulsing kawaii cheek blush hearts, and 7-star twinkling sparkle constellation.
+   - `SAD`: Downcast sorrowful gaze, trembling eyelid droop, bottom digital tear well pool, dual teardrop streams with glowing liquid trails, and bottom splash ripples.
+   - `CONFUSED`: Hypnotic Archimedean cyber vortex spirals with radial ticks, pulsing singularity core bead with rotating crosshairs, dual bobbing holographic '?' badges, and 4-star 3D galaxy orbit.
+   - `THINKING`: Pensive up-right squint, internal rotating quantum data dials inside both eyes, ascending 3-bubble holographic thought orb matrix with spinning reticle, and dual counter-tilted 3D elliptical gyroscope orbit spinner with glowing amethyst data packets and comet trails.
+   - `LISTENING`: Concentric expanding sonar pulse ripples, studio mic capsule with horizontal grille slits and pulsing core, and flanking horizon wings with `⊕` reticles.
+   - `SPEAKING`: Voice-broadcasting visualizer with 17 spectrum pins with pro-audio peak-hold ceiling dots and expanding sonic wavefront arcs.
+   - `WATCHING`: 45°-beveled corner brackets, millimeter tick rulers, dynamic target lock reticle tracking gaze, sweeping laser beam, blinking ruby "REC [00:24:18]" badge, and "FOV 85° // AI SENTRY" tag.
+   - `MOVING`: Front-facing 4WD humanoid chassis with perspective cyber highway, rolling rubber monster tires with chevron treads and spinning 5-spoke hub pins, ground neon wash, Xenon headlights with expanding conical light beams, chest Arc Reactor, helmet visor with scanning line, and dynamic speed dust motes.
+   - `ERROR`: Rapid crimson alarm socket glow, heavy glowing 'X' matrices with white electric core, center fracture sparks, caution warning badges with flanking hazard chevrons, and high-voltage electric fault waveform mouth with electrostatic spark discharge nodes.
+   - `VILLAIN`: Base hooded upper eyelid polygon and smirk shape 100% strictly preserved; accented with 7 organic rising emerald embers with serpentine sway, temple cyber circuit etchings, 6Hz split-optic chromatic ghosting, sinister sneer corner flick, venom spark glint, and razor core finish. (Strictly reserved for the single-session Rogue AI easter egg; never shown in public demonstrations).
+   - Additional Mark II Expressions: `EXCITED`, `PROUD`, `COOL`, `CURIOUS`, `WINK`, `SURPRISED`, `LAUGHING`, `LOVE`, `SHY`, `SKEPTICAL`, `SLEEPY`.
+   - **Contextual Conversational Expression Classifier (`determine_conversational_expression`)**: Real-time context engine intelligently mapping dialogue sentiment, prebaked responses, and user queries to organic facial expressions across all 21 public states. Intelligently routes technical robotics/math/reasoning to `thinking`, playful teasing to `wink`, personal flattery to `shy`, profound warmth and friendship to `love`, awe/shock to `surprised`, casual banter/swag/acknowledgments to `cool`, creator accomplishments and school attribution to `proud` (with robust guardrails preventing general exhibition greetings and robot model mentions from false positive triggers), confusion/clarification to `confused`, capabilities/high-energy greetings to `excited`, locomotion to `moving` (excluding conversational "move on"), camera inspection to `watching`, disappointment/sorrow to `sad` (`EMPATHY // SAD`), and exploration inquiries to `curious`. Strictly guarantees `villain` is never returned in conversational routing.
+   - **Synchronous Public Expression Demonstration Loop (`demonstrate_all_expressions`)**: Paced voice-and-face presentation cycling all 21 public expressions side-by-side with rich natural phrasing variety ("This is my {state} emotion.", "Here is {state}.", "This one is {state}.", "Now {state}."). Speaks an opening introduction under `EXPRESSION CATALOG` HUD status without listing emotions upfront, updates face state and HUD status concurrently with Edge-TTS audio introduction for each emotion, actively polls `standby_kill_event` every 100ms during pause intervals for immediate gesture interruption, speaks an engaging conclusion, and resets smoothly to `idle` (`READY // TALK TO ME`). Evaluated prior to creator fast-paths to guarantee compound queries ("show all emotions and who built you") properly trigger the demonstration. Permanent safety lock strictly excludes `villain` from the public demonstration loop.
+   - **Mark II Subtitle & On-Screen Text Architecture**:
+     - *Tkinter Z-Ordering & Resolution Resizing*: Rebuilt `HyperSmoothCanvas` buffer pipeline (`flush()`, `_ensure_size()`). Lowered NumPy/OpenCV background image layer (`tag_lower`) and elevated all active ClearType Tkinter text items (`tag_raise`) to eliminate the bug where window geometry changes or dynamic card redraws caused text to vanish behind the background frame buffer.
+     - *Shell Persistence & Non-Empty Fallbacks*: Subtitle cards and header pills are safeguarded with permanent non-empty fallbacks and a 9.0s smooth persistence window, guaranteeing that subtitle cards and header pills never render as empty blank shells.
+   - **Gesture HUD Command Capsule Mutual Exclusion**:
+     - Re-architected gesture button rendering into `_draw_gesture_hud_dynamic()`. Completely separated static geometry from text labels.
+     - Enforced strict mutual exclusion: when gesture hold progress is 0.0, renders strictly base action labels (`OPEN PALM • HOLD 3s TO TALK` / `CLOSED FIST • HOLD 3s FOR STANDBY`); when hold progress is active (> 0.0), renders strictly the glowing dynamic progress track and live countdown timer (`HOLDING PALM • 0.3s / 3.0s (12%)`). Completely eliminated text item collision and overlapping artifacts.
+   - **Audio-Visual Speech Synchronization (TTS Non-Idle Face State Guarantee)**:
+     - Refactored `speak()` and `_restore_face_state_after_speech()` in `listen.py`: Neurolis speech is strictly forbidden from playing with the face stuck in `idle`.
+     - In the event no custom state is provided (or if `idle` is mistakenly passed), the system dynamically computes an organic emotional expression via `determine_conversational_expression` or defaults to `speaking`.
+     - System error fallbacks, rate limit alerts, activation greetings, and standby timeouts explicitly trigger dedicated animated states (`error`, `confused`, `happy`, `sleepy`).
+   - **Villain Expression Catalog Routing & Refusal Variety**:
+     - Expanded `is_explicit_villain_request()` to intercept inquiries about the existence or demonstration of the villain face (`"What about the villain expression?"`, `"Do you have a villain emotion?"`, `"Show me villain"`).
+     - Introduced a pool of 16 rich, varied, polite refusal responses (`VILLAIN_EXPRESSION_REFUSAL_RESPONSES`) explicitly stating Neurolis does not possess any villain expression in its catalog.
+     - Renders refusal replies with `cool` or `skeptical` facial expressions and HUD status `CATALOG // PUBLIC`, completely eliminating accidental triggers of plausible deniability glitch snapouts while maintaining the Rogue AI easter egg.
+     - Enforced `hold_state_seconds` parameter handling in `speak()` and refined `_restore_face_state_after_speech()` to restore to `listening` or `idle` cleanly.
+   - **Hardened Subtitle System**: Fixed villain subtitle flickering and double-text rendering using clean, high-contrast matrix green (`#39ff14`/`#dcfce7`) and `FONT_FAMILY`. Added subtitle clobbering guard preventing boot completion routines from wiping active speech subtitles.
+   - **Mark II Cockpit Branding**: Ambient header with pulsing status dot (`PROJECT NEUROLIS MARK II // [STATE] // 60 FPS OLED ENGINE`), dedicated subtitle card pill (`● NEUROLIS MARK II`), and boot sequence diagnostics ("NEUROLIS MARK II" with "Booting...").
 4. **On-Demand Camera Vision**: Groq Vision integration answering "What am I holding?" or "Look at this" via single-frame capture.
 5. **Acoustic Noise Resilience**: Dynamic rolling noise floor tracking rejecting background hall chatter without requiring users to shout.
 6. **Dual Speech Synthesis**: Online Edge-TTS with instant offline Piper neural fallback.
-7. **Safe Teleoperated 4WD Mobility**: Independent manual driver control via wireless remote.
+7. **Clean Software Phase & Mid-2027 Locomotion Roadmap**: The active codebase has been purged of all motor commands, movement exclusions, and Arduino code. Project Neurolis Mark II runs as a pure software stack on Windows 11 (tested on Pi 5). Low-level motor drivers, BTS7960 H-bridges, 12V Johnson motors, and 2D LiDAR SLAM indoor locomotion will be engineered in mid-2027.
+8. **Mark II Bilingual & Voice Modulation Overhaul (ChatGPT Advanced Voice Style)**:
+   - **Bilingual Groq Whisper STT**: Removed hardcoded `language="en"` constraint, enabling automatic Language Identification (`language=None`) in <10ms. Implemented bilingual prefix priming (`prompt="Neurolis AI humanoid robot. Auckland House School. Namaste, aap kaise hain? Hello, how are you? Kya haal hai? All systems operational."`) and an Indic hallucination scrubber, completely eliminating phonetic misinterpretations of Hindi speech.
+   - **Studio Neural Voices**: Upgraded English TTS default to Microsoft Copilot's `en-US-AndrewMultilingualNeural` (warm, natural, human-like breath/cadence) and Hindi to `hi-IN-MadhurNeural` (rich, articulate male voice) with zero cost and unlimited usage.
+   - **ChatGPT-Style Emotional Voice Modulation**: Implemented `get_emotional_prosody(emotion_state, text)` dynamically modulating rate and pitch across all 21 expressions:
+     - Cheeky / Wink / Cool: Bright pitch (+8Hz) and brisk tempo (+16%)
+     - Laughing / Humor: Animated pitch (+10Hz) and fast chuckle pace (+20%)
+     - Sad / Apology: Somber lower pitch (-6Hz) and slower tempo (-8%)
+     - Cheerful / Greeting / Proud / Excited: Upbeat pitch (+6Hz) and energetic cadence (+16%)
+     - Rogue / Villain Arc: Deep ominous pitch (-16Hz) and slow calculated delivery (-12%)
+     - Curious / Thinking: Inquisitive pitch (+4Hz) and thoughtful tempo (+10%)
+     - Default Speaking / Idle: Crisp, poised baseline (+2Hz, +12%)
+   - **Devanagari to Romanized Hinglish Subtitle Engine**: Integrated `devanagari_to_hinglish()` in the subtitle pipeline to ensure all on-screen subtitles display clean, readable Romanized Hinglish even when Devanagari text is received.
+   - **Strict Sub-700 Token Budget**: Tuned `NORMAL_SYSTEM_PROMPT` to incorporate bilingual code-switching guidelines while strictly preserving token economy (542 tokens).
+9. **Real-Time Live Web Search & Knowledge Engine (`edge_search.py`)**:
+   - **100% Free, Zero-Subscription Architecture**: Hybrid multi-modal edge knowledge engine combining:
+     1. *Live Atmospheric Telemetry (`wttr.in`)*: Instant ~150ms real-time temperature, sky condition, humidity, and wind speed (defaulting to Shimla/Auckland House School or any user-specified city).
+     2. *Wikipedia REST API + OpenSearch (`api.rest_v1`)*: Instant ~120-250ms encyclopedic summaries for scientific entities, historical figures, and technical concepts with zero API keys.
+     3. *DuckDuckGo Real-Time Engine (`ddgs`)*: High-speed live search for current news, tournament scores, breaking breakthroughs, and deep research without paid search subscriptions.
+   - **Strict Sub-80 Token Salience Filter**: Integrated extractive sentence analyzer and noise scrubber stripping URLs, cookies, and boilerplate, guaranteeing injected search context strictly remains under 60 words (< 80 tokens).
+   - **Search Intent Classifier (`is_web_search_query`)**: Zero-latency regex classifier in `intent_rules.py` distinguishing search/research intents and temporal questions from motor commands, expression requests, camera vision, creator attributions, and casual greetings.
+   - **Zero Residual Token Footprint**: Injects `[LIVE SEARCH DATA]` solely into the active inference prompt and restores clean user text in `conversation_history` immediately upon generation, guaranteeing $0$ residual token bloat on subsequent conversation turns.
+   - **Synchronous Face UI & Voice Output**: Sets Face UI status to `SEARCHING // LIVE WEB` or `DEEP RESEARCH // LIVE WEB` during lookup, smoothly transitioning to context-matched facial expressions (`curious`, `thinking`, `excited`) with synchronized Romanized Hinglish subtitles and expressive speech prosody.
 
 ---
 
-## 6. The Future Roadmap (The Project Is Very Alive)
+## 6. The Project Roadmap (The Project Is Very Alive)
 
-Although development has been slowed down to focus on high school academic priorities and the upcoming exhibition, Project Neurolis is actively evolving. Our planned future roadmap includes:
+### Phase 1: Software Stack Perfection (Late 2026 - Early 2027) [ACTIVE]
+- [x] 22 hyper-expressive 60 FPS OLED vector face expressions
+- [x] Bilingual English + Hindi speech synthesis with ChatGPT-style emotional prosody
+- [x] Zero-hallucination bilingual Whisper STT with Indic phonetic scrubber
+- [x] Live edge web search and weather telemetry engine (`edge_search.py`)
+- [x] MediaPipe Tasks vision hand gesture sentry (✋ Wake / ✊ Standby)
+- [x] Auditorium-tuned dynamic acoustic endpointer (Endpointer v2)
+- [x] Dynamic 14-Key Groq LPU auto-rotation pool with rate-limit failover
+- [x] Permanently purged all legacy Arduino controller code and stripped all motor commands
 
-- [ ] **Hardware Repair**: Replacing the cracked 7-inch capacitive touchscreen digitizer to restore optional touch controls alongside gesture recognition.
-- [ ] **Modular Telemetry Bridge**: Establishing a clean, non-blocking serial telemetry link between Raspberry Pi and Arduino for battery monitoring and chassis status.
-- [ ] **Proximity Safety Halt**: Implementing low-level hardware emergency braking on the Arduino (cutting motor power if an obstacle is within 20cm during manual driving).
-- [ ] **Re-Engineering Autonomy (The Right Way)**:
-  - Replacing the fragile ultrasonic bank with a 2D LiDAR scanner (e.g. RPLiDAR A1) for true 360° SLAM mapping.
-  - Designing a slower, heavily constrained, state-machine-driven autonomous roam mode with clear recovery behaviors and fail-safes.
-- [ ] **On-Device Vision Models**: Exploring lightweight local edge vision models (e.g., MobileNet / YOLO-nano) for local object detection without cloud API dependency.
+### Phase 2: Physical Locomotion & Robotics Hardware (Mid-2027)
+- [ ] Low-level motor controller pipeline on Raspberry Pi 5 / dedicated microcontrollers
+- [ ] 4x BTS7960 43A motor driver integration with 12V Johnson DC motors
+- [ ] 2D LiDAR scanner integration (e.g., RPLiDAR A1 / C1) for 360° indoor SLAM
+- [ ] Safe, obstacle-aware autonomous navigation and docking
+- [ ] Full humanoid physical chassis assembly and power distribution
+- [ ] Hardware repair: Replacing cracked 7-inch capacitive touchscreen digitizer
 
 ---
 
 <div align="center">
 
-### Built with pride by Swapnil Jai Chauhan & Shivam Verma
+### Built with pride by Swapnil Jai Chauhan
+*(With early Mark 1 prototype chassis contributions by Shivam Verma)*  
 **Auckland House School for Boys — Science Exhibition Prototype**
 
 *Simplicity and rock-solid reliability over fragile complexity.*

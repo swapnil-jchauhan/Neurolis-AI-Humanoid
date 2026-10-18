@@ -11,20 +11,33 @@ Architecture:
 - Exposes real-time feedback (gesture_name, hold_progress_0_to_1) for screen UI progress HUD.
 """
 
+import os
 import time
 import math
 import threading
 import sys
+import contextlib
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-_proj_root = Path(__file__).parent.resolve()
-for _sp in _proj_root.glob("myenv/lib/python3*/site-packages"):
-    _sp_str = str(_sp.resolve())
-    if _sp_str not in sys.path:
-        sys.path.insert(0, _sp_str)
-
+import numpy as np
 import cv2
+
+@contextlib.contextmanager
+def _suppress_c_stderr():
+    """Suppresses abseil/TensorFlow C++ stderr logging during MediaPipe initialization."""
+    try:
+        null_fd = os.open(os.devnull, os.O_RDWR)
+        old_stderr = os.dup(2)
+        os.dup2(null_fd, 2)
+        try:
+            yield
+        finally:
+            os.dup2(old_stderr, 2)
+            os.close(null_fd)
+            os.close(old_stderr)
+    except Exception:
+        yield
 
 try:
     import mediapipe as mp
@@ -60,6 +73,49 @@ def count_extended_fingers(landmarks) -> int:
             extended_count += 1
 
     return extended_count
+
+
+def analyze_hand_geometry(landmarks) -> Tuple[int, int, bool, bool]:
+    """
+    Analyzes hand landmarks geometry with knuckle-curl verification for lighting invariance.
+    Returns: (extended_fingers_count, curled_fingers_count, is_palm_geometry, is_fist_geometry)
+    """
+    if not landmarks or len(landmarks) < 21:
+        return 0, 0, False, False
+
+    wrist = landmarks[0]
+    finger_tips = [8, 12, 16, 20]   # Index, Middle, Ring, Pinky
+    finger_pips = [6, 10, 14, 18]   # PIP joints
+    finger_mcps = [5, 9, 13, 17]   # MCP knuckles
+
+    extended = 0
+    curled = 0
+
+    for tip_idx, pip_idx, mcp_idx in zip(finger_tips, finger_pips, finger_mcps):
+        tip = landmarks[tip_idx]
+        pip = landmarks[pip_idx]
+        mcp = landmarks[mcp_idx]
+
+        d_tip_wrist = math.hypot(tip.x - wrist.x, tip.y - wrist.y)
+        d_pip_wrist = math.hypot(pip.x - wrist.x, pip.y - wrist.y)
+        d_mcp_wrist = math.hypot(mcp.x - wrist.x, mcp.y - wrist.y)
+        d_tip_mcp = math.hypot(tip.x - mcp.x, tip.y - mcp.y)
+
+        # Extended finger: fingertip extends distinctly beyond PIP joint
+        if d_tip_wrist > d_pip_wrist * 1.12:
+            extended += 1
+
+        # Curled finger: fingertip is tucked near MCP base or closer to wrist than PIP
+        if d_tip_mcp < d_mcp_wrist * 0.70 or d_tip_wrist < d_pip_wrist * 1.02:
+            curled += 1
+
+    # Fist geometry: at least 3 of 4 fingers curled inward, at most 1 extended
+    is_fist_geom = (curled >= 3 and extended <= 1)
+
+    # Palm geometry: all 4 fingers extended, zero fingers curled inward
+    is_palm_geom = (extended >= 4 and curled == 0)
+
+    return extended, curled, is_palm_geom, is_fist_geom
 
 
 class GestureSentry:
@@ -118,21 +174,29 @@ class GestureSentry:
             print(f"[GestureSentry] Model asset not found at: {self.model_path}")
             return
 
-        try:
-            base_options = mp_python.BaseOptions(model_asset_path=self.model_path)
-            options = mp_vision.GestureRecognizerOptions(
-                base_options=base_options,
-                running_mode=mp_vision.RunningMode.IMAGE,
-                num_hands=1,
-                min_hand_detection_confidence=0.45,
-                min_hand_presence_confidence=0.45,
-                min_tracking_confidence=0.45,
-            )
-            self.recognizer = mp_vision.GestureRecognizer.create_from_options(options)
+        with _suppress_c_stderr():
+            try:
+                base_options = mp_python.BaseOptions(model_asset_path=self.model_path)
+                options = mp_vision.GestureRecognizerOptions(
+                    base_options=base_options,
+                    running_mode=mp_vision.RunningMode.IMAGE,
+                    num_hands=1,
+                    min_hand_detection_confidence=0.45,
+                    min_hand_presence_confidence=0.45,
+                    min_tracking_confidence=0.45,
+                )
+                self.recognizer = mp_vision.GestureRecognizer.create_from_options(options)
+                # Warm-up dry run to trigger one-time MediaPipe graph initialization silently
+                dummy = np.zeros((256, 256, 3), dtype=np.uint8)
+                mp_dummy = mp.Image(image_format=mp.ImageFormat.SRGB, data=dummy)
+                self.recognizer.recognize(mp_dummy)
+            except Exception as e:
+                self.recognizer = None
+
+        if self.recognizer is not None:
             print("[GestureSentry] MediaPipe Gesture Recognizer initialized successfully.")
-        except Exception as e:
-            print(f"[GestureSentry] Failed to initialize GestureRecognizer: {e}")
-            self.recognizer = None
+        else:
+            print("[GestureSentry] Failed to initialize GestureRecognizer.")
 
     def start(self):
         """Starts background gesture detection thread."""
@@ -181,34 +245,57 @@ class GestureSentry:
         if now is None:
             now = time.monotonic()
 
-        # 1. Downscale frame to 320x240 for ~15 FPS lightweight processing on Raspberry Pi 5 CPU
-        small_frame = cv2.resize(bgr_frame, (320, 240), interpolation=cv2.INTER_LINEAR)
-        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+        # 1. Square Center-Crop and Resize to 256x256 (eliminates MediaPipe non-square ROI warning)
+        h, w = bgr_frame.shape[:2]
+        min_dim = min(h, w)
+        crop_y = (h - min_dim) // 2
+        crop_x = (w - min_dim) // 2
+        square_crop = bgr_frame[crop_y : crop_y + min_dim, crop_x : crop_x + min_dim]
+        small_frame = cv2.resize(square_crop, (256, 256), interpolation=cv2.INTER_LINEAR)
+
+        # 2. Lighting-Proof Pre-Processing: CLAHE on L-channel in LAB space
+        # Balances backlighting, harsh shadows, and dim room illumination
+        try:
+            lab = cv2.cvtColor(small_frame, cv2.COLOR_BGR2LAB)
+            l_ch, a_ch, b_ch = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+            l_norm = clahe.apply(l_ch)
+            enhanced_lab = cv2.merge((l_norm, a_ch, b_ch))
+            enhanced_bgr = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+            rgb_frame = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB)
+        except Exception:
+            rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
         try:
             result = self.recognizer.recognize(mp_image)
-        except Exception as e:
+        except Exception:
             return None, 0.0
 
-        # 2. Hybrid Classification: Category Classifier OR Landmark Geometry
+        # 3. Hybrid Classification: Category Classifier + Knuckle-Curl Landmark Geometry
         cat_palm = False
         cat_fist = False
         if result.gestures and len(result.gestures) > 0 and len(result.gestures[0]) > 0:
             top_gesture = result.gestures[0][0]
             cat_name = top_gesture.category_name
             score = top_gesture.score
-            if cat_name == "Open_Palm" and score >= 0.40:
+            # Tightened Open Palm threshold to prevent false wakes from casual movement
+            if cat_name == "Open_Palm" and score >= 0.60:
                 cat_palm = True
-            elif cat_name == "Closed_Fist" and score >= 0.40:
+            # Resilient Closed Fist threshold
+            elif cat_name == "Closed_Fist" and score >= 0.45:
                 cat_fist = True
 
-        ext_count = None
+        ext_count, curl_count, is_palm_geom, is_fist_geom = (0, 0, False, False)
         if result.hand_landmarks and len(result.hand_landmarks) > 0:
-            ext_count = count_extended_fingers(result.hand_landmarks[0])
+            ext_count, curl_count, is_palm_geom, is_fist_geom = analyze_hand_geometry(result.hand_landmarks[0])
 
-        is_palm = cat_palm or (ext_count is not None and ext_count >= 4)
-        is_fist = cat_fist or (ext_count is not None and ext_count == 0)
+        # Open Palm: Neural category with >=3 extended fingers OR strict palm geometry (4 extended, 0 curled)
+        is_palm = (cat_palm and ext_count >= 3) or is_palm_geom
+
+        # Closed Fist: Neural category OR geometric knuckle-curl (>=3 fingers curled into palm, <=1 extended)
+        is_fist = cat_fist or is_fist_geom
 
         if is_palm and not is_fist:
             detected = "OPEN_PALM"

@@ -25,7 +25,8 @@
 
 # --- Core AI & Voice ---
 groq>=0.11.0             # Groq Cloud API for Whisper STT and Qwen Vision/LLM
-edge-tts>=6.1.0         # Microsoft Edge Neural Speech Synthesizer (Zero API fees)
+edge-tts>=7.3.1         # Microsoft Edge Neural Speech Synthesizer (Sec-MS-GEC v1.143 handshake)
+duckduckgo_search>=8.0.0 # Free, zero-API-key live web search engine
 python-dotenv>=1.0.0    # Automatic .env environment variable loader
 
 # --- Audio Processing & VAD ---

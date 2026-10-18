@@ -1,16 +1,34 @@
 """
-Project Neurolis - Real-Time 7-Inch Animated Face UI Engine (screen.py)
-----------------------------------------------------------------------
-Lightweight 60 FPS animated robotic face optimized for the Raspberry Pi 7-inch (1024x600, 128:75 ratio).
-Features:
-  - Real-time Subtitle Card ([YOU] vs [NEUROLIS]) with auto-wrapping below expressions.
-  - Futuristic Cyber Car / 4WD Rover moving expression with spinning alloy wheels, headlights, and road streaks.
-  - Clean Acoustic Sonar & Equalizer for listening mode (no cluttered rings over eyes).
-  - High-precision cyber eyebrows reacting dynamically to robot states.
-  - Enhanced Eye Anatomy with Iris rings, specular glints, and smooth gaze tracking.
-  - States: IDLE, LISTENING, THINKING, SPEAKING, HAPPY, LOOKING, CONFUSED, ERROR, MOVING, WATCHING.
+Project Neurolis Mark II - Real-Time 7-Inch Animated Face UI Engine (screen.py)
+-------------------------------------------------------------------------------
+Apple-Grade 60 FPS Bionic Optical Face Engine for Raspberry Pi 7-Inch (1024x600, 128:75 ratio).
+
+Mark II Overhaul Highlights:
+  - Apple Vision Pro / macOS-Grade Boot Splash with sculpted Bionic Visor Crest,
+    radial atmospheric backlight, specular light sweep, and S-curve glassmorphic progress bar.
+  - Sleek Organic Bordered Optical Lens Architecture:
+      * Soft multi-tier neon rim border enclosing a deep dark optical chamber (#050b16),
+        luminous internal iris ring, breathing optic core, and 3-layer parallax Pixar catchlights.
+      * Super-rounded organic contour (zero harsh boxy corners) + strict bottom-curve discipline:
+        upward-curved lower eyelids ONLY appear when the robot is smiling/happy (e.g., MOVING,
+        EXCITED, PROUD, and the open eye of WINK).
+  - Apple-Grade Real-Time Animation Physics:
+      * Real wall-clock delta-time (dt) 60 FPS physics engine.
+      * Critically damped spring state transitions (squash-and-stretch + color cross-fade).
+      * 3-layer optical parallax (outer rim -> inner iris -> floating corneal reflections).
+      * Cubic asymmetric blink curve (fast close, brief hold, smooth ease-out open + natural double-blinks).
+  - 22 Unmistakable First-Glance Expressive States (11 Core + 11 Conversational States):
+      * Core States: IDLE, HAPPY, SAD, CONFUSED (frameless hypnotic spirals), THINKING (neural cog iris),
+                     LISTENING (sonar radar iris), SPEAKING (vocal resonator iris), WATCHING (viewfinder reticle),
+                     MOVING (wind-loving cruise + DRIVE note + 3D Cyber-Rover with subtle rear tire smoke),
+                     ERROR (frameless crimson glitch X optics), VILLAIN (preserved rogue AI easter egg).
+      * New Conversational States: EXCITED, LAUGHING (> <), LOVE (frameless bordered heart optics),
+                                   WINK (curved-bottom open eye + wink arch), SURPRISED, SLEEPY,
+                                   SHY, PROUD, CURIOUS (magnifying loupe optic), SKEPTICAL (deadpan side-eye).
+  - Interactive Preview Shortcuts: Press 1-9, 0, Q-P, V, B, or Space/Tab to test any expression live.
 """
 
+import contextlib
 import math
 import os
 import platform
@@ -19,9 +37,18 @@ import shutil
 import sys
 import threading
 import time
-import tkinter as tk
+try:
+    import tkinter as tk
+except ImportError:
+    class _HeadlessTkFallback:
+        ROUND = "round"
+        ARC = "arc"
+        BOTH = "both"
+        Tk = None
+        Canvas = None
+    tk = _HeadlessTkFallback()
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 # Suppress verbose OpenCV warnings and V4L2 probe noise
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
@@ -32,15 +59,19 @@ if sys.platform.startswith("linux"):
     try:
         import ctypes
         asound = ctypes.cdll.LoadLibrary("libasound.so.2")
-        ERROR_HANDLER_FUNC = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p)
+        ERROR_HANDLER_FUNC = ctypes.CFUNCTYPE(
+            None, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p
+        )
+
         def _alsa_error_handler(filename, line, function, err, fmt):
             pass
+
         _c_alsa_error_handler = ERROR_HANDLER_FUNC(_alsa_error_handler)
         asound.snd_lib_error_set_handler(_c_alsa_error_handler)
     except Exception:
         pass
 
-import contextlib
+
 @contextlib.contextmanager
 def suppress_c_stderr():
     """Silences C-level stderr (fd 2) during PortAudio/ALSA operations on Linux."""
@@ -61,14 +92,472 @@ def suppress_c_stderr():
     except Exception:
         yield
 
-# crisp system font family selection across windows and linux / raspberry pi
+
+# Enable Windows Per-Monitor v2 High-DPI Awareness so Windows never bitmap-stretches the UI
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    try:
+        import ctypes
+        # Set 1ms multimedia timer precision on Windows so root.after() hits 60 FPS instead of 15.6ms ticks
+        ctypes.windll.winmm.timeBeginPeriod(1)
+    except Exception:
+        pass
+
+# Crisp system font family selection across Windows and Linux / Raspberry Pi
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "DejaVu Sans"
+MONO_FONT_FAMILY = "Consolas" if sys.platform.startswith("win") else "DejaVu Sans Mono"
+
+# Optional Ultra-Smooth 2x Supersampled OpenCV LINE_AA Anti-Aliasing Engine
+try:
+    import cv2 as _cv2
+    import numpy as _np
+    from PIL import Image as _PILImage, ImageDraw as _PILImageDraw, ImageFont as _PILImageFont
+    try:
+        from PIL import ImageTk as _PILImageTk
+    except Exception:
+        _PILImageTk = None
+    _HAS_CV2_AA = True
+except Exception:
+    _cv2 = None
+    _np = None
+    _PILImage = None
+    _PILImageDraw = None
+    _PILImageFont = None
+    _PILImageTk = None
+    _HAS_CV2_AA = False
+
+if _HAS_CV2_AA:
+    _THETA_64 = _np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)
+    _UNIT_CIRCLE_64 = _np.column_stack([_np.cos(_THETA_64), _np.sin(_THETA_64)])
+
+    # Precomputed 80-vertex Super-Ellipse (Lamé squircle, n=2.85) tables for 60 FPS on Raspberry Pi 5
+    _EYE_THETA = _np.linspace(0.0, 2.0 * math.pi, 80, endpoint=False)
+    _EYE_COS = _np.cos(_EYE_THETA)
+    _EYE_SIN = _np.sin(_EYE_THETA)
+    _EYE_EXP = 2.0 / 2.85
+    _EYE_NX = _np.where(_EYE_COS >= 0.0, 1.0, -1.0) * (_np.abs(_EYE_COS) ** _EYE_EXP)
+    _EYE_NY = _np.where(_EYE_SIN >= 0.0, 1.0, -1.0) * (_np.abs(_EYE_SIN) ** _EYE_EXP)
+    _EYE_SMILE_LIFT = (_np.maximum(0.0, _EYE_SIN) ** 2.6) * 0.25
+
+    # Precomputed quarter-circle tables for ultra-fast rounded rectangles
+    _RR_ANG_TR = _np.linspace(-math.pi / 2.0, 0.0, 10)
+    _RR_ANG_BR = _np.linspace(0.0, math.pi / 2.0, 10)
+    _RR_ANG_BL = _np.linspace(math.pi / 2.0, math.pi, 10)
+    _RR_ANG_TL = _np.linspace(math.pi, 1.5 * math.pi, 10)
+    _RR_COS = [_np.cos(_RR_ANG_TR), _np.cos(_RR_ANG_BR), _np.cos(_RR_ANG_BL), _np.cos(_RR_ANG_TL)]
+    _RR_SIN = [_np.sin(_RR_ANG_TR), _np.sin(_RR_ANG_BR), _np.sin(_RR_ANG_BL), _np.sin(_RR_ANG_TL)]
 
 
-# helper function to smoothly lerp between two hex colors (e.g. #040711 to #f8fafc)
+_RGB_CACHE: Dict[str, Optional[Tuple[int, int, int]]] = {}
+
+
+def _hex_to_rgb(hex_str: str) -> Optional[Tuple[int, int, int]]:
+    if not hex_str:
+        return None
+    cached = _RGB_CACHE.get(hex_str)
+    if cached is not None:
+        return cached
+    h = hex_str.lstrip("#")
+    if len(h) != 6:
+        return (255, 255, 255)
+    val = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    _RGB_CACHE[hex_str] = val
+    return val
+
+
+_CR_T_CACHE: Dict[int, "_np.ndarray"] = {}
+
+
+def _catmull_rom_np(coords: List[float], samples_per_seg: int = 8) -> "_np.ndarray":
+    pts = _np.asarray(coords, dtype=_np.float64).reshape(-1, 2)
+    n = len(pts)
+    if n < 3 or n >= 48:
+        return pts
+    s = 4 if n >= 16 else samples_per_seg
+    basis = _CR_T_CACHE.get(s)
+    if basis is None:
+        t = _np.linspace(0.0, 1.0, s, endpoint=False)[:, None]
+        t2 = t * t
+        t3 = t2 * t
+        # Catmull-Rom basis weights for [P0, P1, P2, P3]
+        basis = 0.5 * _np.hstack([
+            -t + 2.0 * t2 - t3,
+            2.0 - 5.0 * t2 + 3.0 * t3,
+            t + 4.0 * t2 - 3.0 * t3,
+            -t2 + t3,
+        ])
+        _CR_T_CACHE[s] = basis
+    ext = _np.vstack([pts[0:1], pts, pts[-1:]])
+    p0 = ext[:-3]
+    p1 = ext[1:-2]
+    p2 = ext[2:-1]
+    p3 = ext[3:]
+    # Vectorized evaluation across all segments simultaneously: shape (n-1, s, 2)
+    seg_pts = (
+        basis[:, 0:1][None, :, :] * p0[:, None, :]
+        + basis[:, 1:2][None, :, :] * p1[:, None, :]
+        + basis[:, 2:3][None, :, :] * p2[:, None, :]
+        + basis[:, 3:4][None, :, :] * p3[:, None, :]
+    )
+    return _np.vstack([seg_pts.reshape(-1, 2), pts[-1:]])
+
+
+class HyperSmoothCanvas:
+    """
+    Raspberry Pi 5 Optimized 60 FPS Sub-Pixel Anti-Aliased Canvas Engine (cv2.LINE_AA + shift=4).
+    - Uses direct RGB memory buffer (zero cvtColor overhead) + in-place PhotoImage.paste().
+    - Diff-pools native Tkinter text items so static/unchanged text is NEVER deleted or recreated per frame.
+    - Eliminates 100% of Tkinter GDI jagged edges while running in ~2.0 ms/frame (45-60+ smooth FPS on RPi 5 4GB).
+    - Supports `set_rough_mode(True)` for raw MS-Paint-sketched strokes in VILLAIN mode.
+    """
+
+    def __init__(self, tk_canvas=None, width: int = 1024, height: int = 600, bg: str = "#040711", ss: Optional[int] = None):
+        self._tk_canvas = tk_canvas
+        self.w = width
+        self.h = height
+        # Use ss=1 with 16x sub-pixel fixed-point AA (shift=4) for live 60 FPS UI; ss=2 for headless PNG export
+        self.ss = (1 if tk_canvas is not None else 2) if ss is None else ss
+        self.bg = bg
+        self.bg_rgb = _hex_to_rgb(bg) or (4, 7, 17)
+        self.buf = _np.empty((self.h * self.ss, self.w * self.ss, 3), dtype=_np.uint8)
+        self.buf[:] = self.bg_rgb
+        self.static_buf: Optional["_np.ndarray"] = None
+        self._id_counter = 1
+        self._items: List[int] = []
+        self._static_text_specs: List[Tuple[tuple, dict]] = []
+        self._dynamic_text_specs: List[Tuple[tuple, dict]] = []
+        self._in_static_phase = False
+        self._photo = None
+        self._bg_img_id = None
+        self._tk_text_pool: List[int] = []
+        self._prev_text_State: List[tuple] = []
+        self.rough_mode: bool = False
+
+    def set_rough_mode(self, enabled: bool):
+        self.rough_mode = bool(enabled)
+
+    def _ensure_size(self, w: int, h: int):
+        w = max(1, int(w))
+        h = max(1, int(h))
+        if w != self.w or h != self.h:
+            self.w = w
+            self.h = h
+            self.buf = _np.empty((self.h * self.ss, self.w * self.ss, 3), dtype=_np.uint8)
+            self.buf[:] = self.bg_rgb
+            self.static_buf = None
+            self._photo = None
+            if self._bg_img_id is not None and self._tk_canvas is not None:
+                try:
+                    self._tk_canvas.delete(self._bg_img_id)
+                except Exception:
+                    pass
+                self._bg_img_id = None
+            if self._tk_canvas is not None:
+                for tid in self._tk_text_pool:
+                    try:
+                        self._tk_canvas.delete(tid)
+                    except Exception:
+                        pass
+                self._tk_text_pool.clear()
+                self._prev_text_State.clear()
+            self._static_text_specs.clear()
+            self._dynamic_text_specs.clear()
+            self._in_static_phase = False
+
+    def winfo_width(self) -> int:
+        if self._tk_canvas is not None:
+            tw = self._tk_canvas.winfo_width()
+            if tw > 1:
+                self._ensure_size(tw, self.h)
+            return tw
+        return self.w
+
+    def winfo_height(self) -> int:
+        if self._tk_canvas is not None:
+            th = self._tk_canvas.winfo_height()
+            if th > 1:
+                self._ensure_size(self.w, th)
+            return th
+        return self.h
+
+    def bind(self, *args, **kwargs):
+        if self._tk_canvas is not None:
+            return self._tk_canvas.bind(*args, **kwargs)
+
+    def pack(self, *args, **kwargs):
+        if self._tk_canvas is not None:
+            return self._tk_canvas.pack(*args, **kwargs)
+
+    def find_all(self) -> List[int]:
+        return [1]
+
+    def addtag_withtag(self, tag: str, item: int):
+        if tag == "static_ui" and not self._in_static_phase:
+            self.static_buf = self.buf.copy()
+            self._static_text_specs = list(self._dynamic_text_specs)
+            self._dynamic_text_specs.clear()
+            self._in_static_phase = True
+
+    def delete(self, tag: str):
+        if tag == "all":
+            self.buf[:] = self.bg_rgb
+            self.static_buf = None
+            self._static_text_specs.clear()
+            self._dynamic_text_specs.clear()
+            self._in_static_phase = False
+        elif tag == "dynamic":
+            if self.static_buf is not None and self.static_buf.shape == self.buf.shape:
+                _np.copyto(self.buf, self.static_buf)
+            else:
+                self.buf[:] = self.bg_rgb
+            self._dynamic_text_specs.clear()
+            self._in_static_phase = False
+
+    def _next_id(self) -> int:
+        return 1
+
+    def _flatten_coords(self, args) -> List[float]:
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            return args[0]
+        return [float(x) for x in args]
+
+    def create_rectangle(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) < 4:
+            return self._next_id()
+        scale16 = self.ss * 16.0
+        x1 = int(min(c[0], c[2]) * scale16)
+        y1 = int(min(c[1], c[3]) * scale16)
+        x2 = int(max(c[0], c[2]) * scale16)
+        y2 = int(max(c[1], c[3]) * scale16)
+        fill_rgb = _hex_to_rgb(kwargs.get("fill", ""))
+        out_rgb = _hex_to_rgb(kwargs.get("outline", ""))
+        w = max(1, int(round(float(kwargs.get("width", 1)) * self.ss)))
+        lt = _cv2.LINE_8 if self.rough_mode else _cv2.LINE_AA
+        if fill_rgb is not None:
+            _cv2.rectangle(self.buf, (x1, y1), (x2, y2), fill_rgb, -1, lineType=lt, shift=4)
+        if out_rgb is not None:
+            _cv2.rectangle(self.buf, (x1, y1), (x2, y2), out_rgb, w, lineType=lt, shift=4)
+        return self._next_id()
+
+    def create_oval(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) < 4:
+            return self._next_id()
+        cx = (c[0] + c[2]) * 0.5
+        cy = (c[1] + c[3]) * 0.5
+        rx = abs(c[2] - c[0]) * 0.5
+        ry = abs(c[3] - c[1]) * 0.5
+        if rx < 0.2 or ry < 0.2:
+            return self._next_id()
+        fill_rgb = _hex_to_rgb(kwargs.get("fill", ""))
+        out_rgb = _hex_to_rgb(kwargs.get("outline", ""))
+        w = max(1, int(round(float(kwargs.get("width", 1)) * self.ss)))
+        lt = _cv2.LINE_8 if self.rough_mode else _cv2.LINE_AA
+        scale16 = self.ss * 16.0
+        pts = ((_UNIT_CIRCLE_64 * (rx, ry) + (cx, cy)) * scale16).astype(_np.int32)
+        if fill_rgb is not None:
+            _cv2.fillPoly(self.buf, [pts], fill_rgb, lineType=lt, shift=4)
+            if out_rgb is None and lt == _cv2.LINE_AA:
+                _cv2.polylines(self.buf, [pts], True, fill_rgb, 1, lineType=_cv2.LINE_AA, shift=4)
+        if out_rgb is not None:
+            _cv2.polylines(self.buf, [pts], True, out_rgb, w, lineType=lt, shift=4)
+        return self._next_id()
+
+    def create_line(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) < 4 or len(c) % 2 != 0:
+            return self._next_id()
+        fill_rgb = _hex_to_rgb(kwargs.get("fill", "#ffffff"))
+        if fill_rgb is None:
+            return self._next_id()
+        w = max(1, int(round(float(kwargs.get("width", 1)) * self.ss)))
+        smooth = kwargs.get("smooth", False)
+        lt = _cv2.LINE_8 if self.rough_mode else _cv2.LINE_AA
+        scale16 = self.ss * 16.0
+        if smooth and len(c) >= 6:
+            pts = (_catmull_rom_np(c, samples_per_seg=8) * scale16).astype(_np.int32)
+        else:
+            pts = (_np.array(c, dtype=_np.float64).reshape(-1, 2) * scale16).astype(_np.int32)
+        _cv2.polylines(self.buf, [pts], False, fill_rgb, w, lineType=lt, shift=4)
+        return self._next_id()
+
+    def create_polygon(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) < 6 or len(c) % 2 != 0:
+            return self._next_id()
+        fill_rgb = _hex_to_rgb(kwargs.get("fill", ""))
+        out_rgb = _hex_to_rgb(kwargs.get("outline", ""))
+        w = max(1, int(round(float(kwargs.get("width", 1)) * self.ss)))
+        smooth = kwargs.get("smooth", False)
+        lt = _cv2.LINE_8 if self.rough_mode else _cv2.LINE_AA
+        scale16 = self.ss * 16.0
+        if smooth and len(c) >= 6:
+            closed_c = list(c) + list(c[:4])
+            pts = (_catmull_rom_np(closed_c, samples_per_seg=7) * scale16).astype(_np.int32)
+        else:
+            pts = (_np.array(c, dtype=_np.float64).reshape(-1, 2) * scale16).astype(_np.int32)
+        if fill_rgb is not None:
+            _cv2.fillPoly(self.buf, [pts], fill_rgb, lineType=lt, shift=4)
+            if out_rgb is None and lt == _cv2.LINE_AA:
+                _cv2.polylines(self.buf, [pts], True, fill_rgb, 1, lineType=_cv2.LINE_AA, shift=4)
+        if out_rgb is not None:
+            _cv2.polylines(self.buf, [pts], True, out_rgb, w, lineType=lt, shift=4)
+        return self._next_id()
+
+    def create_arc(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) < 4:
+            return self._next_id()
+        x1, y1, x2, y2 = c[0], c[1], c[2], c[3]
+        start_tk = float(kwargs.get("start", 0.0))
+        extent_tk = float(kwargs.get("extent", 90.0))
+        out_rgb = _hex_to_rgb(kwargs.get("outline", "#ffffff"))
+        if out_rgb is None:
+            return self._next_id()
+        w = max(1, int(round(float(kwargs.get("width", 1)) * self.ss)))
+        cx = (x1 + x2) * 0.5
+        cy = (y1 + y2) * 0.5
+        rx = abs(x2 - x1) * 0.5
+        ry = abs(y2 - y1) * 0.5
+        steps = max(18, int(abs(extent_tk) * 0.35))
+        degs = _np.linspace(start_tk, start_tk + extent_tk, steps)
+        rads = _np.radians(degs)
+        pts = _np.column_stack([cx + rx * _np.cos(rads), cy - ry * _np.sin(rads)])
+        pts_i32 = (pts * (self.ss * 16.0)).astype(_np.int32)
+        _cv2.polylines(self.buf, [pts_i32], False, out_rgb, w, lineType=_cv2.LINE_AA, shift=4)
+        return self._next_id()
+
+    def create_text(self, *args, **kwargs) -> int:
+        c = self._flatten_coords(args)
+        if len(c) >= 2:
+            kw_clean = dict(kwargs)
+            kw_clean.pop("tags", None)
+            self._dynamic_text_specs.append(((c[0], c[1]), kw_clean))
+        return self._next_id()
+
+    def flush(self):
+        """Ultra-fast zero-cvtColor paste to Tkinter PhotoImage + diff-pooled ClearType text items."""
+        if self._tk_canvas is None or _PILImageTk is None:
+            return
+        if self.ss > 1:
+            down = _cv2.resize(self.buf, (self.w, self.h), interpolation=_cv2.INTER_AREA)
+        else:
+            down = self.buf
+        pil_img = _PILImage.fromarray(down, "RGB")
+        if self._photo is None:
+            self._photo = _PILImageTk.PhotoImage(image=pil_img)
+            if self._bg_img_id is not None:
+                try:
+                    self._tk_canvas.delete(self._bg_img_id)
+                except Exception:
+                    pass
+            self._bg_img_id = self._tk_canvas.create_image(0, 0, anchor="nw", image=self._photo)
+            self._tk_canvas.tag_lower(self._bg_img_id)
+        else:
+            self._photo.paste(pil_img)
+            if self._bg_img_id is not None:
+                self._tk_canvas.tag_lower(self._bg_img_id)
+
+        all_specs = self._static_text_specs + self._dynamic_text_specs
+        need = len(all_specs)
+
+        # Hide excess pooled text items without destroying them
+        if len(self._tk_text_pool) > need:
+            for idx in range(need, len(self._tk_text_pool)):
+                if idx < len(self._prev_text_State) and self._prev_text_State[idx] != ("HIDDEN",):
+                    self._tk_canvas.itemconfigure(self._tk_text_pool[idx], state="hidden")
+                    self._prev_text_State[idx] = ("HIDDEN",)
+
+        for idx, ((tx, ty), tkw) in enumerate(all_specs):
+            sig = (round(tx, 1), round(ty, 1), tkw.get("text"), tkw.get("fill"), tkw.get("font"), tkw.get("anchor"), tkw.get("width"))
+            if idx < len(self._tk_text_pool):
+                tid = self._tk_text_pool[idx]
+                if idx >= len(self._prev_text_State) or self._prev_text_State[idx] != sig:
+                    self._tk_canvas.coords(tid, tx, ty)
+                    self._tk_canvas.itemconfigure(tid, state="normal", **tkw)
+                    if idx < len(self._prev_text_State):
+                        self._prev_text_State[idx] = sig
+                    else:
+                        self._prev_text_State.append(sig)
+                self._tk_canvas.tag_raise(tid)
+            else:
+                tid = self._tk_canvas.create_text(tx, ty, **tkw)
+                self._tk_text_pool.append(tid)
+                self._prev_text_State.append(sig)
+                self._tk_canvas.tag_raise(tid)
+
+    def get_pil_image(self, crop_box=None, target_size=None) -> "_PILImage.Image":
+        """Headless high-precision export (renders text via PIL TrueType and downsamples with LANCZOS)."""
+        pil_ss = _PILImage.fromarray(self.buf.copy(), "RGB")
+        draw = _PILImageDraw.Draw(pil_ss)
+
+        def _load_pil_font(size_px: int, is_bold: bool, is_mono: bool = False):
+            if is_mono:
+                candidates = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" if is_bold else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                    "C:/Windows/Fonts/consolab.ttf" if is_bold else "C:/Windows/Fonts/consola.ttf",
+                ]
+            else:
+                candidates = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if is_bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "C:/Windows/Fonts/segoeuib.ttf" if is_bold else "C:/Windows/Fonts/segoeui.ttf",
+                ]
+            for fp in candidates:
+                if os.path.exists(fp):
+                    try:
+                        return _PILImageFont.truetype(fp, max(8, int(size_px)))
+                    except Exception:
+                        pass
+            return _PILImageFont.load_default()
+
+        for (tx, ty), tkw in (self._static_text_specs + self._dynamic_text_specs):
+            x = tx * self.ss
+            y = ty * self.ss
+            text = str(tkw.get("text", ""))
+            fill_rgb = _hex_to_rgb(tkw.get("fill", "#ffffff")) or (255, 255, 255)
+            f_spec = tkw.get("font", (FONT_FAMILY, 12, "normal"))
+            f_name = str(f_spec[0]).lower() if len(f_spec) > 0 else ""
+            f_size = int(f_spec[1]) if len(f_spec) > 1 else 12
+            is_bold = len(f_spec) > 2 and "bold" in str(f_spec[2]).lower()
+            is_mono = "mono" in f_name or "consol" in f_name or "courier" in f_name
+            pil_font = _load_pil_font(int(f_size * self.ss * 1.12), is_bold, is_mono)
+            anchor = tkw.get("anchor", "center")
+            bbox = draw.multiline_textbbox((0, 0), text, font=pil_font, spacing=int(3 * self.ss))
+            tw_t = bbox[2] - bbox[0]
+            th_t = bbox[3] - bbox[1]
+            if anchor == "w":
+                dx, dy = x, y - th_t * 0.5
+            elif anchor == "e":
+                dx, dy = x - tw_t, y - th_t * 0.5
+            elif anchor == "nw":
+                dx, dy = x, y
+            else:
+                dx, dy = x - tw_t * 0.5, y - th_t * 0.5
+            draw.multiline_text((dx, dy), text, fill=fill_rgb, font=pil_font, spacing=int(3 * self.ss))
+
+        if self.ss > 1:
+            full_res = pil_ss.resize((self.w, self.h), _PILImage.Resampling.LANCZOS)
+        else:
+            full_res = pil_ss
+        if crop_box is not None:
+            full_res = full_res.crop(crop_box)
+        if target_size is not None:
+            full_res = full_res.resize(target_size, _PILImage.Resampling.LANCZOS)
+        return full_res
+
+
 def lerp_color(color_a: str, color_b: str, t: float) -> str:
-    """smoothly blends between two hex colors based on t (0.0 to 1.0)"""
-    t = max(0.0, min(1.0, t))
+    """Smoothly blends between two hex colors based on t (0.0 to 1.0)."""
+    t = max(0.0, min(1.0, float(t)))
     r1, g1, b1 = int(color_a[1:3], 16), int(color_a[3:5], 16), int(color_a[5:7], 16)
     r2, g2, b2 = int(color_b[1:3], 16), int(color_b[3:5], 16), int(color_b[5:7], 16)
     r = int(r1 + (r2 - r1) * t)
@@ -77,10 +566,28 @@ def lerp_color(color_a: str, color_b: str, t: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# all the possible emotion and visual states the face can switch into
+def ease_out_cubic(t: float) -> float:
+    """Apple-style cubic ease-out curve."""
+    t = max(0.0, min(1.0, float(t)))
+    return 1.0 - pow(1.0 - t, 3)
+
+
+def ease_out_back(t: float, overshoot: float = 1.35) -> float:
+    """Spring-like overshoot easing for expressive state transitions."""
+    t = max(0.0, min(1.0, float(t)))
+    c1 = overshoot
+    c3 = c1 + 1.0
+    return 1.0 + c3 * pow(t - 1.0, 3) + c1 * pow(t - 1.0, 2)
+
+
 class ExpressionState:
+    """All emotion and visual states supported by the Neurolis Mark II Face UI."""
+
+    # Boot states
     BOOT_GREETING = "boot_greeting"
     BOOT_SEQUENCE = "boot_sequence"
+
+    # 11 Overhauled Core States
     IDLE = "idle"
     LISTENING = "listening"
     THINKING = "thinking"
@@ -93,6 +600,82 @@ class ExpressionState:
     MOVING = "moving"
     WATCHING = "watching"
     VILLAIN = "villain"
+    VILLIAN = "villain"  # Common spelling alias for seamless compatibility
+
+    # 10 New Conversational Expressions for Mark II Chat Tone / User Input
+    EXCITED = "excited"      # Golden starburst optics with happy curved lower lid & D-smile
+    LAUGHING = "laughing"    # Joyful squeezed > < chevrons, flying tear beads & wide laugh
+    LOVE = "love"            # Frameless bordered neon-rose heart optics (♥ ♥) & floating hearts
+    WINK = "wink"            # Curved-bottom smiling open left eye + right wink arch & :P grin
+    SURPRISED = "surprised"  # Circular shockwave ring optics with pinpoint core & 'O' gasp
+    SLEEPY = "sleepy"        # Heavy drooping lavender eyelids, sleep bubble & cascading Zzz
+    SHY = "shy"              # Inward-tilted bashful sakura optics, averted gaze, /// blush & sweat drop
+    PROUD = "proud"          # Heroic upward-curved golden optics, floating 3D crown & tooth sparkle
+    CURIOUS = "curious"      # Asymmetric magnifying loupe optic with rotating bezel & !? spark
+    SKEPTICAL = "skeptical"  # Deadpan half-lidded side-eye with '...' temple dots & knowing smirk
+    COOL = "cool"            # Bordered cyber-aviator sunglasses visor, lens sheen & confident smirk
+
+    # Helpful conversational aliases
+    AMAZED = "surprised"
+    AMUSED = "laughing"
+    AFFECTIONATE = "love"
+    TIRED = "sleepy"
+    BASHFUL = "shy"
+    CONFIDENT = "proud"
+    INQUISITIVE = "curious"
+    DOUBTFUL = "skeptical"
+
+    CORE_STATES: List[str] = [
+        IDLE, HAPPY, SAD, CONFUSED, THINKING, LISTENING,
+        SPEAKING, WATCHING, MOVING, ERROR, VILLAIN,
+    ]
+
+    CONVERSATIONAL_STATES: List[str] = [
+        EXCITED, LAUGHING, LOVE, WINK, SURPRISED,
+        SLEEPY, SHY, PROUD, CURIOUS, SKEPTICAL, COOL,
+    ]
+
+    ALL_EXPRESSIONS: List[str] = CORE_STATES + CONVERSATIONAL_STATES
+
+    ALIASES: Dict[str, str] = {
+        "villian": VILLAIN,
+        "rogue": VILLAIN,
+        "evil": VILLAIN,
+        "amazed": SURPRISED,
+        "shocked": SURPRISED,
+        "wow": SURPRISED,
+        "amused": LAUGHING,
+        "haha": LAUGHING,
+        "lol": LAUGHING,
+        "giggle": LAUGHING,
+        "affectionate": LOVE,
+        "heart": LOVE,
+        "adoring": LOVE,
+        "tired": SLEEPY,
+        "drowsy": SLEEPY,
+        "yawn": SLEEPY,
+        "bashful": SHY,
+        "blush": SHY,
+        "flattered": SHY,
+        "confident": PROUD,
+        "smug_proud": PROUD,
+        "triumph": PROUD,
+        "inquisitive": CURIOUS,
+        "intrigued": CURIOUS,
+        "wonder": CURIOUS,
+        "doubtful": SKEPTICAL,
+        "unimpressed": SKEPTICAL,
+        "suspicious": SKEPTICAL,
+        "hype": EXCITED,
+        "thrilled": EXCITED,
+        "starstruck": EXCITED,
+        "flirty": WINK,
+        "cheeky": WINK,
+        "playful": WINK,
+        "sunglasses": COOL,
+        "chill": COOL,
+        "swag": COOL,
+    }
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -100,7 +683,6 @@ BOOT_AUDIO_WAV = BASE_DIR / "assets" / "sounds" / "boot_loop.wav"
 BOOT_AUDIO_MP3 = BASE_DIR / "assets" / "sounds" / "boot_loop.mp3"
 
 
-# ensures boot sound track is available locally, downloading or synthesizing fallback if needed
 def ensure_boot_audio() -> Optional[Path]:
     """Ensures the boot sound loop exists locally, checking local assets, brain uploads, GitHub, or synthesizing."""
     if BOOT_AUDIO_WAV.exists() and BOOT_AUDIO_WAV.stat().st_size > 1000:
@@ -115,8 +697,6 @@ def ensure_boot_audio() -> Optional[Path]:
         except Exception:
             return BOOT_AUDIO_MP3
 
-    # Check local brain user_uploaded directories for original source media
-    import shutil
     brain_candidates = [
         Path(r"C:\Users\swapn\.gemini\antigravity\brain\636a8fe0-85dc-4870-bd6a-3350372df403\.user_uploaded\uploaded_media_1790862962719.mp3"),
         Path(r"C:\Users\swapn\.gemini\antigravity\brain\636a8fe0-85dc-4870-bd6a-3350372df403\.user_uploaded\uploaded_media_1790863007474.mp3"),
@@ -134,13 +714,12 @@ def ensure_boot_audio() -> Optional[Path]:
                 if BOOT_AUDIO_MP3.exists():
                     return BOOT_AUDIO_MP3
 
-    # Attempt download from GitHub repository
     raw_urls = [
         "https://raw.githubusercontent.com/swapnil-jchauhan/Neurolis-AI-Humanoid/main/assets/sounds/boot_loop.wav",
         "https://raw.githubusercontent.com/swapnil-jchauhan/Neurolis-AI-Humanoid/main/assets/sounds/boot_loop.mp3",
     ]
-    import urllib.request
     import ssl
+    import urllib.request
     for url in raw_urls:
         dest = BOOT_AUDIO_WAV if url.endswith(".wav") else BOOT_AUDIO_MP3
         try:
@@ -166,22 +745,21 @@ def ensure_boot_audio() -> Optional[Path]:
             except Exception:
                 pass
 
-    # Resilient fallback: synthesize a rich futuristic cyber boot pad loop if completely offline
     try:
         import numpy as np
         import soundfile as sf
         sr = 48000
-        duration = 3.0
+        duration = 3.2
         t = np.linspace(0, duration, int(sr * duration), endpoint=False)
-        # Harmonious cyber drone chord (A2, E3, A3, C4) with smooth LFO envelope
         signal = (
-            0.35 * np.sin(2 * np.pi * 110.0 * t) +
-            0.25 * np.sin(2 * np.pi * 164.81 * t) +
-            0.20 * np.sin(2 * np.pi * 220.0 * t) +
-            0.15 * np.sin(2 * np.pi * 261.63 * t)
+            0.32 * np.sin(2 * np.pi * 110.0 * t)
+            + 0.24 * np.sin(2 * np.pi * 164.81 * t)
+            + 0.20 * np.sin(2 * np.pi * 220.0 * t)
+            + 0.14 * np.sin(2 * np.pi * 277.18 * t)
+            + 0.10 * np.sin(2 * np.pi * 329.63 * t)
         )
-        lfo = 0.8 + 0.2 * np.sin(2 * np.pi * 0.67 * t)
-        stereo = np.column_stack([signal * lfo, signal * lfo * 0.95])
+        lfo = 0.82 + 0.18 * np.sin(2 * np.pi * 0.62 * t)
+        stereo = np.column_stack([signal * lfo, signal * lfo * 0.96])
         sf.write(str(BOOT_AUDIO_WAV), stereo.astype(np.float32), sr, subtype="PCM_16")
         return BOOT_AUDIO_WAV
     except Exception:
@@ -190,12 +768,12 @@ def ensure_boot_audio() -> Optional[Path]:
     return None
 
 
-
 class BootAudioPlayer:
     """
     Plays the boot soundtrack in a seamless cross-faded continuous loop
     synchronized with the loading bar, fading out gracefully upon completion.
     """
+
     def __init__(self, audio_path: Optional[Path] = None):
         self.audio_path = audio_path or ensure_boot_audio()
         self.stream = None
@@ -214,15 +792,14 @@ class BootAudioPlayer:
         if not self.audio_path or not self.audio_path.exists():
             return
         try:
-            import soundfile as sf
             import numpy as np
+            import soundfile as sf
             data, sr = sf.read(str(self.audio_path), dtype="float32")
             if data.ndim == 1:
                 data = np.column_stack([data, data])
             self.samplerate = sr
             self.channels = data.shape[1]
 
-            # Build seamless cross-fade loop (200ms crossfade between tail and head)
             N = len(data)
             L = min(int(0.20 * sr), max(10, N // 4))
             M = N - L
@@ -246,7 +823,9 @@ class BootAudioPlayer:
             written = 0
             while written < frames:
                 chunk = min(frames - written, buf_len - self.pos)
-                outdata[written:written + chunk] = self.loop_buf[self.pos:self.pos + chunk] * self.fade_vol
+                outdata[written : written + chunk] = (
+                    self.loop_buf[self.pos : self.pos + chunk] * self.fade_vol
+                )
                 written += chunk
                 self.pos = (self.pos + chunk) % buf_len
 
@@ -260,10 +839,13 @@ class BootAudioPlayer:
             return
         try:
             import sounddevice as sd
-            # Probe available output devices before opening stream to prevent ALSA -9994 error
             try:
                 devices = sd.query_devices()
-                has_output = any(d.get("max_output_channels", 0) > 0 for d in devices if isinstance(d, dict))
+                has_output = any(
+                    d.get("max_output_channels", 0) > 0
+                    for d in devices
+                    if isinstance(d, dict)
+                )
                 if not has_output:
                     self.is_playing = False
                     return
@@ -275,7 +857,6 @@ class BootAudioPlayer:
             self.is_fading = False
             self.pos = 0
 
-            # Fallback to standard 44.1kHz / device='default' if float32 48kHz is unsupported on Linux/Pi audio sinks
             with suppress_c_stderr():
                 for dev in ["default", "sysdefault", None]:
                     try:
@@ -331,117 +912,12 @@ class BootAudioPlayer:
         threading.Thread(target=_closer, daemon=True).start()
 
 
-# checks all the physical wires, chips, and code scripts on startup
-class HardwareInspector:
-    def __init__(self, gesture_sentry=None):
-        self.gesture_sentry = gesture_sentry
-
-    # checks if a physical webcam or usb camera is plugged in and accessible
-    def check_camera(self):
-        # 1. If gesture sentry / camera worker already has an active frame
-        if self.gesture_sentry is not None and getattr(self.gesture_sentry, "get_frame_fn", None) is not None:
-            try:
-                frame = self.gesture_sentry.get_frame_fn()
-                if frame is not None:
-                    return True, "✓", "Connected"
-            except Exception:
-                pass
-        # 2. Probe directly
-        try:
-            import cv2
-            cap = cv2.VideoCapture(0)
-            if cap.isOpened():
-                cap.release()
-                return True, "✓", "Connected"
-            return False, "✗", "Not Detected"
-        except Exception:
-            return False, "✗", "Not Detected"
-
-    # checks if audio input microphone is plugged in and recognized
-    def check_mic(self):
-        # 1. PipeWire capture check on Linux (e.g. phone mic via pw-record)
-        if sys.platform.startswith("linux") and shutil.which("pw-record"):
-            return True, "✓", "Connected"
-
-        # 2. ALSA / sounddevice hardware input check
-        try:
-            import sounddevice as sd
-            dev = sd.query_devices(kind="input")
-            if dev and dev.get("max_input_channels", 0) > 0:
-                return True, "✓", "Connected"
-            return False, "✗", "Not Detected"
-        except Exception:
-            return False, "✗", "Not Detected"
-
-    # checks if speakers or audio output devices are plugged in
-    def check_speakers(self):
-        try:
-            import sounddevice as sd
-            dev = sd.query_devices(kind="output")
-            if dev and dev.get("max_output_channels", 0) > 0:
-                return True, "✓", "Connected"
-            return False, "✗", "Not Detected"
-        except Exception:
-            return False, "✗", "Not Detected"
-
-    # checks if running directly on real raspberry pi hardware or pc simulation
-    def check_raspberry_pi(self):
-        try:
-            if os.path.exists("/proc/device-tree/model"):
-                with open("/proc/device-tree/model", "r", encoding="utf-8", errors="ignore") as f:
-                    model = f.read().strip().rstrip("\x00")
-                    if "Raspberry Pi" in model:
-                        return True, "✓", "Raspberry Pi 5"
-        except Exception:
-            pass
-        try:
-            if os.path.exists("/proc/cpuinfo"):
-                with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if "Model" in line and "Raspberry Pi" in line:
-                            return True, "✓", "Raspberry Pi 5"
-        except Exception:
-            pass
-        return False, "✗", f"{platform.system()} PC (Simulation)"
-
-    # verifies that listen.py core voice loop exists
-    def check_listen_py(self):
-        base_dir = Path(__file__).resolve().parent
-        listen_file = base_dir / "listen.py"
-        if listen_file.exists():
-            return True, "✓", "Online"
-        return False, "✗", "Not Found"
-
-    # checks if Google MediaPipe Tasks Vision is installed
-    def check_mediapipe(self):
-        try:
-            import mediapipe as mp
-            return True, "✓", f"Installed (v{mp.__version__})"
-        except Exception:
-            return False, "✗", "Not Installed"
-
-    # checks if the MediaPipe gesture recognizer task model is downloaded
-    def check_gesture_model(self):
-        base_dir = Path(__file__).resolve().parent
-        model_file = base_dir / "gesture_recognizer.task"
-        if model_file.exists():
-            size_mb = model_file.stat().st_size / (1024 * 1024)
-            return True, "✓", f"Ready ({size_mb:.1f}MB)"
-        return False, "✗", "Model Missing"
-
-    # checks if gesture_sentry.py module is present and online
-    def check_gesture_sentry(self):
-        base_dir = Path(__file__).resolve().parent
-        sentry_file = base_dir / "gesture_sentry.py"
-        if sentry_file.exists():
-            return True, "✓", "Online (✋/✊)"
-        return False, "✗", "Not Found"
-
-
-
-# main class that creates and animates the robotic face on the screen
 class FaceUI:
-    # constructor sets up the window dimensions, colors, eye sizes, and animation timers
+    """
+    Main Real-Time Animated Face UI for Neurolis Mark II.
+    Renders 22 distinct emotional & operational states + Apple-grade Boot Splash & Spring Physics.
+    """
+
     def __init__(
         self,
         width: int = 1024,
@@ -456,68 +932,87 @@ class FaceUI:
         self.bg_color = bg_color
         self.enable_boot = enable_boot
 
-        # State management - boots with apple-grade greeting and diagnostics
+        # State management & Apple-grade spring transition physics
         self.state = ExpressionState.BOOT_GREETING if enable_boot else ExpressionState.IDLE
-        self.status_text = "SYSTEM BOOT // DIAGNOSTICS" if enable_boot else "STANDBY // READY"
+        self.prev_state = self.state
+        self.state_change_time = time.time()
+        self.transition_progress = 1.0
+        self.status_text = "BOOTING..." if enable_boot else "STANDBY // READY"
         self.lock = threading.Lock()
         self.running = False
 
-        # Launch sequence & hardware diagnostics
+        # Launch sequence & splash timing
+        self.boot_duration = 3.3
         self.boot_start_time = time.time()
-        self.boot_scroll_y = 0.0
-        self.diagnostic_results = []
-        self.diagnostic_complete = False
-        self.hardware_inspector = HardwareInspector()
         self.boot_audio_player = BootAudioPlayer()
-        self._boot_thread: Optional[threading.Thread] = None
+        if enable_boot:
+            self.boot_audio_player.start()
 
-        # Ghostly CRT glitch & static flicker animation state (100% native Tkinter on Pi 5 & PC)
+        # Ghostly CRT glitch & static flicker animation state
         self.glitch_active = False
         self.glitch_start_time = 0.0
         self.glitch_duration = 0.3
         self.glitch_cycles = 3
 
-        # Eye tracking coordinates (-1.0 to 1.0)
+        # Spring-damped Eye Tracking & Parallax Coordinates (-1.0 to 1.0)
         self.target_look_x = 0.0
         self.target_look_y = 0.0
         self.current_look_x = 0.0
         self.current_look_y = 0.0
+        self.look_vel_x = 0.0
+        self.look_vel_y = 0.0
+        self._last_idle_saccade = time.time()
+        self._next_saccade_interval = random.uniform(2.4, 4.2)
 
-        # Animation parameters
+        # Apple-Grade Asymmetric Blink Physics (fast close, brief hold, smooth cubic open + double blinks)
         self.blink_progress = 0.0
         self.is_blinking = False
         self.last_blink_time = time.time()
-        self.next_blink_interval = random.uniform(2.5, 5.0)
+        self.next_blink_interval = random.uniform(2.6, 5.2)
+        self._pending_double_blink = False
 
-        # Oscillations
+        # Real wall-clock delta-time & continuous oscillation phases
+        self._last_frame_time = time.time()
         self.anim_phase = 0.0
         self.thinking_angle = 0.0
-        self.speaking_intensity = 0.6
+        self.speaking_intensity = 0.65
 
         # Subtitles
-        self.subtitle_speaker = "NEUROLIS"
+        self.subtitle_speaker = "NEUROLIS MARK II"
         self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
         self.subtitle_time = time.time()
 
-        # Colors - Modern Luminous OLED Robot Palette (Vector / EMO inspired)
+        # Luminous Bionic OLED Robot Palette
         self.color_eye_main = "#00f0ff"
-        self.color_eye_glow = "#00384d"
+        self.color_eye_glow = "#002b3d"
         self.color_pupil = "#ffffff"
-        self.color_error = "#ff2244"
-        self.color_listening = "#00ffcc"
+        self.color_error = "#ff1e42"
+        self.color_listening = "#00f5d4"
         self.color_thinking = "#a855f7"
         self.color_happy = "#00ff88"
-        self.color_sad = "#2979ff"
-        self.color_sad_glow = "#0e2447"
+        self.color_sad = "#3b82f6"
+        self.color_sad_glow = "#0b1e40"
         self.color_confused = "#ffb703"
-        self.color_confused_glow = "#4d3400"
+        self.color_confused_glow = "#3b2500"
+        self.color_excited = "#ffd000"
+        self.color_laughing = "#ff9500"
+        self.color_love = "#ff2a85"
+        self.color_wink = "#00f5d4"
+        self.color_surprised = "#38bdf8"
+        self.color_sleepy = "#a78bfa"
+        self.color_shy = "#ff7597"
+        self.color_proud = "#fbbf24"
+        self.color_curious = "#10b981"
+        self.color_skeptical = "#84cc16"
+        self.color_cool = "#00f0ff"
 
-        # Geometry scaled for 1024x600 (128:75 ratio) with +15% expression size boost
+        # Sleek, Less-Boxy Organic Geometry scaled for 1024x600 (128:75 ratio)
         self.ui_scale = (self.width / 1024.0) * 1.15
-        self.eye_w = int(160 * self.ui_scale)
-        self.eye_h = int(165 * self.ui_scale)
-        self.eye_spacing = int(260 * self.ui_scale)
-        self.corner_radius = int(42 * self.ui_scale)
+        self.eye_w = int(162 * self.ui_scale)
+        self.eye_h = int(162 * self.ui_scale)
+        self.eye_spacing = int(266 * self.ui_scale)
+        # Higher organic corner radius (~42% of width) so bordered eyes look sleek and organic, NEVER boxy!
+        self.corner_radius = int(66 * self.ui_scale)
 
         # Gesture HUD Bar & fallback click attributes & callbacks
         self.gesture_sentry = None
@@ -530,6 +1025,7 @@ class FaceUI:
         self.send_btn_bbox = None
         self._hud_geom = None
         self._last_talk_press_time = 0.0
+        self.last_standby_press_time = 0.0
         self._last_standby_press_time = 0.0
         self._last_send_press_time = 0.0
 
@@ -543,42 +1039,44 @@ class FaceUI:
         self.canvas: Optional[tk.Canvas] = None
         self._thread: Optional[threading.Thread] = None
 
-    # human latch HUD overlay is disabled per design
     def set_human_latch(self, latched: bool = True, label: str = "HUMAN TARGET"):
         pass
 
-    # links the vision gesture sentry engine for real-time progress HUD rendering
     def set_gesture_sentry(self, gesture_sentry):
         self.gesture_sentry = gesture_sentry
-        self.hardware_inspector.gesture_sentry = gesture_sentry
 
     def set_motor_controller(self, motor_controller):
-        # Deprecated: motor controller removed in favor of standalone remote control
         pass
 
-    # lets developer or user skip the 18s boot sequence by tapping screen or pressing any key
     def skip_boot(self):
         with self.lock:
             if self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
+                self.prev_state = self.state
                 self.state = ExpressionState.IDLE
+                self.state_change_time = time.time()
+                self.transition_progress = 0.0
                 self.status_text = "STANDBY // READY"
-                self.subtitle_speaker = "NEUROLIS"
-                self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
+                if not self.subtitle_text or self.subtitle_text in ("Booting...", "Standing by. Show open palm or press Enter to begin."):
+                    self.subtitle_speaker = "NEUROLIS MARK II"
+                    self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
+                self.is_blinking = True
+                self.blink_progress = 0.35
         self._last_static_key = None
         if hasattr(self, "boot_audio_player"):
             self.boot_audio_player.fade_out_and_stop(0.3)
 
-    # handles key presses to support fullscreen, stop, instant boot skipping, and Enter key wake/send
     def _on_key(self, event):
         key = (event.keysym or "").lower()
         if key in ["f", "f11"]:
             self._toggle_fullscreen()
-        elif key == "escape":
+            return
+        if key == "escape":
             self.stop()
-        elif key in ["return", "enter"]:
+            return
+        if key in ["return", "enter"]:
             with self.lock:
                 in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
-                is_standby = (self.state == ExpressionState.IDLE)
+                is_standby = self.state == ExpressionState.IDLE
             if in_boot:
                 self.skip_boot()
             elif is_standby:
@@ -593,17 +1091,60 @@ class FaceUI:
                         self.on_send_click()
                     except Exception as e:
                         print(f"[Screen] Enter key send callback error: {e}")
-        else:
-            self.skip_boot()
+            return
 
-    # handles touch taps and mouse clicks on the screen (touch-ready for Raspberry Pi 7-inch)
+        hotkey_map = {
+            "1": ExpressionState.IDLE,
+            "2": ExpressionState.HAPPY,
+            "3": ExpressionState.SAD,
+            "4": ExpressionState.CONFUSED,
+            "5": ExpressionState.THINKING,
+            "6": ExpressionState.LISTENING,
+            "7": ExpressionState.SPEAKING,
+            "8": ExpressionState.WATCHING,
+            "9": ExpressionState.MOVING,
+            "0": ExpressionState.ERROR,
+            "v": ExpressionState.VILLAIN,
+            "q": ExpressionState.EXCITED,
+            "w": ExpressionState.LAUGHING,
+            "e": ExpressionState.LOVE,
+            "r": ExpressionState.WINK,
+            "t": ExpressionState.SURPRISED,
+            "y": ExpressionState.SLEEPY,
+            "u": ExpressionState.SHY,
+            "i": ExpressionState.PROUD,
+            "o": ExpressionState.CURIOUS,
+            "p": ExpressionState.SKEPTICAL,
+            "c": ExpressionState.COOL,
+        }
+        with self.lock:
+            in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
+        if in_boot:
+            self.skip_boot()
+            return
+
+        if key == "b":
+            with self.lock:
+                self.boot_start_time = time.time()
+                self.state = ExpressionState.BOOT_GREETING
+                self.status_text = "BOOTING..."
+            return
+        if key in ["space", "tab"]:
+            with self.lock:
+                all_exp = ExpressionState.ALL_EXPRESSIONS
+                idx = all_exp.index(self.state) if self.state in all_exp else -1
+                next_st = all_exp[(idx + 1) % len(all_exp)]
+            self.set_state(next_st)
+            return
+        if key in hotkey_map:
+            self.set_state(hotkey_map[key])
+
     def _on_screen_press(self, event):
         if self.root:
             try:
                 self.root.focus_force()
             except Exception:
                 pass
-        # 1. Skip boot sequence if active
         with self.lock:
             in_boot = self.state in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]
         if in_boot:
@@ -611,9 +1152,8 @@ class FaceUI:
             return
 
         with self.lock:
-            is_standby = (self.state == ExpressionState.IDLE)
+            is_standby = self.state == ExpressionState.IDLE
 
-        # 1. Check touch tap in STANDBY: tapping Palm card or anywhere on screen wakes up Neurolis
         if is_standby:
             self._last_talk_press_time = time.time()
             if self.on_talk_click is not None:
@@ -623,7 +1163,6 @@ class FaceUI:
                     print(f"[Screen] Talk callback error: {e}")
             return
 
-        # 2. Check touch tap on Closed Fist card (Clickable ONLY when ACTIVE: talking, listening, thinking, watching)
         if self.standby_btn_bbox is not None and not is_standby:
             sbx1, sby1, sbx2, sby2 = self.standby_btn_bbox
             if sbx1 <= event.x <= sbx2 and sby1 <= event.y <= sby2:
@@ -635,54 +1174,6 @@ class FaceUI:
                         print(f"[Screen] Standby button callback error: {e}")
                 return
 
-    # starts the background thread that tests each hardware component one after another
-    def _start_diagnostic_thread(self):
-        if self._boot_thread is None:
-            self._boot_thread = threading.Thread(target=self._boot_diagnostic_worker, daemon=True)
-            self._boot_thread.start()
-
-    # runs through all component checks with human-friendly pacing (~1.15s per check)
-    def _boot_diagnostic_worker(self):
-        steps = [
-            ("Camera Detected?", self.hardware_inspector.check_camera),
-            ("Mic Detected?", self.hardware_inspector.check_mic),
-            ("Speakers Detected?", self.hardware_inspector.check_speakers),
-            ("Raspberry Pi Detected?", self.hardware_inspector.check_raspberry_pi),
-            ("listen.py Test Initiate", self.hardware_inspector.check_listen_py),
-            ("MediaPipe Tasks Vision?", self.hardware_inspector.check_mediapipe),
-            ("Gesture Model Asset?", self.hardware_inspector.check_gesture_model),
-            ("Vision Gesture Sentry?", self.hardware_inspector.check_gesture_sentry),
-        ]
-
-        for name, check_fn in steps:
-            if not self.running or self.state not in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
-                break
-            time.sleep(1.15)
-            if not self.running or self.state not in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
-                break
-            try:
-                res = check_fn()
-                if len(res) == 4:
-                    passed, badge, detail, is_fb = res
-                else:
-                    passed, badge, detail = res
-                    is_fb = False
-            except Exception as e:
-                passed, badge, detail, is_fb = False, "✗", f"Check Error: {e}", False
-
-            with self.lock:
-                self.diagnostic_results.append({
-                    "name": name,
-                    "passed": passed,
-                    "badge": badge,
-                    "detail": detail,
-                    "is_fallback": is_fb,
-                })
-
-        with self.lock:
-            self.diagnostic_complete = True
-
-    # starts the face ui either in the background on another thread or right here on main
     def start(self, in_background: bool = True):
         if in_background:
             self._thread = threading.Thread(target=self._run_tk_loop, daemon=True)
@@ -694,10 +1185,9 @@ class FaceUI:
         else:
             self._run_tk_loop()
 
-    # creates the actual tkinter window, canvas, and binds keyboard shortcuts
     def _run_tk_loop(self):
         self.root = tk.Tk()
-        self.root.title("Neurolis Face UI")
+        self.root.title("Neurolis Mark II Face UI")
         self.root.geometry(f"{self.width}x{self.height}")
         self.root.configure(bg=self.bg_color)
 
@@ -707,28 +1197,26 @@ class FaceUI:
         self.root.bind("<Escape>", lambda e: self.stop())
         self.root.bind("<Key>", self._on_key)
 
-        self.canvas = tk.Canvas(
+        self._tk_canvas = tk.Canvas(
             self.root,
             width=self.width,
             height=self.height,
             bg=self.bg_color,
             highlightthickness=0,
         )
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Button-1>", self._on_screen_press)
+        self._tk_canvas.pack(fill=tk.BOTH, expand=True)
+        self._tk_canvas.bind("<Button-1>", self._on_screen_press)
+        if _HAS_CV2_AA and _PILImageTk is not None:
+            self.canvas = HyperSmoothCanvas(tk_canvas=self._tk_canvas, width=self.width, height=self.height, bg=self.bg_color, ss=1)
+        else:
+            self.canvas = self._tk_canvas
 
         self.running = True
+        self._last_frame_time = time.time()
         self._animate_loop()
         self.root.mainloop()
 
     def _apply_fullscreen_state(self):
-        """
-        Applies fullscreen mode smoothly across platforms:
-        - On Linux (Raspberry Pi OS / labwc / Wayland): Uses borderless geometry (sw-1 x sh)
-          which avoids the wlroots/labwc DRM KMS direct-scanout pageflip deadlock that causes
-          severe 1 FPS freezing on Xwayland.
-        - On Windows: Uses native Win32 DWM borderless fullscreen.
-        """
         if not self.root:
             return
         self._last_static_key = None
@@ -740,7 +1228,6 @@ class FaceUI:
                 self.root.withdraw()
                 self.root.overrideredirect(True)
                 self.root.deiconify()
-                # sw - 1 prevents broken Xwayland KMS direct scanout while filling 99.95% of the display seamlessly
                 self.root.geometry(f"{sw - 1}x{sh}+0+0")
                 self.root.update_idletasks()
                 self.root.lift()
@@ -763,39 +1250,50 @@ class FaceUI:
                 except Exception:
                     pass
 
-    # hit 'f' or 'F11' on the keyboard to toggle between windowed and borderless fullscreen
     def _toggle_fullscreen(self):
         if self.root:
             self.fullscreen = not self.fullscreen
             self._apply_fullscreen_state()
 
-    # thread-safe function that listen.py calls to switch expressions (happy, sad, etc)
     def set_state(self, state: str, status_msg: Optional[str] = None):
-        """Thread-safe state update called from listen.py."""
+        """Thread-safe state update called from listen.py with Apple-grade spring transition trigger."""
+        norm = str(state or "idle").strip().lower()
+        norm = ExpressionState.ALIASES.get(norm, norm)
+        now = time.time()
         with self.lock:
-            self.state = state
+            if norm != self.state:
+                was_villain = (self.state == ExpressionState.VILLAIN)
+                is_villain = (norm == ExpressionState.VILLAIN)
+                self.prev_state = self.state
+                self.state = norm
+                self.state_change_time = now
+                self.transition_progress = 0.0
+                # Intense realistic system-invasion flicker burst when entering OR exiting VILLAIN mode!
+                if is_villain or was_villain:
+                    self.glitch_active = True
+                    self.glitch_start_time = now
+                    self.glitch_duration = 0.42
+                    self.glitch_cycles = 5
             if status_msg is not None:
                 self.status_text = status_msg.upper()
+            elif norm == ExpressionState.IDLE:
+                self.status_text = "STANDBY // READY"
+            elif norm == ExpressionState.VILLAIN:
+                self.status_text = "ERR_0x7F // SYS_BREACH"
             else:
-                self.status_text = f"STATE: {state.upper()}"
+                self.status_text = f"STATE: {norm.upper()}"
 
     def trigger_glitch_flicker(self, cycles: int = 3, duration_ms: int = 300):
-        """
-        Triggers a ghostly CRT scanline / static glitch flicker effect on the canvas.
-        Renders rapid frames of scanlines, chromatic line offset, and illumination dips.
-        Works 100% natively via Tkinter drawing on Pi 5 display and PC simulation.
-        """
         with self.lock:
             self.glitch_active = True
             self.glitch_start_time = time.time()
             self.glitch_duration = max(0.05, duration_ms / 1000.0)
             self.glitch_cycles = max(1, cycles)
-        # Briefly pause calling thread to allow GUI rendering loop to execute glitch frames (avoid freezing Tkinter thread if called from GUI thread)
         if not (self._thread and threading.current_thread() == self._thread):
             time.sleep(self.glitch_duration)
 
     def _draw_glitch_overlay(self, w: float, h: float):
-        """Renders 100% native Tkinter ghostly CRT scanlines, chromatic line offsets, and illumination dips."""
+        """Intense full-screen CRT signal hijack burst on entry/exit of VILLAIN mode."""
         now = time.time()
         elapsed = now - self.glitch_start_time
         if elapsed > self.glitch_duration:
@@ -803,58 +1301,49 @@ class FaceUI:
             return
 
         cycle_p = (elapsed / max(0.01, self.glitch_duration)) * self.glitch_cycles
-        sub_frame = int(cycle_p * 2) % 2
+        sub_frame = int(cycle_p * 2.5) % 3
 
-        # 1. Subtle illumination dip / phosphor fluctuation
         if sub_frame == 1:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#040b08", outline="")
+            self.canvas.create_rectangle(0, 0, w, h, fill="#030d07", outline="")
+        elif sub_frame == 2:
+            self.canvas.create_rectangle(0, 0, w, h, fill="#14040a", outline="")
 
-        # 2. Ghostly CRT scanlines across the canvas with phosphor pulse
-        scanline_step = 6
-        scanline_colors = ["#003b14", "#0a2e1d", "#004d26", "#052213"]
+        scanline_step = 8
+        scanline_colors = ["#0b3d1e", "#2b0914", "#062914", "#041c10"]
         for i, sy in enumerate(range(0, int(h), scanline_step)):
             scol = scanline_colors[i % len(scanline_colors)]
             self.canvas.create_line(0, sy, w, sy, fill=scol, width=1)
 
-        # 3. Chromatic line offsets / horizontal glitch slices across the ocular region
-        slice_colors = ["#ff003c", "#39ff14", "#00f0ff", "#ffffff", "#ff1744"]
-        for _ in range(6):
-            gy = random.uniform(h * 0.1, h * 0.85)
-            gh = random.uniform(2, 6)
-            g_col = random.choice(slice_colors)
-            gx_offset = random.uniform(-35, 35)
-            self.canvas.create_rectangle(
-                max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
-                fill=g_col, outline=""
-            )
+        slice_colors = ["#ff003c", "#39ff14", "#00f0ff", "#ffffff", "#ff1e42"]
+        for i in range(9):
+            gy = ((elapsed * 900.0 + i * 67.0) % max(1.0, h - 8.0))
+            gh = 3.0 + (i % 3) * 3.0
+            g_col = slice_colors[(i + sub_frame) % len(slice_colors)]
+            gx1 = (i * 37) % int(w * 0.35)
+            gx2 = w - ((i * 53) % int(w * 0.25))
+            self.canvas.create_rectangle(gx1, gy, gx2, gy + gh, fill=g_col, outline="")
 
-    # updates the subtitle box at the bottom whenever the user or robot speaks
     def set_subtitles(self, speaker: str, text: str):
-        """Thread-safe subtitle updater for user transcription & robot speech."""
         with self.lock:
-            self.subtitle_speaker = speaker.strip().upper()
-            self.subtitle_text = text.strip()
+            self.subtitle_speaker = (speaker or "NEUROLIS MARK II").strip().upper()
+            self.subtitle_text = (text or "").strip()
             self.subtitle_time = time.time()
 
-    # wipes out the subtitles when going to standby or starting fresh
     def clear_subtitles(self):
         with self.lock:
-            self.subtitle_speaker = ""
-            self.subtitle_text = ""
+            self.subtitle_speaker = "NEUROLIS MARK II"
+            self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
+            self.subtitle_time = time.time()
 
-    # moves pupil gaze coordinates so neurolis looks at the visitor's face
     def look_at(self, x: float, y: float):
-        """Directs the gaze of the eyes (-1.0 to 1.0)."""
         with self.lock:
             self.target_look_x = max(-1.0, min(1.0, x))
             self.target_look_y = max(-1.0, min(1.0, y))
 
-    # adjusts mouth waveform height depending on how loud the speech is
     def set_speaking_intensity(self, intensity: float):
         with self.lock:
             self.speaking_intensity = max(0.1, min(1.0, intensity))
 
-    # gracefully shuts down the animation loop and closes the tkinter window
     def stop(self):
         if hasattr(self, "boot_audio_player"):
             self.boot_audio_player.fade_out_and_stop(0.2)
@@ -868,7 +1357,6 @@ class FaceUI:
     def close(self):
         self.stop()
 
-    # destroys the tkinter root window without throwing thread errors
     def _destroy_tk(self):
         if self.root:
             try:
@@ -878,154 +1366,340 @@ class FaceUI:
                 pass
             self.root = None
 
-    # runs every frame to smooth out eye gaze, count blink timers, and advance sine waves
     def _update_physics(self, dt: float):
+        """Apple-grade spring-damped gaze physics, natural double-blinks, and state transition easing."""
         now = time.time()
-        self.current_look_x += (self.target_look_x - self.current_look_x) * 0.18
-        self.current_look_y += (self.target_look_y - self.current_look_y) * 0.18
+        dt = max(0.004, min(0.08, dt))
 
+        # 1. State transition progress (0.0 -> 1.0 over 0.28s)
+        if self.transition_progress < 1.0:
+            self.transition_progress = min(1.0, (now - self.state_change_time) / 0.28)
+
+        # 2. Lifelike idle micro-saccades
+        if (
+            self.state == ExpressionState.IDLE
+            and abs(self.target_look_x) < 0.02
+            and abs(self.target_look_y) < 0.02
+            and (now - self._last_idle_saccade) > self._next_saccade_interval
+        ):
+            self._last_idle_saccade = now
+            self._next_saccade_interval = random.uniform(2.2, 4.5)
+            # Subtle natural glance that gently returns
+            self.look_vel_x += random.uniform(-1.8, 1.8)
+            self.look_vel_y += random.uniform(-1.1, 1.1)
+
+        # 3. Critically damped spring gaze tracking
+        stiffness = 140.0
+        damping = 18.0
+        ax = stiffness * (self.target_look_x - self.current_look_x) - damping * self.look_vel_x
+        ay = stiffness * (self.target_look_y - self.current_look_y) - damping * self.look_vel_y
+        self.look_vel_x += ax * dt
+        self.look_vel_y += ay * dt
+        self.current_look_x += self.look_vel_x * dt
+        self.current_look_y += self.look_vel_y * dt
+
+        # 4. Asymmetric Pixar/Apple Blink Curve (fast snap shut, smooth cubic ease open + double-blinks)
         if not self.is_blinking:
             if now - self.last_blink_time > self.next_blink_interval:
                 self.is_blinking = True
                 self.blink_progress = 0.0
+                if not self._pending_double_blink and random.random() < 0.20:
+                    self._pending_double_blink = True
+                else:
+                    self._pending_double_blink = False
         else:
-            self.blink_progress += dt * 8.5
+            self.blink_progress += dt * 4.6  # ~215ms total blink duration
             if self.blink_progress >= 1.0:
                 self.is_blinking = False
                 self.blink_progress = 0.0
                 self.last_blink_time = now
-                self.next_blink_interval = random.uniform(2.5, 5.5)
+                if self._pending_double_blink:
+                    self.next_blink_interval = 0.14  # Quick natural second blink
+                    self._pending_double_blink = False
+                else:
+                    self.next_blink_interval = random.uniform(2.8, 5.4)
 
         self.anim_phase += dt * 3.2
         self.thinking_angle += dt * 4.5
 
-    # the heartbeat that updates physics and repaints the canvas (40ms / 25 FPS on Linux/Pi, 16ms on Windows)
     def _animate_loop(self):
         if not self.running or self.canvas is None:
             return
-        is_linux = sys.platform.startswith("linux")
-        interval_ms = 40 if is_linux else 16
-        dt = 0.040 if is_linux else 0.016
+        t_start = time.perf_counter()
+        now = time.time()
+        dt = now - getattr(self, "_last_frame_time", now - 0.016)
+        self._last_frame_time = now
         self._update_physics(dt)
         self._render()
+        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+        delay_ms = max(1, int(16.2 - elapsed_ms))
         if self.root and self.running:
-            self.root.after(interval_ms, self._animate_loop)
+            self.root.after(delay_ms, self._animate_loop)
 
-    # helper math to draw smooth rounded rectangles for eyes and cards
     def _create_rounded_rect(self, x1, y1, x2, y2, radius, **kwargs):
+        """Draws a mathematically exact trigonometric rounded rectangle using precomputed LUTs."""
         if radius <= 0:
             return self.canvas.create_rectangle(x1, y1, x2, y2, **kwargs)
-        if (x2 - x1) <= radius * 2.2 and (y2 - y1) <= radius * 2.2:
-            return self.canvas.create_oval(x1, y1, x2, y2, **kwargs)
-        points = [
-            x1 + radius, y1, x2 - radius, y1, x2, y1,
-            x2, y1 + radius, x2, y2 - radius, x2, y2,
-            x2 - radius, y2, x1 + radius, y2, x1, y2,
-            x1, y2 - radius, x1, y1 + radius, x1, y1,
-        ]
-        return self.canvas.create_polygon(points, smooth=True, **kwargs)
-
-    # the master paint function that clears the canvas and draws the entire face layout
-    def _render(self):
-        if not self.canvas:
-            return
-        w = self.canvas.winfo_width() or self.width
-        h = self.canvas.winfo_height() or self.height
-
-        # Dynamically scale face geometry when canvas dimensions change (1024x600 native or 1080p fullscreen)
-        if getattr(self, "_last_geo_size", None) != (w, h):
-            self._last_geo_size = (w, h)
-            self.ui_scale = (w / 1024.0) * 1.15
-            self.eye_w = int(160 * self.ui_scale)
-            self.eye_h = int(165 * self.ui_scale)
-            self.eye_spacing = int(260 * self.ui_scale)
-            self.corner_radius = int(42 * self.ui_scale)
-
-        # Position face in upper region so subtitles sit comfortably in lower region
-        center_x = w / 2.0
-        center_y = h * 0.33
-
-        with self.lock:
-            cur_state = self.state
-            status_str = self.status_text
-            look_x = self.current_look_x
-            look_y = self.current_look_y
-            sub_speaker = self.subtitle_speaker
-            sub_text = self.subtitle_text
-
-        now = time.time()
-        # phase 1: oobe welcome greeting ("Hi there!")
-        if cur_state == ExpressionState.BOOT_GREETING:
-            self._last_static_key = None
-            elapsed = now - self.boot_start_time
-            if elapsed >= 3.8:
-                with self.lock:
-                    self.state = ExpressionState.BOOT_SEQUENCE
-                    cur_state = ExpressionState.BOOT_SEQUENCE
-                if hasattr(self, "boot_audio_player"):
-                    self.boot_audio_player.start()
-                self._start_diagnostic_thread()
-            else:
-                self._draw_boot_greeting(w, h, elapsed)
-                return
-
-        # phase 2: cascading hardware & safety diagnostic checklist
-        if cur_state == ExpressionState.BOOT_SEQUENCE:
-            self._last_static_key = None
-            seq_elapsed = now - (self.boot_start_time + 3.8)
-            with self.lock:
-                diag_done = self.diagnostic_complete
-                diag_count = len(self.diagnostic_results)
-
-            diag_total = 15
-            if diag_count < diag_total:
-                pct = int((diag_count / float(diag_total)) * 65.0)
-            else:
-                load_p = min(1.0, max(0.0, (seq_elapsed - (diag_total * 1.15)) / 3.4))
-                pct = int(65.0 + load_p * 35.0)
-
-            if seq_elapsed >= 21.0 and diag_done and pct >= 100:
-                if hasattr(self, "boot_audio_player"):
-                    self.boot_audio_player.fade_out_and_stop(0.5)
-                with self.lock:
-                    self.state = ExpressionState.IDLE
-                    self.status_text = "STANDBY // READY"
-                    self.subtitle_speaker = "NEUROLIS"
-                    self.subtitle_text = "Standing by. Press Enter or tap 'Talk to Neurolis' to begin."
-                cur_state = ExpressionState.IDLE
-            else:
-                self._draw_boot_sequence(w, h, seq_elapsed, pct)
-                return
-
-        # Gaze tracking: Smoothly follow human target across room in tracking, idle, moving, listening, speaking, and villain modes
-        if cur_state in [
-            ExpressionState.WATCHING, ExpressionState.LOOKING, ExpressionState.IDLE,
-            ExpressionState.MOVING, ExpressionState.LISTENING, ExpressionState.SPEAKING,
-            ExpressionState.VILLAIN, ExpressionState.HAPPY
-        ]:
-            look_x = max(-0.35, min(0.35, look_x))
-            look_y = max(-0.25, min(0.25, look_y))
+        w = max(1.0, float(x2 - x1))
+        h = max(1.0, float(y2 - y1))
+        r = min(float(radius), w * 0.49, h * 0.49)
+        if _HAS_CV2_AA:
+            cx_list = [x2 - r, x2 - r, x1 + r, x1 + r]
+            cy_list = [y1 + r, y2 - r, y2 - r, y1 + r]
+            xs = _np.concatenate([cx_list[c] + r * _RR_COS[c] for c in range(4)])
+            ys = _np.concatenate([cy_list[c] + r * _RR_SIN[c] for c in range(4)])
+            pts = _np.column_stack([xs, ys]).ravel().tolist()
         else:
-            look_x = 0.0
-            look_y = 0.0
+            pts = []
+            steps = 10
+            for i in range(steps + 1):
+                ang = -math.pi / 2.0 + (i / float(steps)) * (math.pi / 2.0)
+                pts.extend([x2 - r + r * math.cos(ang), y1 + r + r * math.sin(ang)])
+            for i in range(steps + 1):
+                ang = (i / float(steps)) * (math.pi / 2.0)
+                pts.extend([x2 - r + r * math.cos(ang), y2 - r + r * math.sin(ang)])
+            for i in range(steps + 1):
+                ang = math.pi / 2.0 + (i / float(steps)) * (math.pi / 2.0)
+                pts.extend([x1 + r + r * math.cos(ang), y2 - r + r * math.sin(ang)])
+            for i in range(steps + 1):
+                ang = math.pi + (i / float(steps)) * (math.pi / 2.0)
+                pts.extend([x1 + r + r * math.cos(ang), y1 + r + r * math.sin(ang)])
+        kwargs.pop("smooth", None)
+        return self.canvas.create_polygon(pts, smooth=False, **kwargs)
 
-        # Palette selection based on state
+    @staticmethod
+    def _build_eye_contour(
+        cx: float,
+        cy: float,
+        ew: float,
+        eh: float,
+        rad: float,
+        smile_bottom: bool = False,
+    ) -> List[float]:
+        """
+        Builds a continuous-curvature Apple Super-Ellipse (Lamé squircle, n=2.85) eye contour
+        using vectorized numpy LUTs for 60 FPS performance on Raspberry Pi 5.
+        """
+        rx = ew * 0.5
+        ry = eh * 0.5
+        if _HAS_CV2_AA:
+            px = cx + rx * _EYE_NX
+            if smile_bottom:
+                py = cy + ry * _EYE_NY - _EYE_SMILE_LIFT * eh
+            else:
+                py = cy + ry * _EYE_NY
+            return _np.column_stack([px, py]).ravel().tolist()
+
+        pts: List[float] = []
+        num_pts = 80
+        exp_p = 2.0 / 2.85
+        for i in range(num_pts):
+            theta = (i / float(num_pts)) * 2.0 * math.pi
+            cos_t = math.cos(theta)
+            sin_t = math.sin(theta)
+            nx = (1.0 if cos_t >= 0 else -1.0) * (abs(cos_t) ** exp_p)
+            ny = (1.0 if sin_t >= 0 else -1.0) * (abs(sin_t) ** exp_p)
+            px = cx + rx * nx
+            py = cy + ry * ny
+            if smile_bottom and sin_t > 0.0:
+                py -= (sin_t ** 2.6) * (eh * 0.25)
+            pts.extend([px, py])
+        return pts
+
+    def _draw_sparkle(self, cx: float, cy: float, r: float, col: str, core_col: str = "#ffffff"):
+        """Draws a crisp 4-point diamond star sparkle (✦) at (cx, cy)."""
+        w_in = r * 0.26
+        pts = [
+            cx, cy - r,
+            cx + w_in, cy - w_in,
+            cx + r, cy,
+            cx + w_in, cy + w_in,
+            cx, cy + r,
+            cx - w_in, cy + w_in,
+            cx - r, cy,
+            cx - w_in, cy - w_in,
+        ]
+        self.canvas.create_polygon(pts, fill=col, outline="")
+        cr = max(1.2, r * 0.22)
+        self.canvas.create_oval(cx - cr, cy - cr, cx + cr, cy + cr, fill=core_col, outline="")
+
+    def _draw_flickering_lightbulb(self, bx: float, by: float, scale: float, mode: str = "trying"):
+        """
+        Draws a custom vector flickering lightbulb (💡) next to the upper-right temple:
+          - `mode="trying"` (for THINKING): sputters and flickers between dim warm-amber and bright gold as an idea tries to spark.
+          - `mode="idea"` (for CURIOUS): pulses with a bright golden-emerald eureka glow and radiating spark rays!
+        """
+        if mode == "trying":
+            w1 = math.sin(self.anim_phase * 9.0)
+            w2 = math.cos(self.anim_phase * 21.0)
+            flicker = 0.42 + 0.58 * max(0.0, (0.55 + 0.45 * w1) * (0.65 + 0.35 * w2))
+        else:
+            flicker = 0.80 + 0.20 * math.sin(self.anim_phase * 14.0)
+
+        r_bulb = 18.5 * scale
+        halo_r = r_bulb * (1.35 + 0.45 * flicker)
+        halo_col = lerp_color(self.bg_color, "#fbbf24", 0.32 * flicker)
+        self.canvas.create_oval(bx - halo_r, by - halo_r, bx + halo_r, by + halo_r, fill=halo_col, outline="")
+
+        mid_r = r_bulb * (1.12 + 0.20 * flicker)
+        mid_col = lerp_color(self.bg_color, "#fde047", 0.52 * flicker)
+        self.canvas.create_oval(bx - mid_r, by - mid_r, bx + mid_r, by + mid_r, fill=mid_col, outline="")
+
+        base_w = r_bulb * 0.56
+        base_top = by + r_bulb * 0.72
+        base_bot = by + r_bulb * 1.38
+        self._create_rounded_rect(
+            bx - base_w, base_top, bx + base_w, base_bot,
+            radius=int(4 * scale), fill="#475569", outline="#94a3b8", width=max(1, int(1.5 * scale))
+        )
+        for t_i in range(2):
+            ty = base_top + (t_i + 1) * ((base_bot - base_top) / 3.0)
+            self.canvas.create_line(bx - base_w * 0.85, ty, bx + base_w * 0.85, ty, fill="#cbd5e1", width=max(1, int(1.5 * scale)))
+        self.canvas.create_oval(
+            bx - base_w * 0.45, base_bot - 2 * scale,
+            bx + base_w * 0.45, base_bot + 4 * scale,
+            fill="#94a3b8", outline=""
+        )
+
+        neck_pts = [
+            bx - r_bulb * 0.82, by + r_bulb * 0.42,
+            bx - base_w * 0.92, base_top + 2 * scale,
+            bx + base_w * 0.92, base_top + 2 * scale,
+            bx + r_bulb * 0.82, by + r_bulb * 0.42,
+        ]
+        glass_fill = lerp_color("#2e2105", "#fde047", flicker)
+        glass_rim = lerp_color("#a16207", "#ffffff", flicker * 0.85)
+        self.canvas.create_polygon(neck_pts, fill=glass_fill, outline=glass_rim, width=max(1, int(2 * scale)))
+        self.canvas.create_oval(
+            bx - r_bulb, by - r_bulb, bx + r_bulb, by + r_bulb,
+            fill=glass_fill, outline=glass_rim, width=max(1, int(2.5 * scale))
+        )
+
+        fil_col = lerp_color("#d97706", "#ffffff", flicker)
+        fil_pts = [
+            bx - r_bulb * 0.32, base_top,
+            bx - r_bulb * 0.38, by - r_bulb * 0.12,
+            bx, by + r_bulb * 0.10,
+            bx + r_bulb * 0.38, by - r_bulb * 0.12,
+            bx + r_bulb * 0.32, base_top,
+        ]
+        self.canvas.create_line(fil_pts, smooth=False, fill=fil_col, width=max(1, int(2.4 * scale)), capstyle=tk.ROUND)
+
+        self.canvas.create_oval(
+            bx - r_bulb * 0.62, by - r_bulb * 0.62,
+            bx - r_bulb * 0.20, by - r_bulb * 0.25,
+            fill="#ffffff", outline=""
+        )
+
+        ray_col = lerp_color("#78350f", "#fef08a", flicker)
+        for ang_deg in (-145, -110, -70, -35, 10):
+            rad_a = math.radians(ang_deg)
+            r1 = r_bulb * 1.22
+            r2 = r_bulb * (1.45 + 0.40 * flicker)
+            self.canvas.create_line(
+                bx + math.cos(rad_a) * r1, by + math.sin(rad_a) * r1,
+                bx + math.cos(rad_a) * r2, by + math.sin(rad_a) * r2,
+                fill=ray_col, width=max(1, int(2.8 * scale)), capstyle=tk.ROUND
+            )
+
+    def _draw_music_note(
+        self,
+        nx: float,
+        ny: float,
+        size: float,
+        col: str,
+        glow_col: str,
+        beamed_pair: bool = True,
+    ):
+        """Draws a crisp custom-vector musical note (`♫` beamed eighth-note pair or `♪` single eighth note)."""
+        s = size
+        if beamed_pair:
+            dx = s * 0.95
+            h_stem = s * 1.35
+            slant = s * 0.28
+            self.canvas.create_line(nx - dx * 0.5 + s * 0.28, ny, nx - dx * 0.5 + s * 0.28, ny - h_stem, fill=glow_col, width=max(2, int(s * 0.42)), capstyle=tk.ROUND)
+            self.canvas.create_line(nx + dx * 0.5 + s * 0.28, ny - slant, nx + dx * 0.5 + s * 0.28, ny - h_stem - slant, fill=glow_col, width=max(2, int(s * 0.42)), capstyle=tk.ROUND)
+            self.canvas.create_line(nx - dx * 0.5 + s * 0.28, ny - h_stem, nx + dx * 0.5 + s * 0.28, ny - h_stem - slant, fill=glow_col, width=max(3, int(s * 0.55)), capstyle=tk.ROUND)
+
+            for hx, hy in [(nx - dx * 0.5, ny), (nx + dx * 0.5, ny - slant)]:
+                self.canvas.create_oval(hx - s * 0.48, hy - s * 0.36, hx + s * 0.48, hy + s * 0.36, fill=glow_col, outline="")
+                self.canvas.create_oval(hx - s * 0.36, hy - s * 0.26, hx + s * 0.36, hy + s * 0.26, fill=col, outline="")
+                self.canvas.create_oval(hx - s * 0.20, hy - s * 0.14, hx - s * 0.02, hy - s * 0.02, fill="#ffffff", outline="")
+
+            st_w = max(1, int(s * 0.20))
+            bm_w = max(2, int(s * 0.28))
+            x1_s = nx - dx * 0.5 + s * 0.28
+            x2_s = nx + dx * 0.5 + s * 0.28
+            self.canvas.create_line(x1_s, ny, x1_s, ny - h_stem, fill=col, width=st_w, capstyle=tk.ROUND)
+            self.canvas.create_line(x2_s, ny - slant, x2_s, ny - h_stem - slant, fill=col, width=st_w, capstyle=tk.ROUND)
+            self.canvas.create_line(x1_s, ny - h_stem, x2_s, ny - h_stem - slant, fill=col, width=bm_w, capstyle=tk.ROUND)
+            self.canvas.create_line(x1_s, ny - h_stem + s * 0.34, x2_s, ny - h_stem - slant + s * 0.34, fill=col, width=max(1, int(bm_w * 0.75)), capstyle=tk.ROUND)
+        else:
+            h_stem = s * 1.35
+            x_s = nx + s * 0.28
+            self.canvas.create_oval(nx - s * 0.48, ny - s * 0.36, nx + s * 0.48, ny + s * 0.36, fill=glow_col, outline="")
+            self.canvas.create_oval(nx - s * 0.36, ny - s * 0.26, nx + s * 0.36, hy := ny + s * 0.26, fill=col, outline="")
+            self.canvas.create_oval(nx - s * 0.20, ny - s * 0.14, nx - s * 0.02, ny - s * 0.02, fill="#ffffff", outline="")
+            self.canvas.create_line(x_s, ny, x_s, ny - h_stem, fill=col, width=max(1, int(s * 0.22)), capstyle=tk.ROUND)
+            flag_pts = [
+                x_s, ny - h_stem,
+                x_s + s * 0.58, ny - h_stem + s * 0.32,
+                x_s + s * 0.42, ny - h_stem + s * 0.78,
+            ]
+            self.canvas.create_line(flag_pts, smooth=True, fill=col, width=max(1, int(s * 0.24)), capstyle=tk.ROUND)
+
+    def _draw_cyber_blush(
+        self,
+        lx: float,
+        rx: float,
+        by: float,
+        scale: float,
+        base_col: str = "#ff3b7f",
+        outward_shift: float = 0.0,
+        size_mult: float = 1.0,
+        extra_slashes: bool = False,
+    ):
+        """Draws warm, multi-layered glowing cyber-blush cushions with cute diagonal /// anime strokes."""
+        pulse = 0.92 + 0.08 * math.sin(self.anim_phase * 4.2)
+        bw = 66.0 * scale * pulse * size_mult
+        bh = 22.0 * scale * pulse * size_mult
+        c_outer = lerp_color(self.bg_color, base_col, 0.28)
+        c_mid = lerp_color(self.bg_color, base_col, 0.56)
+        c_inner = lerp_color(self.bg_color, base_col, 0.84)
+        c_slash = lerp_color(base_col, "#ffffff", 0.62)
+
+        for side, base_cx in [(-1, lx), (1, rx)]:
+            cx = base_cx + side * outward_shift
+            self.canvas.create_oval(cx - bw * 0.56, by - bh * 0.56, cx + bw * 0.56, by + bh * 0.56, fill=c_outer, outline="")
+            self.canvas.create_oval(cx - bw * 0.42, by - bh * 0.42, cx + bw * 0.42, by + bh * 0.42, fill=c_mid, outline="")
+            self.canvas.create_oval(cx - bw * 0.28, by - bh * 0.28, cx + bw * 0.28, by + bh * 0.28, fill=c_inner, outline="")
+            slash_indices = (-1.5, -0.5, 0.5, 1.5) if extra_slashes else (-1, 0, 1)
+            for s_i in slash_indices:
+                sx = cx + s_i * (10.2 * scale * size_mult)
+                self.canvas.create_line(
+                    sx - 3.4 * scale * size_mult, by + 4.5 * scale * size_mult,
+                    sx + 3.4 * scale * size_mult, by - 4.5 * scale * size_mult,
+                    fill=c_slash, width=max(1, int(2.2 * scale)), capstyle=tk.ROUND
+                )
+
+    def _get_palette(self, cur_state: str, now: float) -> Tuple[str, str]:
+        """Returns (main_color, glow_color) for any of the 22 expression states."""
         if cur_state == ExpressionState.VILLAIN:
             pulse_6hz = math.sin(now * 12.0 * math.pi)
-            main_color = "#39ff14"  # Radiant sinister neon lime green (rogue AI easter egg)
-            glow_color = lerp_color("#003b14", "#0a4e1e", 0.4 + 0.4 * pulse_6hz)
+            main_color = "#39ff14"
+            glow_color = lerp_color("#002e10", "#0b5222", 0.5 + 0.4 * pulse_6hz)
         elif cur_state == ExpressionState.ERROR:
             main_color = self.color_error
-            glow_color = "#551122"
+            glow_color = "#4d0b1a"
         elif cur_state == ExpressionState.LISTENING:
             main_color = self.color_listening
-            glow_color = "#003b33"
+            glow_color = "#003830"
         elif cur_state == ExpressionState.THINKING:
             main_color = self.color_thinking
-            glow_color = "#3d1455"
+            glow_color = "#351052"
         elif cur_state == ExpressionState.HAPPY:
             main_color = self.color_happy
-            glow_color = "#00442a"
+            glow_color = "#003d24"
         elif cur_state == ExpressionState.SAD:
             main_color = self.color_sad
             glow_color = self.color_sad_glow
@@ -1034,21 +1708,165 @@ class FaceUI:
             glow_color = self.color_confused_glow
         elif cur_state == ExpressionState.MOVING:
             main_color = "#00f0ff"
-            glow_color = "#00384d"
+            glow_color = "#00334d"
         elif cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
-            main_color = "#00e5ff"
-            glow_color = "#00384d"
+            main_color = "#00ffcc"
+            glow_color = "#003547"
+        elif cur_state == ExpressionState.EXCITED:
+            main_color = self.color_excited
+            glow_color = "#473300"
+        elif cur_state == ExpressionState.LAUGHING:
+            main_color = self.color_laughing
+            glow_color = "#472200"
+        elif cur_state == ExpressionState.LOVE:
+            main_color = self.color_love
+            glow_color = "#4a0826"
+        elif cur_state == ExpressionState.WINK:
+            main_color = self.color_wink
+            glow_color = "#003b36"
+        elif cur_state == ExpressionState.SURPRISED:
+            main_color = self.color_surprised
+            glow_color = "#082f49"
+        elif cur_state == ExpressionState.SLEEPY:
+            main_color = self.color_sleepy
+            glow_color = "#1e1b4b"
+        elif cur_state == ExpressionState.SHY:
+            main_color = self.color_shy
+            glow_color = "#451028"
+        elif cur_state == ExpressionState.PROUD:
+            main_color = self.color_proud
+            glow_color = "#422c00"
+        elif cur_state == ExpressionState.CURIOUS:
+            main_color = self.color_curious
+            glow_color = "#043828"
+        elif cur_state == ExpressionState.SKEPTICAL:
+            main_color = self.color_skeptical
+            glow_color = "#1e3806"
+        elif cur_state == ExpressionState.COOL:
+            main_color = self.color_cool
+            glow_color = "#002b4d"
         else:
             main_color = self.color_eye_main
             glow_color = self.color_eye_glow
+        return main_color, glow_color
 
-        # Static UI caching: Only redraw buttons, subtitle card, and header when state/text/dimensions change
+    def _render(self):
+        if not self.canvas:
+            return
+        w = self.canvas.winfo_width()
+        if w <= 1:
+            w = self.width
+        h = self.canvas.winfo_height()
+        if h <= 1:
+            h = self.height
+
+        if getattr(self, "_last_geo_size", None) != (w, h):
+            self._last_geo_size = (w, h)
+            self._last_static_key = None
+            self.ui_scale = (w / 1024.0) * 1.15
+            self.eye_w = int(162 * self.ui_scale)
+            self.eye_h = int(162 * self.ui_scale)
+            self.eye_spacing = int(266 * self.ui_scale)
+            self.corner_radius = int(66 * self.ui_scale)
+
+        center_x = w / 2.0
+        center_y = h * 0.325
+
+        with self.lock:
+            cur_state = self.state
+            prev_state = self.prev_state
+            trans_p = self.transition_progress
+            status_str = self.status_text
+            look_x = self.current_look_x
+            look_y = self.current_look_y
+            sub_speaker = self.subtitle_speaker
+            sub_text = self.subtitle_text
+            sub_time = getattr(self, "subtitle_time", 0.0)
+
+        now = time.time()
+
+        standby_prompt = "Standing by. Show open palm or press Enter to begin."
+        if not sub_text or not sub_text.strip():
+            sub_text = standby_prompt if cur_state == ExpressionState.IDLE else "..."
+            sub_speaker = "NEUROLIS MARK II" if cur_state == ExpressionState.IDLE else (sub_speaker or "NEUROLIS")
+            with self.lock:
+                self.subtitle_speaker = sub_speaker
+                self.subtitle_text = sub_text
+        elif cur_state == ExpressionState.IDLE and sub_text != standby_prompt:
+            # Hold previous dialogue subtitles for 9.0s in standby before reverting to clean prompt
+            if (now - sub_time) >= 9.0:
+                with self.lock:
+                    self.subtitle_speaker = "NEUROLIS MARK II"
+                    self.subtitle_text = standby_prompt
+                    self.subtitle_time = now
+                    sub_speaker = self.subtitle_speaker
+                    sub_text = self.subtitle_text
+
+        # Force static cache invalidation if static_buf is missing
+        if hasattr(self.canvas, "static_buf") and self.canvas.static_buf is None:
+            self._last_static_key = None
+
+        # Phase 1: Apple-Grade Welcome Boot Splash
+        if cur_state == ExpressionState.BOOT_GREETING:
+            self._last_static_key = None
+            elapsed = now - self.boot_start_time
+            if elapsed >= self.boot_duration:
+                with self.lock:
+                    self.prev_state = self.state
+                    self.state = ExpressionState.IDLE
+                    cur_state = ExpressionState.IDLE
+                    self.state_change_time = now
+                    self.transition_progress = 0.0
+                    self.status_text = "STANDBY // READY"
+                    if not self.subtitle_text or self.subtitle_text in ("Booting...", "Standing by. Show open palm or press Enter to begin."):
+                        self.subtitle_speaker = "NEUROLIS MARK II"
+                        self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
+                    self.is_blinking = True
+                    self.blink_progress = 0.35
+                if hasattr(self, "boot_audio_player"):
+                    self.boot_audio_player.fade_out_and_stop(0.35)
+            else:
+                self._draw_boot_greeting(w, h, elapsed)
+                return
+
+        if cur_state == ExpressionState.BOOT_SEQUENCE:
+            self._last_static_key = None
+            with self.lock:
+                self.state = ExpressionState.IDLE
+                cur_state = ExpressionState.IDLE
+                self.status_text = "STANDBY // READY"
+                self.subtitle_speaker = "NEUROLIS MARK II"
+                self.subtitle_text = "Standing by. Show open palm or press Enter to begin."
+            if hasattr(self, "boot_audio_player"):
+                self.boot_audio_player.fade_out_and_stop(0.2)
+
+        gaze_enabled_states = {
+            ExpressionState.WATCHING, ExpressionState.LOOKING, ExpressionState.IDLE,
+            ExpressionState.MOVING, ExpressionState.LISTENING, ExpressionState.SPEAKING,
+            ExpressionState.VILLAIN, ExpressionState.HAPPY, ExpressionState.EXCITED,
+            ExpressionState.LOVE, ExpressionState.CURIOUS, ExpressionState.SURPRISED,
+            ExpressionState.PROUD, ExpressionState.WINK, ExpressionState.COOL,
+        }
+        if cur_state in gaze_enabled_states:
+            look_x = max(-0.35, min(0.35, look_x))
+            look_y = max(-0.25, min(0.25, look_y))
+        else:
+            look_x = 0.0
+            look_y = 0.0
+
+        main_color, glow_color = self._get_palette(cur_state, now)
+        if trans_p < 1.0 and prev_state not in [ExpressionState.BOOT_GREETING, ExpressionState.BOOT_SEQUENCE]:
+            p_main, p_glow = self._get_palette(prev_state, now)
+            e_t = ease_out_cubic(trans_p)
+            main_color = lerp_color(p_main, main_color, e_t)
+            glow_color = lerp_color(p_glow, glow_color, e_t)
+
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
         static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed)
 
         mouth_cy = center_y + self.eye_h * 0.65
-        btn_y = mouth_cy + int(self.eye_h * 0.22)
+        btn_y = mouth_cy + int(self.eye_h * 0.21)
 
         if static_key != getattr(self, "_last_static_key", None):
             self.canvas.delete("all")
@@ -1065,59 +1883,117 @@ class FaceUI:
 
         items_before_dynamic = len(self.canvas.find_all())
 
-        # Live Dynamic Gesture HUD progress fill gauge & badge
+        # Live Gesture HUD progress fill gauge
         self._draw_gesture_hud_dynamic(w, h, center_x, btn_y, cur_state)
 
-        # 2. Eye Positioning
+        # Eye Positioning & Apple-Grade Micro-Motion Physics
         gaze_scale = self.ui_scale / 1.8
-        gaze_dx = look_x * (24.0 * gaze_scale)
+        gaze_dx = look_x * (22.0 * gaze_scale)
         gaze_dy = look_y * (16.0 * gaze_scale)
-        suspension_bounce = 0.0
+
+        if cur_state == ExpressionState.MOVING:
+            suspension_bounce = math.sin(self.anim_phase * 14.0) * (2.2 * gaze_scale)
+        elif cur_state == ExpressionState.LAUGHING:
+            suspension_bounce = abs(math.sin(self.anim_phase * 12.0)) * (-5.8 * gaze_scale)
+        elif cur_state == ExpressionState.EXCITED:
+            suspension_bounce = math.sin(self.anim_phase * 7.5) * (3.2 * gaze_scale)
+        elif cur_state == ExpressionState.SLEEPY:
+            suspension_bounce = math.sin(self.anim_phase * 1.1) * (2.8 * gaze_scale)
+        else:
+            suspension_bounce = math.sin(self.anim_phase * 1.8) * (1.2 * gaze_scale)
+
         left_eye_cx = center_x - (self.eye_spacing / 2.0) + gaze_dx
         right_eye_cx = center_x + (self.eye_spacing / 2.0) + gaze_dx
         eye_cy = center_y + suspension_bounce + gaze_dy
 
-        # Dynamic blink, speech cadence, and breathing scaling
-        if self.is_blinking:
-            blink_factor = math.sin(self.blink_progress * math.pi)
-            h_scale = max(0.06, 1.0 - blink_factor * 0.94)
+        non_blinking_states = {
+            ExpressionState.HAPPY, ExpressionState.LAUGHING, ExpressionState.WINK,
+            ExpressionState.CONFUSED, ExpressionState.ERROR, ExpressionState.VILLAIN,
+            ExpressionState.SLEEPY, ExpressionState.LOVE, ExpressionState.EXCITED,
+            ExpressionState.COOL,
+        }
+        if self.is_blinking and cur_state not in non_blinking_states:
+            bp = self.blink_progress
+            if bp < 0.32:
+                blink_factor = ease_out_cubic(bp / 0.32)
+            elif bp < 0.44:
+                blink_factor = 1.0
+            else:
+                blink_factor = 1.0 - ease_out_cubic((bp - 0.44) / 0.56)
+            h_scale = max(0.08, 1.0 - blink_factor * 0.92)
             w_scale = 1.0 + blink_factor * 0.08
         elif cur_state == ExpressionState.SPEAKING:
-            spk_factor = math.sin(self.anim_phase * 8.0) * 0.12 * self.speaking_intensity
+            spk_factor = math.sin(self.anim_phase * 8.0) * 0.06 * self.speaking_intensity
             h_scale = 1.0 + spk_factor
-            w_scale = 1.0 - spk_factor * 0.4
+            w_scale = 1.0 - spk_factor * 0.25
         else:
-            breathe = math.sin(self.anim_phase * 1.8) * 0.02
+            breathe = math.sin(self.anim_phase * 1.8) * 0.022
             h_scale = 1.0 + breathe
-            w_scale = 1.0
+            w_scale = 1.0 - breathe * 0.3
 
-        # 3. Dynamic Eyebrows
-        self._draw_eyebrows(left_eye_cx, right_eye_cx, eye_cy - self.eye_h * 0.55, cur_state, main_color)
+        if trans_p < 1.0:
+            sp = ease_out_back(trans_p, overshoot=1.45)
+            h_scale *= (0.86 + 0.14 * sp)
+            w_scale *= (1.10 - 0.10 * sp)
 
-        # 4. Eyes Rendering (Solid Glowing OLED Robotic Capsules - Vector / EMO Style)
+        ew = self.eye_w * w_scale
+        eh = self.eye_h * h_scale
+
+        # 3. Eyes Rendering FIRST
         if cur_state == ExpressionState.VILLAIN:
-            self._draw_villain_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
+            self._draw_villain_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, eh, main_color, glow_color, look_x, look_y)
         elif cur_state == ExpressionState.HAPPY:
-            self._draw_happy_eyes(left_eye_cx, right_eye_cx, eye_cy, main_color, glow_color)
+            self._draw_happy_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h, main_color, glow_color)
+        elif cur_state == ExpressionState.MOVING:
+            self._draw_moving_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
         elif cur_state == ExpressionState.SAD:
-            self._draw_sad_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color)
+            self._draw_sad_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color)
         elif cur_state == ExpressionState.CONFUSED:
             self._draw_confused_eyes(left_eye_cx, right_eye_cx, eye_cy, main_color, glow_color)
         elif cur_state == ExpressionState.THINKING:
-            self._draw_thinking_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color)
+            self._draw_thinking_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color)
         elif cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
-            self._draw_watching_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
+            self._draw_watching_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
         elif cur_state == ExpressionState.ERROR:
-            self._draw_error_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h * h_scale, main_color, glow_color)
+            self._draw_error_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h, main_color, glow_color)
+        elif cur_state == ExpressionState.EXCITED:
+            self._draw_excited_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.LAUGHING:
+            self._draw_laughing_eyes(left_eye_cx, right_eye_cx, eye_cy, self.eye_w, self.eye_h, main_color, glow_color)
+        elif cur_state == ExpressionState.LOVE:
+            self._draw_love_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.WINK:
+            self._draw_wink_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.SURPRISED:
+            self._draw_surprised_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.SLEEPY:
+            self._draw_sleepy_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color)
+        elif cur_state == ExpressionState.SHY:
+            self._draw_shy_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color)
+        elif cur_state == ExpressionState.PROUD:
+            self._draw_proud_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.CURIOUS:
+            self._draw_curious_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.SKEPTICAL:
+            self._draw_skeptical_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color)
+        elif cur_state == ExpressionState.COOL:
+            self._draw_cool_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.LISTENING:
+            self._draw_listening_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
+        elif cur_state == ExpressionState.SPEAKING:
+            self._draw_speaking_eyes(left_eye_cx, right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y)
         else:
-            self._draw_standard_eye(left_eye_cx, eye_cy, self.eye_w * w_scale, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
-            self._draw_standard_eye(right_eye_cx, eye_cy, self.eye_w * w_scale, self.eye_h * h_scale, main_color, glow_color, look_x, look_y)
+            self._draw_standard_eye(left_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y, state=cur_state)
+            self._draw_standard_eye(right_eye_cx, eye_cy, ew, eh, main_color, glow_color, look_x, look_y, state=cur_state)
+
+        # 4. Dynamic Cybernetic Eyebrows
+        self._draw_eyebrows(left_eye_cx, right_eye_cx, eye_cy - self.eye_h * 0.56, cur_state, main_color)
 
         # 5. Reactive Mouth / Center State Animations
         if cur_state == ExpressionState.VILLAIN:
             self._draw_villain_mouth(center_x, mouth_cy, main_color)
         elif cur_state == ExpressionState.MOVING:
-            self._draw_robot_moving_forward(center_x, mouth_cy, main_color)
+            self._draw_moving_mouth(center_x, mouth_cy, main_color)
         elif cur_state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
             self._draw_watching_speech_hud(center_x, mouth_cy, main_color)
         elif cur_state == ExpressionState.SPEAKING:
@@ -1135,850 +2011,2063 @@ class FaceUI:
             self._draw_confused_mouth(center_x, mouth_cy, main_color)
         elif cur_state == ExpressionState.ERROR:
             self._draw_error_mouth(center_x, mouth_cy, main_color)
-        elif cur_state == ExpressionState.IDLE:
+        elif cur_state == ExpressionState.EXCITED:
+            self._draw_excited_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.LAUGHING:
+            self._draw_laughing_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.LOVE:
+            self._draw_love_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.WINK:
+            self._draw_wink_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.SURPRISED:
+            self._draw_surprised_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.SLEEPY:
+            self._draw_sleepy_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.SHY:
+            self._draw_shy_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.PROUD:
+            self._draw_proud_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.CURIOUS:
+            self._draw_curious_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.SKEPTICAL:
+            self._draw_skeptical_mouth(center_x, mouth_cy, main_color)
+        elif cur_state == ExpressionState.COOL:
+            self._draw_cool_mouth(center_x, mouth_cy, main_color)
+        else:
             self._draw_idle_mouth(center_x, mouth_cy, main_color)
 
-        # 8. Ghostly CRT Glitch & Static Overlay (when glitch active)
+        # 6. Full-Screen VILLAIN System Invasion Overlay & Intense Entry/Exit Flicker
+        if cur_state == ExpressionState.VILLAIN:
+            self._draw_villain_hacked_crt_overlay(w, h, center_x, eye_cy, btn_y, sub_speaker, sub_text)
         if self.glitch_active:
             self._draw_glitch_overlay(w, h)
-        elif cur_state == ExpressionState.VILLAIN:
-            # 8b. Subtle 6Hz static pulse during villain speech delivery
-            pulse_6hz = math.sin(now * 12.0 * math.pi)
-            if pulse_6hz > 0.35:
-                for sy in range(0, int(h), 12):
-                    self.canvas.create_line(0, sy, w, sy, fill="#052413", width=1)
-                if random.random() < 0.2:
-                    gy = random.uniform(h * 0.15, h * 0.65)
-                    self.canvas.create_line(center_x - 140, gy, center_x + 140, gy, fill="#39ff14", width=1)
 
-        # Tag all newly rendered face items as dynamic so they clear on the next frame
         all_items = self.canvas.find_all()
         for item in all_items[items_before_dynamic:]:
             self.canvas.addtag_withtag("dynamic", item)
+        if hasattr(self.canvas, "set_rough_mode"):
+            self.canvas.set_rough_mode(False)
+        if hasattr(self.canvas, "flush"):
+            self.canvas.flush()
 
-    # draws cybernetic eyebrows that tilt up or down depending on emotional mood
-    def _draw_eyebrows(self, lx, rx, base_y, state, color):
-        """Draws dynamic cybernetic eyebrows that angle and shift based on expression."""
-        brow_len = self.eye_w * 0.82
-        bob = math.sin(self.anim_phase * 2.0) * 2.0
+    # =========================================================================
+    # CYBERNETIC EYEBROWS (ALL 22 STATES)
+    # =========================================================================
+    def _draw_eyebrows(self, lx: float, rx: float, base_y: float, state: str, color: str):
+        """Draws expressive cybernetic eyebrows with dual-layer neon bloom."""
+        if state in [ExpressionState.VILLAIN]:
+            return
+
+        scale = self.ui_scale / 1.8
+        brow_len = self.eye_w * 0.84
+        bob = math.sin(self.anim_phase * 2.0) * (2.2 * scale)
+
+        pts_l = None
+        pts_r = None
 
         if state == ExpressionState.SAD:
-            # Heartbroken sad brows: inner ends rise high in distress, outer ends droop down in sorrow
-            tremor = math.sin(self.anim_phase * 8.0) * 1.2
-            ly1, ly2 = base_y + 10 + tremor, base_y - 18 + tremor
-            ry1, ry2 = base_y - 18 + tremor, base_y + 10 + tremor
+            tremor = math.sin(self.anim_phase * 8.0) * (1.8 * scale)
+            pts_l = [
+                lx - brow_len * 0.5, base_y + 14 * scale + tremor,
+                lx - brow_len * 0.1, base_y - 10 * scale + tremor,
+                lx + brow_len * 0.5, base_y - 24 * scale + tremor,
+            ]
+            pts_r = [
+                rx - brow_len * 0.5, base_y - 24 * scale + tremor,
+                rx + brow_len * 0.1, base_y - 10 * scale + tremor,
+                rx + brow_len * 0.5, base_y + 14 * scale + tremor,
+            ]
         elif state == ExpressionState.HAPPY:
-            # Lifted high, joyous upward arches
-            ly1, ly2 = base_y - 22 + bob, base_y - 16 + bob
-            ry1, ry2 = base_y - 16 + bob, base_y - 22 + bob
+            bounce = math.sin(self.anim_phase * 6.0) * (3.5 * scale)
+            y_ends = base_y - 10 * scale + bounce
+            y_peak = base_y - 24 * scale + bounce
+            pts_l = [lx - brow_len * 0.48, y_ends, lx, y_peak, lx + brow_len * 0.48, y_ends]
+            pts_r = [rx - brow_len * 0.48, y_ends, rx, y_peak, rx + brow_len * 0.48, y_ends]
+        elif state == ExpressionState.LOVE:
+            bounce = math.sin(self.anim_phase * 6.0) * (2.5 * scale)
+            y_ends = base_y - 16 * scale + bounce
+            y_peak = base_y - 32 * scale + bounce
+            pts_l = [lx - brow_len * 0.45, y_ends, lx, y_peak, lx + brow_len * 0.45, y_ends]
+            pts_r = [rx - brow_len * 0.45, y_ends, rx, y_peak, rx + brow_len * 0.45, y_ends]
+        elif state == ExpressionState.EXCITED:
+            bounce = math.sin(self.anim_phase * 8.0) * (3.5 * scale)
+            pts_l = [lx - brow_len * 0.48, base_y - 10 * scale + bounce, lx, base_y - 28 * scale + bounce, lx + brow_len * 0.48, base_y - 12 * scale + bounce]
+            pts_r = [rx - brow_len * 0.48, base_y - 12 * scale + bounce, rx, base_y - 28 * scale + bounce, rx + brow_len * 0.48, base_y - 10 * scale + bounce]
+        elif state == ExpressionState.LAUGHING:
+            shake = abs(math.sin(self.anim_phase * 12.0)) * (-4.5 * scale)
+            pts_l = [lx - brow_len * 0.46, base_y + 12 * scale + shake, lx, base_y - 4 * scale + shake, lx + brow_len * 0.46, base_y + 10 * scale + shake]
+            pts_r = [rx - brow_len * 0.46, base_y + 10 * scale + shake, rx, base_y - 4 * scale + shake, rx + brow_len * 0.46, base_y + 12 * scale + shake]
+        elif state == ExpressionState.WINK:
+            pts_l = [lx - brow_len * 0.48, base_y - 12 * scale, lx, base_y - 26 * scale, lx + brow_len * 0.48, base_y - 12 * scale]
+            pts_r = [rx - brow_len * 0.46, base_y + 12 * scale, rx, base_y - 2 * scale, rx + brow_len * 0.46, base_y + 14 * scale]
+        elif state == ExpressionState.SURPRISED:
+            pts_l = [lx - brow_len * 0.46, base_y - 16 * scale, lx, base_y - 34 * scale, lx + brow_len * 0.46, base_y - 16 * scale]
+            pts_r = [rx - brow_len * 0.46, base_y - 16 * scale, rx, base_y - 34 * scale, rx + brow_len * 0.46, base_y - 16 * scale]
+        elif state == ExpressionState.SLEEPY:
+            drift = math.sin(self.anim_phase * 1.1) * (2.0 * scale)
+            pts_l = [lx - brow_len * 0.44, base_y + 4 * scale + drift, lx, base_y + 8 * scale + drift, lx + brow_len * 0.44, base_y + 2 * scale + drift]
+            pts_r = [rx - brow_len * 0.44, base_y + 2 * scale + drift, rx, base_y + 8 * scale + drift, rx + brow_len * 0.44, base_y + 4 * scale + drift]
+        elif state == ExpressionState.SHY:
+            pts_l = [lx - brow_len * 0.48, base_y + 14 * scale + bob, lx, base_y - 2 * scale + bob, lx + brow_len * 0.48, base_y - 18 * scale + bob]
+            pts_r = [rx - brow_len * 0.48, base_y - 18 * scale + bob, rx, base_y - 2 * scale + bob, rx + brow_len * 0.48, base_y + 14 * scale + bob]
+        elif state == ExpressionState.PROUD:
+            pts_l = [lx - brow_len * 0.48, base_y - 4 * scale, lx, base_y - 12 * scale, lx + brow_len * 0.48, base_y + 2 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y - 10 * scale, rx, base_y - 30 * scale, rx + brow_len * 0.48, base_y - 14 * scale]
+        elif state == ExpressionState.CURIOUS:
+            pts_l = [lx - brow_len * 0.46, base_y - 10 * scale, lx, base_y - 24 * scale, lx + brow_len * 0.46, base_y - 10 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y - 18 * scale, rx, base_y - 36 * scale, rx + brow_len * 0.48, base_y - 16 * scale]
+        elif state == ExpressionState.SKEPTICAL:
+            pts_l = [lx - brow_len * 0.48, base_y + 14 * scale, lx + brow_len * 0.48, base_y + 14 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y - 16 * scale, rx, base_y - 34 * scale, rx + brow_len * 0.48, base_y - 14 * scale]
+        elif state == ExpressionState.COOL:
+            pts_l = [lx - brow_len * 0.48, base_y - 12 * scale, lx + brow_len * 0.48, base_y - 10 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y - 12 * scale, rx, base_y - 26 * scale, rx + brow_len * 0.48, base_y - 14 * scale]
         elif state == ExpressionState.MOVING:
-            # Aerodynamic sports slant
-            ly1, ly2 = base_y - 10, base_y - 4
-            ry1, ry2 = base_y - 4, base_y - 10
+            wind_bob = math.sin(self.anim_phase * 10.0) * (1.8 * scale)
+            pts_l = [lx - brow_len * 0.50, base_y - 8 * scale + wind_bob, lx, base_y - 24 * scale + wind_bob, lx + brow_len * 0.46, base_y - 14 * scale + wind_bob]
+            pts_r = [rx - brow_len * 0.46, base_y - 14 * scale + wind_bob, rx, base_y - 24 * scale + wind_bob, rx + brow_len * 0.50, base_y - 8 * scale + wind_bob]
         elif state in [ExpressionState.WATCHING, ExpressionState.LOOKING]:
-            # Inquisitive optical observation
-            ly1, ly2 = base_y - 14, base_y - 12
-            ry1, ry2 = base_y - 12, base_y - 14
+            pts_l = [lx - brow_len * 0.5, base_y - 26 * scale, lx + brow_len * 0.5, base_y - 26 * scale]
+            pts_r = [rx - brow_len * 0.5, base_y - 26 * scale, rx + brow_len * 0.5, base_y - 26 * scale]
         elif state == ExpressionState.LISTENING:
-            # Raised, alert listening arches
-            ly1, ly2 = base_y - 16, base_y - 14
-            ry1, ry2 = base_y - 14, base_y - 16
+            pts_l = [lx - brow_len * 0.5, base_y - 16 * scale, lx, base_y - 26 * scale, lx + brow_len * 0.5, base_y - 18 * scale]
+            pts_r = [rx - brow_len * 0.5, base_y - 18 * scale, rx, base_y - 26 * scale, rx + brow_len * 0.5, base_y - 16 * scale]
         elif state == ExpressionState.THINKING:
-            # Asymmetrical pensive concentration: left furrowed low, right arched high
-            ly1, ly2 = base_y + 2, base_y - 8
-            ry1, ry2 = base_y - 24, base_y - 14
+            pts_l = [lx - brow_len * 0.48, base_y + 2 * scale, lx + brow_len * 0.48, base_y - 8 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y - 22 * scale, rx, base_y - 32 * scale, rx + brow_len * 0.48, base_y - 16 * scale]
         elif state == ExpressionState.CONFUSED:
-            # Asymmetrical: left raised high in bewilderment, right scrunched low
-            ly1, ly2 = base_y - 24, base_y - 16
-            ry1, ry2 = base_y + 8, base_y - 2
+            pts_l = [
+                lx - brow_len * 0.48, base_y + 4 * scale,
+                lx - brow_len * 0.16, base_y - 10 * scale,
+                lx + brow_len * 0.16, base_y + 8 * scale,
+                lx + brow_len * 0.48, base_y - 4 * scale,
+            ]
+            pts_r = [rx - brow_len * 0.50, base_y - 18 * scale, rx, base_y - 34 * scale, rx + brow_len * 0.50, base_y - 16 * scale]
         elif state == ExpressionState.ERROR:
-            # Fierce angry alarm slant
-            ly1, ly2 = base_y + 10, base_y - 18
-            ry1, ry2 = base_y - 18, base_y + 10
+            pts_l = [lx - brow_len * 0.48, base_y - 18 * scale, lx + brow_len * 0.48, base_y + 6 * scale]
+            pts_r = [rx - brow_len * 0.48, base_y + 6 * scale, rx + brow_len * 0.48, base_y - 18 * scale]
         elif state == ExpressionState.SPEAKING:
-            # Animated conversational brows bobbing with cadence
-            spk_bob = math.sin(self.anim_phase * 6.0) * 2.5
-            ly1, ly2 = base_y - 10 + spk_bob, base_y - 10 + spk_bob
-            ry1, ry2 = base_y - 10 + spk_bob, base_y - 10 + spk_bob
-        elif state == ExpressionState.VILLAIN:
-            # Hooded straight upper eyelids are integrated directly into the smug eye geometry
-            return
+            spk_bob = math.sin(self.anim_phase * 6.0) * (3.2 * scale) * self.speaking_intensity
+            pts_l = [lx - brow_len * 0.48, base_y - 12 * scale + spk_bob, lx, base_y - 18 * scale + spk_bob, lx + brow_len * 0.48, base_y - 12 * scale + spk_bob]
+            pts_r = [rx - brow_len * 0.48, base_y - 12 * scale + spk_bob, rx, base_y - 18 * scale + spk_bob, rx + brow_len * 0.48, base_y - 12 * scale + spk_bob]
         else:
-            # Calm friendly idle brows
-            ly1, ly2 = base_y - 6 + bob, base_y - 6 + bob
-            ry1, ry2 = base_y - 6 + bob, base_y - 6 + bob
+            pts_l = [lx - brow_len * 0.48, base_y - 12 * scale + bob, lx, base_y - 18 * scale + bob, lx + brow_len * 0.48, base_y - 12 * scale + bob]
+            pts_r = [rx - brow_len * 0.48, base_y - 12 * scale + bob, rx, base_y - 18 * scale + bob, rx + brow_len * 0.48, base_y - 12 * scale + bob]
 
-        # Left brow
-        self.canvas.create_line(
-            lx - brow_len / 2.0, ly1,
-            lx + brow_len / 2.0, ly2,
-            fill=color, width=6, capstyle=tk.ROUND
-        )
-        # Right brow
-        self.canvas.create_line(
-            rx - brow_len / 2.0, ry1,
-            rx + brow_len / 2.0, ry2,
-            fill=color, width=6, capstyle=tk.ROUND
-        )
+        glow_col = lerp_color(self.bg_color, color, 0.35)
+        core_col = lerp_color(color, "#ffffff", 0.42)
 
-    # draws a solid rounded oled eye capsule with bevel depth and glossy specular glints
-    def _draw_standard_eye(self, cx, cy, ew, eh, main_col, glow_col, lx=0.0, ly=0.0):
-        """Draws a solid, vibrant OLED eye capsule with high-contrast cyber bloom and glossy reflections."""
-        x1, y1 = cx - ew / 2.0, cy - eh / 2.0
-        x2, y2 = cx + ew / 2.0, cy + eh / 2.0
+        if pts_l is not None:
+            self.canvas.create_line(pts_l, smooth=True, fill=glow_col, width=int(13 * scale), capstyle=tk.ROUND, tags="eyebrow")
+            self.canvas.create_line(pts_l, smooth=True, fill=color, width=int(6.2 * scale), capstyle=tk.ROUND, tags="eyebrow")
+            self.canvas.create_line(pts_l, smooth=True, fill=core_col, width=max(1, int(1.8 * scale)), capstyle=tk.ROUND, tags="eyebrow")
+        if pts_r is not None:
+            self.canvas.create_line(pts_r, smooth=True, fill=glow_col, width=int(13 * scale), capstyle=tk.ROUND, tags="eyebrow")
+            self.canvas.create_line(pts_r, smooth=True, fill=color, width=int(6.2 * scale), capstyle=tk.ROUND, tags="eyebrow")
+            self.canvas.create_line(pts_r, smooth=True, fill=core_col, width=max(1, int(1.8 * scale)), capstyle=tk.ROUND, tags="eyebrow")
 
-        # 1. Outer Soft Bloom / Glow Shell
-        glow_expand = 8
-        self._create_rounded_rect(
-            x1 - glow_expand, y1 - glow_expand,
-            x2 + glow_expand, y2 + glow_expand,
-            self.corner_radius + 4, fill=glow_col, outline=""
-        )
+    # =========================================================================
+    # SLEEK BORDERED OPTICAL LENS ENGINE (EXACT TRIGONOMETRIC CONTOURS!)
+    # =========================================================================
+    def _draw_standard_eye(
+        self,
+        cx: float,
+        cy: float,
+        ew: float,
+        eh: float,
+        main_col: str,
+        glow_col: str,
+        lx: float = 0.0,
+        ly: float = 0.0,
+        state: Optional[str] = None,
+        corner_r: Optional[int] = None,
+        smile_bottom: bool = False,
+        draw_iris: bool = True,
+        draw_catchlights: bool = True,
+        catchlight_dy: float = 0.0,
+    ):
+        """
+        Draws the signature Neurolis Mark II Bordered Optical Lens Eye using exact
+        trigonometric contours (`_build_eye_contour`).
+        """
+        scale = self.ui_scale / 1.8
+        rad = float(corner_r) if corner_r is not None else min(float(self.corner_radius), ew * 0.44, eh * 0.44)
 
-        # 2. Main Solid Luminous OLED Eye Capsule
-        self._create_rounded_rect(
-            x1, y1, x2, y2,
-            self.corner_radius, fill=main_col, outline=""
-        )
+        glow_w = 10.0 * scale
+        pts_glow_wide = self._build_eye_contour(cx, cy, ew + glow_w * 2, eh + glow_w * 2, rad + glow_w, smile_bottom=smile_bottom)
+        self.canvas.create_polygon(pts_glow_wide, smooth=False, fill=lerp_color(self.bg_color, main_col, 0.16), outline="")
 
-        # 3. High-Tech Beveled Inner Border (giving rich OLED depth)
-        inset = 3
-        if eh > 20:
-            self._create_rounded_rect(
-                x1 + inset, y1 + inset,
-                x2 - inset, y2 - inset,
-                max(4, self.corner_radius - 2), fill="", outline="#ffffff", width=1
-            )
+        glow_m = 4.5 * scale
+        pts_glow_mid = self._build_eye_contour(cx, cy, ew + glow_m * 2, eh + glow_m * 2, rad + glow_m, smile_bottom=smile_bottom)
+        self.canvas.create_polygon(pts_glow_mid, smooth=False, fill=lerp_color(self.bg_color, main_col, 0.38), outline="")
 
-        # 4. Glossy Specular Glints (Top-Left Pixar / OLED robot shine)
-        if eh > self.eye_h * 0.35:
-            # Primary glossy pill reflection
-            glint1_w = ew * 0.28
-            glint1_h = eh * 0.16
-            gx1 = cx - ew * 0.38 + (lx * 8.0)
-            gy1 = cy - eh * 0.38 + (ly * 8.0)
-            self._create_rounded_rect(
-                gx1, gy1, gx1 + glint1_w, gy1 + glint1_h,
-                radius=max(2, int(glint1_h * 0.5)), fill="#ffffff", outline=""
-            )
+        pts_outer = self._build_eye_contour(cx, cy, ew, eh, rad, smile_bottom=smile_bottom)
+        self.canvas.create_polygon(pts_outer, smooth=False, fill=main_col, outline="")
 
-            # Secondary micro glint
-            glint2_w = ew * 0.12
-            glint2_h = eh * 0.10
-            gx2 = gx1 + glint1_w + 6.0
-            gy2 = gy1 + 2.0
-            self._create_rounded_rect(
-                gx2, gy2, gx2 + glint2_w, gy2 + glint2_h,
-                radius=max(2, int(glint2_h * 0.5)), fill="#ffffff", outline=""
-            )
+        border_t = max(5.5 * scale, min(ew, eh) * 0.080)
+        iw = ew - border_t * 2.0
+        ih = eh - border_t * 2.0
+        irad = max(6.0, rad - border_t * 0.90)
 
-    # joyful smiling crescent arcs with cheerful vertical bounce for happy face
-    def _draw_happy_eyes(self, lx, rx, cy, main_col, glow_col):
-        """Radiant smiling crescent eyes with joyous bounce (Vector / EMO style)."""
-        arc_w, arc_h = self.eye_w * 0.96, self.eye_h * 0.72
-        bounce = math.sin(self.anim_phase * 5.0) * 4.0
+        if ih > 8.0 and iw > 8.0:
+            chamber_col = lerp_color("#040914", main_col, 0.08)
+            inner_bevel_col = lerp_color(chamber_col, main_col, 0.36)
+            pts_inner = self._build_eye_contour(cx, cy, iw, ih, irad, smile_bottom=smile_bottom)
+            self.canvas.create_polygon(pts_inner, smooth=False, fill=chamber_col, outline=inner_bevel_col, width=max(1, int(2.0 * scale)))
 
-        for cx in [lx, rx]:
-            # Outer Neon Glow Arc (Note: style=tk.ARC takes no capstyle in Tkinter)
-            self.canvas.create_arc(
-                cx - arc_w / 2 - 8, cy - arc_h / 2 - 8 + bounce,
-                cx + arc_w / 2 + 8, cy + arc_h / 2 + 8 + bounce,
-                start=25, extent=130, style=tk.ARC, width=32, outline=glow_col
-            )
-            # Main Bold Neon Crescent Arc
-            self.canvas.create_arc(
-                cx - arc_w / 2, cy - arc_h / 2 + bounce,
-                cx + arc_w / 2, cy + arc_h / 2 + bounce,
-                start=25, extent=130, style=tk.ARC, width=20, outline=main_col
-            )
-            # Inner Luminous Highlight Arc
-            self.canvas.create_arc(
-                cx - arc_w / 2 + 3, cy - arc_h / 2 + 3 + bounce,
-                cx + arc_w / 2 - 3, cy + arc_h / 2 - 3 + bounce,
-                start=35, extent=110, style=tk.ARC, width=5, outline="#ffffff"
-            )
+        if draw_iris and eh > self.eye_h * 0.36:
+            icx = cx + (lx * 13.5 * scale)
+            icy = cy + (ly * 10.0 * scale) - (8.0 * scale if smile_bottom else 0.0)
+            r_iris = min(iw, ih) * (0.31 if smile_bottom else 0.35)
 
-    # downcast eyes with drooping upper lids and an animated falling digital teardrop
-    def _draw_sad_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col):
-        """Downcast heartbroken sad eyes with drooping outer eyelids and falling digital teardrop."""
-        # Draw base glowing eyes
-        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, 0.0, 0.0)
-        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, 0.0, 0.0)
-
-        # Upper drooping sad eyelids (slanted down on the outside \   / )
-        lid_drop = 38
-        # Left eye drooping lid: high inside, drooping low outside
-        left_lid = [
-            lx - ew / 2.0 - 6, cy - eh / 2.0 - 6,
-            lx + ew / 2.0 + 6, cy - eh / 2.0 - 6,
-            lx + ew / 2.0 + 6, cy - eh / 2.0 + lid_drop - 16,
-            lx - ew / 2.0 - 6, cy - eh / 2.0 + lid_drop + 18,
-        ]
-        self.canvas.create_polygon(left_lid, fill=self.bg_color, outline="")
-        self.canvas.create_line(
-            lx - ew / 2.0 - 4, cy - eh / 2.0 + lid_drop + 18,
-            lx + ew / 2.0 + 4, cy - eh / 2.0 + lid_drop - 16,
-            fill=main_col, width=4, capstyle=tk.ROUND
-        )
-
-        # Right eye drooping lid: high inside, drooping low outside
-        right_lid = [
-            rx - ew / 2.0 - 6, cy - eh / 2.0 - 6,
-            rx + ew / 2.0 + 6, cy - eh / 2.0 - 6,
-            rx + ew / 2.0 + 6, cy - eh / 2.0 + lid_drop + 18,
-            rx - ew / 2.0 - 6, cy - eh / 2.0 + lid_drop - 16,
-        ]
-        self.canvas.create_polygon(right_lid, fill=self.bg_color, outline="")
-        self.canvas.create_line(
-            rx - ew / 2.0 - 4, cy - eh / 2.0 + lid_drop - 16,
-            rx + ew / 2.0 + 4, cy - eh / 2.0 + lid_drop + 18,
-            fill=main_col, width=4, capstyle=tk.ROUND
-        )
-
-        # Animated Digital Teardrop welling up and trickling from left eye
-        tear_t = (self.anim_phase * 1.4) % 3.2
-        if tear_t < 2.2:
-            frac = tear_t / 2.2
-            tear_x = lx - ew * 0.32
-            tear_y = cy + eh * 0.36 + frac * 56
-            tear_r = max(2, int(6 * (1.0 - frac * 0.35)))
-            # Teardrop core
+            iris_fill = lerp_color("#050c1a", main_col, 0.25)
+            iris_ring_col = lerp_color(main_col, "#ffffff", 0.32)
             self.canvas.create_oval(
-                tear_x - tear_r, tear_y - tear_r,
-                tear_x + tear_r, tear_y + tear_r,
-                fill="#80d4ff", outline="#ffffff", width=1
-            )
-            # Teardrop glowing stream
-            if frac > 0.12:
-                trail_len = min(16.0, frac * 20.0)
-                self.canvas.create_line(
-                    tear_x, tear_y - trail_len,
-                    tear_x, tear_y - tear_r,
-                    fill="#2979ff", width=2, capstyle=tk.ROUND
-                )
-
-    # dual hypnotic spinning vortex spirals with orbiting golden dizzy stars
-    def _draw_confused_eyes(self, lx, rx, cy, main_col, glow_col):
-        """Dual hypnotic Archimedean cyber vortex spirals with orbiting golden stars (✦)."""
-        rot = self.anim_phase * 4.2
-        max_r = min(self.eye_w, self.eye_h) * 0.44
-        num_pts = 64
-        max_theta = 4.5 * math.pi  # 2.25 turns
-
-        # Left eye: Clockwise spiral
-        pts_left = []
-        for i in range(num_pts):
-            frac = i / (num_pts - 1)
-            theta = frac * max_theta
-            r = frac * max_r
-            angle = theta + rot
-            x = lx + r * math.cos(angle)
-            y = cy + r * math.sin(angle)
-            pts_left.extend([x, y])
-
-        # Right eye: Counter-clockwise spiral
-        pts_right = []
-        for i in range(num_pts):
-            frac = i / (num_pts - 1)
-            theta = frac * max_theta
-            r = frac * max_r
-            angle = -theta - rot
-            x = rx + r * math.cos(angle)
-            y = cy + r * math.sin(angle)
-            pts_right.extend([x, y])
-
-        # Draw glow spirals
-        self.canvas.create_line(pts_left, smooth=True, fill=glow_col, width=12, capstyle=tk.ROUND)
-        self.canvas.create_line(pts_right, smooth=True, fill=glow_col, width=12, capstyle=tk.ROUND)
-
-        # Draw main sharp spirals
-        self.canvas.create_line(pts_left, smooth=True, fill=main_col, width=5, capstyle=tk.ROUND)
-        self.canvas.create_line(pts_right, smooth=True, fill=main_col, width=5, capstyle=tk.ROUND)
-
-        # Inner glowing spiral core
-        for cx in [lx, rx]:
-            self.canvas.create_oval(cx - 4, cy - 4, cx + 4, cy + 4, fill="#ffffff", outline="")
-
-        # 3 Orbiting Dizzy Cyber Stars (✦) above head
-        halo_cx = (lx + rx) / 2.0
-        halo_cy = cy - self.eye_h * 0.68
-        star_orbit_rx = self.eye_spacing * 0.45
-        star_orbit_ry = 14.0
-
-        for s in range(3):
-            s_angle = rot * 0.85 + s * (2.0 * math.pi / 3.0)
-            sx = halo_cx + math.cos(s_angle) * star_orbit_rx
-            sy = halo_cy + math.sin(s_angle) * star_orbit_ry
-            sr = 7.0 + math.sin(self.anim_phase * 6.0 + s) * 1.5
-
-            # 4-point diamond star polygon
-            star_poly = [
-                sx, sy - sr,
-                sx + sr * 0.32, sy - sr * 0.32,
-                sx + sr, sy,
-                sx + sr * 0.32, sy + sr * 0.32,
-                sx, sy + sr,
-                sx - sr * 0.32, sy + sr * 0.32,
-                sx - sr, sy,
-                sx - sr * 0.32, sy - sr * 0.32,
-            ]
-            self.canvas.create_polygon(star_poly, fill="#ffe57f", outline="")
-            self.canvas.create_oval(sx - 2, sy - 2, sx + 2, sy + 2, fill="#ffffff", outline="")
-
-    # analytical squint glance with rotating quantum data rings inside each eye
-    def _draw_thinking_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col):
-        """Pensive analytical eyes glancing up-right with rotating quantum data rings."""
-        squint_h = eh * 0.74
-        offset_x = 8.0
-        offset_y = -10.0
-        self._draw_standard_eye(lx + offset_x, cy + offset_y, ew, squint_h, main_col, glow_col, 0.0, 0.0)
-        self._draw_standard_eye(rx + offset_x, cy + offset_y, ew, squint_h, main_col, glow_col, 0.0, 0.0)
-
-        # Inside each eye: segmented rotating quantum ring
-        ring_r = min(ew, squint_h) * 0.28
-        for eye_cx in [lx + offset_x, rx + offset_x]:
-            for seg in range(3):
-                seg_angle = (self.thinking_angle * 1.5 + seg * 120.0) % 360.0
-                self.canvas.create_arc(
-                    eye_cx - ring_r, cy + offset_y - ring_r,
-                    eye_cx + ring_r, cy + offset_y + ring_r,
-                    start=seg_angle, extent=70, style=tk.ARC, width=3, outline="#ffffff"
-                )
-
-        # Concentric orbital data nodes above the right forehead
-        halo_cx = rx + 36
-        halo_cy = cy - eh * 0.65
-        for i in range(3):
-            angle = self.thinking_angle * (1.1 + i * 0.4) + (i * (2.0 * math.pi / 3.0))
-            orbit_rx = 34.0 + i * 8.0
-            orbit_ry = 12.0 + i * 3.0
-            px = halo_cx + math.cos(angle) * orbit_rx
-            py = halo_cy + math.sin(angle) * orbit_ry
-            dot_r = 3 + i
-            self.canvas.create_oval(px - dot_r, py - dot_r, px + dot_r, py + dot_r, fill=main_col, outline="")
-
-    # fierce angled crimson alarm slits with emergency warning pulse
-    def _draw_error_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col):
-        """Fierce angled warning eyes with red alarm pulse."""
-        alarm_pulse = 0.6 + 0.4 * math.sin(self.anim_phase * 8.0)
-        cur_red = "#ff2244" if alarm_pulse > 0.5 else "#cc1133"
-
-        self._draw_standard_eye(lx, cy, ew, eh, cur_red, glow_col, 0.0, 0.0)
-        self._draw_standard_eye(rx, cy, ew, eh, cur_red, glow_col, 0.0, 0.0)
-
-        # Angled warning eyelids cutting inward
-        lid_h = 34
-        # Left eye lid
-        self.canvas.create_polygon([
-            lx - ew / 2.0 - 6, cy - eh / 2.0 - 6,
-            lx + ew / 2.0 + 6, cy - eh / 2.0 - 6,
-            lx + ew / 2.0 + 6, cy - eh / 2.0 + lid_h + 14,
-            lx - ew / 2.0 - 6, cy - eh / 2.0 + lid_h - 14,
-        ], fill=self.bg_color, outline="")
-        self.canvas.create_line(
-            lx - ew / 2.0 - 4, cy - eh / 2.0 + lid_h - 14,
-            lx + ew / 2.0 + 4, cy - eh / 2.0 + lid_h + 14,
-            fill=cur_red, width=3, capstyle=tk.ROUND
-        )
-
-        # Right eye lid
-        self.canvas.create_polygon([
-            rx - ew / 2.0 - 6, cy - eh / 2.0 - 6,
-            rx + ew / 2.0 + 6, cy - eh / 2.0 - 6,
-            rx + ew / 2.0 + 6, cy - eh / 2.0 + lid_h - 14,
-            rx - ew / 2.0 - 6, cy - eh / 2.0 + lid_h + 14,
-        ], fill=self.bg_color, outline="")
-        self.canvas.create_line(
-            rx - ew / 2.0 - 4, cy - eh / 2.0 + lid_h + 14,
-            rx + ew / 2.0 + 4, cy - eh / 2.0 + lid_h - 14,
-            fill=cur_red, width=3, capstyle=tk.ROUND
-        )
-
-    # optical camera mode with viewfinder brackets and dark blue contrast scanning line
-    def _draw_watching_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col, lx_coord, ly_coord):
-        """Focused optical eyes with camera viewfinder brackets and active laser scanner line."""
-        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, lx_coord, ly_coord)
-        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, lx_coord, ly_coord)
-
-        bracket_color = "#00ffcc"
-        bracket_len = 18
-        bracket_pad = 8
-        for cx in [lx, rx]:
-            x1 = cx - ew / 2.0 - bracket_pad
-            y1 = cy - eh / 2.0 - bracket_pad
-            x2 = cx + ew / 2.0 + bracket_pad
-            y2 = cy + eh / 2.0 + bracket_pad
-
-            # Viewfinder brackets
-            self.canvas.create_line(x1, y1 + bracket_len, x1, y1, x1 + bracket_len, y1, fill=bracket_color, width=3)
-            self.canvas.create_line(x2 - bracket_len, y1, x2, y1, x2, y1 + bracket_len, fill=bracket_color, width=3)
-            self.canvas.create_line(x1, y2 - bracket_len, x1, y2, x1 + bracket_len, y2, fill=bracket_color, width=3)
-            self.canvas.create_line(x2 - bracket_len, y2, x2, y2, x2, y2 - bracket_len, fill=bracket_color, width=3)
-
-            # Laser scanner sweep line
-            scan_y = cy + math.sin(self.anim_phase * 3.5) * (eh * 0.42)
-            # dark blue contrast laser scanning line that cuts across the bright cyan eye
-            self.canvas.create_line(x1 + 4, scan_y, x2 - 4, scan_y, fill="#002b66", width=3)
-
-    # smug, hooded rogue AI villain eyes matching the sinister curved smirk aesthetic
-    def _draw_villain_eyes(self, lx, rx, cy, ew, eh, main_col, glow_col, lx_coord=0.0, ly_coord=0.0):
-        """Draws smug, hooded, half-closed rogue AI eyes with glowing neon lime contours."""
-        for cx in [lx, rx]:
-            is_left = (cx == lx)
-            w_half = ew * 0.46
-            top_y = cy - eh * 0.10
-            bot_y = cy + eh * 0.28
-
-            # Outer brow wing extension (straight horizontal line extending past outer edge)
-            ext_left = 22 if is_left else 8
-            ext_right = 8 if is_left else 22
-
-            # 1. Subtle outer neon bloom glow
-            glow_pts = [
-                cx - w_half - ext_left, top_y,
-                cx + w_half + ext_right, top_y,
-                cx + w_half + 4, bot_y + 4,
-                cx, bot_y + 8,
-                cx - w_half - 4, bot_y + 4,
-            ]
-            self.canvas.create_polygon(glow_pts, smooth=True, fill=glow_col, outline="")
-
-            # 2. Semi-dark interior socket fill
-            self.canvas.create_polygon(
-                [
-                    cx - w_half, top_y,
-                    cx + w_half, top_y,
-                    cx + w_half * 0.85, bot_y,
-                    cx, bot_y + 2,
-                    cx - w_half * 0.85, bot_y,
-                ],
-                smooth=True, fill="#031b09", outline=""
+                icx - r_iris, icy - r_iris,
+                icx + r_iris, icy + r_iris,
+                fill=iris_fill, outline=iris_ring_col, width=max(1, int(2.4 * scale))
             )
 
-            # 2b. Ocular pupil slit with 6Hz green cyber pulse
-            pulse_6hz = math.sin(time.time() * 12.0 * math.pi)
-            slit_y = cy + eh * 0.08
-            slit_hw = w_half * (0.34 + 0.08 * pulse_6hz)
-            self.canvas.create_line(
-                cx - slit_hw, slit_y,
-                cx + slit_hw, slit_y,
-                fill="#39ff14", width=3, capstyle=tk.ROUND
-            )
-            # Center bright neon green pinpoint
+            tick_sz = 4.5 * scale
+            t_col = lerp_color(main_col, "#ffffff", 0.58)
+            self.canvas.create_line(icx, icy - r_iris, icx, icy - r_iris + tick_sz, fill=t_col, width=max(1, int(1.5 * scale)))
+            self.canvas.create_line(icx, icy + r_iris, icx, icy + r_iris - tick_sz, fill=t_col, width=max(1, int(1.5 * scale)))
+            self.canvas.create_line(icx - r_iris, icy, icx - r_iris + tick_sz, icy, fill=t_col, width=max(1, int(1.5 * scale)))
+            self.canvas.create_line(icx + r_iris, icy, icx + r_iris - tick_sz, icy, fill=t_col, width=max(1, int(1.5 * scale)))
+
+            pupil_pulse = math.sin(self.anim_phase * 3.5) * (1.4 * scale)
+            pupil_r = max(4.0, min(ew, eh) * 0.125 + pupil_pulse)
             self.canvas.create_oval(
-                cx - 3, slit_y - 2, cx + 3, slit_y + 2,
-                fill="#a6ff85", outline=""
-            )
-
-            # 3. Curved lower eye contour (shallow smiling bowl arc)
-            lower_pts = [
-                cx - w_half, top_y,
-                cx - w_half * 0.6, bot_y,
-                cx, bot_y + 3,
-                cx + w_half * 0.6, bot_y,
-                cx + w_half, top_y,
-            ]
-            self.canvas.create_line(lower_pts, smooth=True, fill=main_col, width=5, capstyle=tk.ROUND)
-
-            # 4. Straight horizontal hooded upper eyelid with outer temple brow wing
-            self.canvas.create_line(
-                cx - w_half - ext_left, top_y,
-                cx + w_half + ext_right, top_y,
-                fill=main_col, width=6, capstyle=tk.ROUND
-            )
-
-    # wide glowing neon smile arc for happy expression
-    def _draw_happy_mouth(self, cx, cy, col):
-        """Warm, sleek curved happy smile arc without blush boxes."""
-        scale = self.ui_scale / 1.8
-        bounce = math.sin(self.anim_phase * 5.0) * (3.0 * scale)
-        m_y = cy + bounce
-        arc_w, arc_h = int(84 * self.ui_scale), int(40 * self.ui_scale)
-
-        # Glow arc
-        self.canvas.create_arc(
-            cx - arc_w / 2 - 4 * scale, m_y - arc_h / 2 - 4 * scale,
-            cx + arc_w / 2 + 4 * scale, m_y + arc_h / 2 + 4 * scale,
-            start=205, extent=130, style=tk.ARC, width=int(12 * scale), outline="#00442a"
-        )
-        # Main neon smile arc
-        self.canvas.create_arc(
-            cx - arc_w / 2, m_y - arc_h / 2,
-            cx + arc_w / 2, m_y + arc_h / 2,
-            start=205, extent=130, style=tk.ARC, width=int(6 * scale), outline=col
-        )
-
-    # downturned quivering sad frown line for heartbroken state
-    def _draw_sad_mouth(self, cx, cy, col):
-        """Melancholic downturned sad frown line."""
-        scale = self.ui_scale / 1.8
-        tremble = math.sin(self.anim_phase * 10.0) * (1.8 * scale)
-        m_y = cy + 4 * scale + tremble
-        arc_w, arc_h = int(76 * self.ui_scale), int(36 * self.ui_scale)
-
-        # Frown glow
-        self.canvas.create_arc(
-            cx - arc_w / 2 - 4 * scale, m_y - arc_h / 2 - 4 * scale,
-            cx + arc_w / 2 + 4 * scale, m_y + arc_h / 2 + 4 * scale,
-            start=25, extent=130, style=tk.ARC, width=int(12 * scale), outline="#0e2447"
-        )
-        # Main neon frown arc
-        self.canvas.create_arc(
-            cx - arc_w / 2, m_y - arc_h / 2,
-            cx + arc_w / 2, m_y + arc_h / 2,
-            start=25, extent=130, style=tk.ARC, width=int(5 * scale), outline=col
-        )
-
-    # resting friendly smile arc matching Neurolis design sketch
-    def _draw_idle_mouth(self, cx, cy, col):
-        """Warm resting smile arc matching Neurolis design sketch."""
-        scale = self.ui_scale / 1.8
-        arc_w = int(76 * self.ui_scale)
-        arc_h = int(32 * self.ui_scale)
-        # Glow arc
-        self.canvas.create_arc(
-            cx - arc_w / 2, cy - arc_h / 2,
-            cx + arc_w / 2, cy + arc_h / 2,
-            start=205, extent=130, style=tk.ARC, width=int(10 * scale), outline=self.color_eye_glow
-        )
-        # Main smile arc
-        self.canvas.create_arc(
-            cx - arc_w / 2, cy - arc_h / 2,
-            cx + arc_w / 2, cy + arc_h / 2,
-            start=205, extent=130, style=tk.ARC, width=int(5 * scale), outline=col
-        )
-
-    # 15-pin cyber audio frequency spectrum pins that dance with voice intensity
-    def _draw_speaking_mouth(self, cx, cy, col):
-        """Sleek minimalist cyber audio spectrum line (Vector / JARVIS style)."""
-        scale = self.ui_scale / 1.8
-        base_w = int(180 * self.ui_scale)
-        self.canvas.create_line(
-            cx - base_w / 2.0, cy,
-            cx + base_w / 2.0, cy,
-            fill="#092033", width=int(2 * scale)
-        )
-
-        num_pins = 15
-        pin_spacing = int(11 * scale)
-        start_x = cx - ((num_pins - 1) * pin_spacing) / 2.0
-
-        for i in range(num_pins):
-            dist_center = 1.0 - (abs(i - 7) / 7.0) * 0.45
-            pin_phase = i * 0.65
-            h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 26.0 * dist_center * self.speaking_intensity * scale
-            pin_h = max(3.0 * scale, h_val + 3.0 * scale)
-            px = start_x + i * pin_spacing
-
-            pin_col = "#00f0ff" if i % 2 == 0 else "#00ffcc"
-            self.canvas.create_line(
-                px, cy - pin_h, px, cy + pin_h,
-                fill=pin_col, width=int(4 * scale), capstyle=tk.ROUND
+                icx - pupil_r - 3 * scale, icy - pupil_r - 3 * scale,
+                icx + pupil_r + 3 * scale, icy + pupil_r + 3 * scale,
+                fill=main_col, outline=""
             )
             self.canvas.create_oval(
-                px - 2 * scale, cy - pin_h - 2 * scale,
-                px + 2 * scale, cy - pin_h + 2 * scale,
+                icx - pupil_r, icy - pupil_r,
+                icx + pupil_r, icy + pupil_r,
                 fill="#ffffff", outline=""
             )
 
-    # 13-bar acoustic soundwave spectrum with radar beacon dots for listening mode
-    def _draw_listening_mouth(self, cx, cy, col):
-        """Sleek acoustic audio waveform and concentric radar beacon."""
+        if draw_catchlights and eh > self.eye_h * 0.34:
+            gx_p = lx * 15.0 * scale
+            gy_p = ly * 11.0 * scale + catchlight_dy
+            glint1_w = ew * 0.22
+            glint1_h = eh * 0.12
+            gx1 = cx - ew * 0.28 + gx_p
+            gy1 = cy - eh * 0.30 + gy_p
+            self.canvas.create_oval(gx1, gy1, gx1 + glint1_w, gy1 + glint1_h, fill="#ffffff", outline="")
+
+            glint2_r = max(2.5, ew * 0.040)
+            gx2 = gx1 + glint1_w + 5.5 * scale
+            gy2 = gy1 + glint1_h * 0.55
+            self.canvas.create_oval(gx2 - glint2_r, gy2 - glint2_r, gx2 + glint2_r, gy2 + glint2_r, fill="#ffffff", outline="")
+
+            glint3_r = max(2.8, ew * 0.046)
+            gx3 = cx + ew * 0.22 + gx_p * 0.7
+            gy3 = cy + eh * 0.18 + gy_p * 0.7 - (11.0 * scale if smile_bottom else 0.0)
+            self.canvas.create_oval(gx3 - glint3_r, gy3 - glint3_r, gx3 + glint3_r, gy3 + glint3_r, fill="#ffffff", outline="")
+
+    # =========================================================================
+    # 11 OVERHAULED CORE EXPRESSIONS (UNMISTAKABLE AT FIRST GLANCE!)
+    # =========================================================================
+    def _draw_happy_eyes(self, lx: float, rx: float, cy: float, *args, **kwargs):
+        """
+        2. HAPPY: Joyous smiling inverted-U neon emerald crescent arches (∩ ∩) with white apex gleam,
+        warm cyber-blush cushions, and twinkling diamond joy sparkles (✦).
+        """
         scale = self.ui_scale / 1.8
-        num_bars = 13
-        bar_spacing = int(13 * scale)
-        total_w = (num_bars - 1) * bar_spacing
-        start_x = cx - total_w / 2.0
+        ew, eh = self.eye_w, self.eye_h
+        main_col, glow_col = self.color_happy, "#003d24"
 
-        for i in range(num_bars):
-            dist_from_center = abs(i - 6) / 6.0
-            weight = 1.0 - dist_from_center * 0.4
-            b_val = abs(math.sin(self.anim_phase * 5.0 + i * 0.55)) * 24 * weight * scale
-            bar_h = max(4.0 * scale, b_val + 4.0 * scale)
-            bx = start_x + (i * bar_spacing)
-            bar_col = "#00ffcc" if dist_from_center < 0.5 else "#00bfa5"
-            self.canvas.create_line(
-                bx, cy - bar_h, bx, cy + bar_h,
-                fill=bar_col, width=int(5 * scale), capstyle=tk.ROUND
-            )
+        bounce = math.sin(self.anim_phase * 6.0) * (3.5 * scale)
+        eye_y = cy + bounce
 
-        for side in [-1, 1]:
-            dot_x = cx + side * (total_w / 2.0 + 26 * scale)
-            dot_pulse = (4 + math.sin(self.anim_phase * 4.0) * 2.0) * scale
-            self.canvas.create_oval(
-                dot_x - dot_pulse, cy - dot_pulse,
-                dot_x + dot_pulse, cy + dot_pulse,
-                fill="#00ffcc", outline=""
-            )
+        w = ew * 0.88
+        h = eh * 0.65
+        r_w = w / 2.0
+        r_h = h * 0.65
+        leg_drop = h * 0.32
+        flare = r_w * 0.06
 
-    # small inquisitive rounded cyber mouth 'o' while pondering an answer
-    def _draw_thinking_mouth(self, cx, cy, col):
-        """Inquisitive rounded cyber mouth 'o' while in thought."""
+        self._draw_cyber_blush(lx, rx, eye_y + leg_drop + 16 * scale, scale, base_col="#ff3b7f", outward_shift=14 * scale)
+
+        for ecx in (lx, rx):
+            pts = []
+            pts.extend([ecx - r_w - flare, eye_y + leg_drop])
+            pts.extend([ecx - r_w, eye_y])
+            for i in range(21):
+                ang = math.pi - (i / 20.0) * math.pi
+                pts.extend([ecx + r_w * math.cos(ang), eye_y - r_h * math.sin(ang)])
+            pts.extend([ecx + r_w, eye_y])
+            pts.extend([ecx + r_w + flare, eye_y + leg_drop])
+
+            self.canvas.create_line(pts, smooth=True, fill=glow_col, width=int(28 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill="#00cc66", width=int(18 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill=main_col, width=int(11 * scale), capstyle=tk.ROUND)
+            apex_pts = pts[10 * 2 : 17 * 2]
+            if len(apex_pts) >= 4:
+                self.canvas.create_line(apex_pts, smooth=True, fill="#ffffff", width=max(1, int(3.5 * scale)), capstyle=tk.ROUND)
+
+        sp_r = (7.5 + 2.0 * math.sin(self.anim_phase * 5.0)) * scale
+        self._draw_sparkle(lx - ew * 0.56, eye_y - eh * 0.18, sp_r, "#70ffbe")
+        self._draw_sparkle(rx + ew * 0.56, eye_y - eh * 0.18, sp_r * 0.85, "#70ffbe")
+
+    def _draw_sad_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        3. SAD: Softly rounded sapphire bordered optical eyes with heavy drooping outer-slanted eyelids (\\   /),
+        a deep shimmering liquid tear pool welling at the bottom rim, and prominent dual-stream cascading teardrops!
+        """
         scale = self.ui_scale / 1.8
-        r = (8 + math.sin(self.anim_phase * 3.0) * 2.0) * scale
-        self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=col, width=int(4 * scale))
-        self.canvas.create_oval(cx - 3 * scale, cy - 3 * scale, cx + 3 * scale, cy + 3 * scale, fill="#ffffff", outline="")
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, 0.0, 0.24, catchlight_dy=18 * scale)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, 0.0, 0.24, catchlight_dy=18 * scale)
 
-    # cute wavy squiggly mouth line for confused puzzled face
-    def _draw_confused_mouth(self, cx, cy, col):
-        """Cute quizzical wavy micro-squiggle."""
-        scale = self.ui_scale / 1.8
-        w = int(22 * scale)
-        points = [
-            cx - w, cy,
-            cx - w * 0.5, cy + 5 * scale,
-            cx, cy - 5 * scale,
-            cx + w * 0.5, cy + 4 * scale,
-            cx + w, cy - 2 * scale,
+        lid_drop = 42 * scale
+        tremble = math.sin(self.anim_phase * 9.0) * (1.6 * scale)
+
+        left_lid = [
+            lx - ew / 2.0 - 14 * scale, cy - eh / 2.0 - 14 * scale,
+            lx + ew / 2.0 + 14 * scale, cy - eh / 2.0 - 14 * scale,
+            lx + ew / 2.0 + 14 * scale, cy - eh / 2.0 + lid_drop - 20 * scale + tremble,
+            lx - ew / 2.0 - 14 * scale, cy - eh / 2.0 + lid_drop + 22 * scale + tremble,
         ]
-        self.canvas.create_line(points, smooth=True, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
-
-    # jagged glitch zig-zag mouth line for error and alert state
-    def _draw_error_mouth(self, cx, cy, col):
-        """Sharp zig-zag glitch mouth line with red alarm flash."""
-        scale = self.ui_scale / 1.8
-        points = [
-            cx - 36 * scale, cy,
-            cx - 24 * scale, cy - 8 * scale,
-            cx - 12 * scale, cy + 8 * scale,
-            cx, cy - 8 * scale,
-            cx + 12 * scale, cy + 8 * scale,
-            cx + 24 * scale, cy - 8 * scale,
-            cx + 36 * scale, cy,
-        ]
-        self.canvas.create_line(points, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
-
-    # wide, asymmetric sinister villain smirk curving up to the right with chin accent
-    def _draw_villain_mouth(self, cx, cy, col):
-        """Asymmetric sinister rogue AI smirk curving up to the right with chin accent."""
-        scale = self.ui_scale / 1.8
-        # 1. Main sinister smirk curve
-        smirk_pts = [
-            cx - 96 * scale, cy + 4 * scale,
-            cx - 56 * scale, cy + 18 * scale,
-            cx - 16 * scale, cy + 24 * scale,
-            cx + 28 * scale, cy + 16 * scale,
-            cx + 72 * scale, cy - 2 * scale,
-            cx + 106 * scale, cy - 22 * scale,
-            cx + 126 * scale, cy - 40 * scale,
-        ]
-        self.canvas.create_line(smirk_pts, smooth=True, fill=col, width=int(5 * scale), capstyle=tk.ROUND)
-
-        # 2. Upward cheeky diagonal corner flick at right tip
+        self.canvas.create_polygon(left_lid, fill=self.bg_color, outline="")
         self.canvas.create_line(
-            cx + 124 * scale, cy - 38 * scale,
-            cx + 135 * scale, cy - 54 * scale,
-            fill=col, width=int(4 * scale), capstyle=tk.ROUND
+            lx - ew * 0.46, cy - eh / 2.0 + lid_drop + 20 * scale + tremble,
+            lx + ew * 0.46, cy - eh / 2.0 + lid_drop - 18 * scale + tremble,
+            fill=main_col, width=int(6.5 * scale), capstyle=tk.ROUND
         )
 
-        # 3. Chin / lower-lip accent curve beneath the lowest dip
-        chin_pts = [
-            cx - 48 * scale, cy + 38 * scale,
-            cx - 22 * scale, cy + 42 * scale,
-            cx - 2 * scale, cy + 41 * scale,
+        right_lid = [
+            rx - ew / 2.0 - 14 * scale, cy - eh / 2.0 - 14 * scale,
+            rx + ew / 2.0 + 14 * scale, cy - eh / 2.0 - 14 * scale,
+            rx + ew / 2.0 + 14 * scale, cy - eh / 2.0 + lid_drop + 22 * scale + tremble,
+            rx - ew / 2.0 - 14 * scale, cy - eh / 2.0 + lid_drop - 20 * scale + tremble,
         ]
-        self.canvas.create_line(chin_pts, smooth=True, fill=col, width=int(4 * scale), capstyle=tk.ROUND)
+        self.canvas.create_polygon(right_lid, fill=self.bg_color, outline="")
+        self.canvas.create_line(
+            rx - ew * 0.46, cy - eh / 2.0 + lid_drop - 18 * scale + tremble,
+            rx + ew * 0.46, cy - eh / 2.0 + lid_drop + 20 * scale + tremble,
+            fill=main_col, width=int(6.5 * scale), capstyle=tk.ROUND
+        )
 
-    # rotating gyroscope orbit constellation dots around the face while thinking
-    def _draw_thinking_spinner(self, cx, cy, col):
-        """High-tech orbital gyroscope constellation around face center."""
-        r = self.eye_spacing * 0.65
-        for i in range(3):
-            angle = self.thinking_angle * (1.0 + i * 0.3) + (i * (2 * math.pi / 3))
+        # 1. Noticeable Welling Liquid Tear Pool shimmering along the lower rim of each eye
+        for side, cx in [(-1, lx), (1, rx)]:
+            pool_y = cy + eh * 0.34
+            wave_pts = []
+            for w_i in range(11):
+                t = (w_i / 10.0) * 2.0 - 1.0
+                wx = cx + t * (ew * 0.36)
+                wy = pool_y + math.sin(self.anim_phase * 6.5 + w_i * 0.8) * (2.5 * scale) + (t * t) * (6.0 * scale)
+                wave_pts.extend([wx, wy])
+            self.canvas.create_line(wave_pts, smooth=True, fill="#38bdf8", width=int(8.5 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(wave_pts, smooth=True, fill="#bae6fd", width=int(4.0 * scale), capstyle=tk.ROUND)
+            bead_x = cx + side * (ew * 0.32)
+            bead_y = cy + eh * 0.38
+            br = 7.5 * scale
+            self.canvas.create_oval(bead_x - br, bead_y - br, bead_x + br, bead_y + br, fill="#38bdf8", outline="#ffffff", width=max(1, int(1.5 * scale)))
+
+        # 2. Prominent Multi-Layered Cascading Teardrops with Watery Streak Trails & Cheek Splash Ripples
+        tear_streams = [
+            (lx - ew * 0.30, 0.22, 1.0),
+            (lx + ew * 0.22, 0.68, 0.78),
+            (rx + ew * 0.30, 0.45, 1.0),
+            (rx - ew * 0.22, 0.88, 0.78),
+        ]
+        for tx, phase_off, sz_m in tear_streams:
+            frac = ((self.anim_phase * 0.65 + phase_off) % 1.0)
+            start_y = cy + eh * 0.42
+            ty = start_y + frac * (56.0 * scale)
+            tr = (10.5 * sz_m * (1.0 - frac * 0.15)) * scale
+
+            self.canvas.create_line(
+                tx, start_y, tx, ty - tr * 0.8,
+                fill=lerp_color(self.bg_color, "#38bdf8", 0.55 * (1.0 - frac * 0.5)),
+                width=max(2, int(4.5 * sz_m * scale)), capstyle=tk.ROUND
+            )
+
+            gr = tr * 1.35
+            self.canvas.create_oval(tx - gr, ty - gr, tx + gr, ty + gr, fill="#082f49", outline="")
+
+            drop_pts = [
+                tx - tr, ty,
+                tx, ty - tr * 2.1,
+                tx + tr, ty,
+            ]
+            self.canvas.create_polygon(drop_pts, fill="#38bdf8", outline="")
+            self.canvas.create_oval(tx - tr, ty - tr, tx + tr, ty + tr, fill="#38bdf8", outline="#bae6fd", width=max(1, int(1.8 * scale)))
+            self.canvas.create_oval(tx - tr * 0.65, ty - tr * 0.45, tx + tr * 0.65, ty + tr * 0.75, fill="#7dd3fc", outline="")
+            self.canvas.create_oval(tx - tr * 0.55, ty - tr * 0.55, tx - tr * 0.12, ty - tr * 0.15, fill="#ffffff", outline="")
+
+            if frac > 0.65:
+                sp_w = (frac - 0.65) * 38.0 * scale
+                self.canvas.create_oval(tx - sp_w, ty + tr - 3 * scale, tx + sp_w, ty + tr + 3 * scale, fill="", outline="#7dd3fc", width=max(1, int(1.8 * scale)))
+
+    def _draw_confused_eyes(self, lx: float, rx: float, cy: float, main_col: str, glow_col: str):
+        """
+        4. CONFUSED ("Like in confused, both eye spirals to be same size..."):
+        100% FRAMELESS Hypnotic Counter-Rotating Golden Archimedes Spirals (@   @) —
+        BOTH eye spirals are now the EXACT SAME SIZE and height!
+        """
+        scale = self.ui_scale / 1.8
+        same_sp_r = min(self.eye_w, self.eye_h) * 0.47
+        specs = [
+            (lx, cy, same_sp_r, 1.0, main_col),
+            (rx, cy, same_sp_r, -1.0, main_col),
+        ]
+        for cx, cy_e, max_sp_r, dir_s, sp_col in specs:
+            self.canvas.create_oval(
+                cx - max_sp_r - 10 * scale, cy_e - max_sp_r - 10 * scale,
+                cx + max_sp_r + 10 * scale, cy_e + max_sp_r + 10 * scale,
+                fill=lerp_color(self.bg_color, glow_col, 0.55), outline=""
+            )
+
+            pts = []
+            rot = self.anim_phase * 4.8 * dir_s
+            num_steps = 72
+            for i in range(num_steps):
+                frac = i / float(num_steps - 1)
+                theta = frac * 6.8 * math.pi * dir_s + rot
+                r_cur = (0.05 + 0.95 * frac) * max_sp_r
+                pts.extend([cx + r_cur * math.cos(theta), cy_e + r_cur * math.sin(theta)])
+
+            self.canvas.create_line(pts, smooth=True, fill=glow_col, width=int(15 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill=sp_col, width=int(8.2 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts[:42], smooth=True, fill="#ffffff", width=max(1, int(3.2 * scale)), capstyle=tk.ROUND)
+            self.canvas.create_oval(cx - 5 * scale, cy_e - 5 * scale, cx + 5 * scale, cy_e + 5 * scale, fill="#ffffff", outline="")
+
+        q_bob = math.sin(self.anim_phase * 4.0) * (4.0 * scale)
+        self.canvas.create_text(rx + self.eye_w * 0.64, cy - self.eye_h * 0.44 + q_bob, text="?", fill="#fde047", font=(FONT_FAMILY, int(28 * scale), "bold"))
+        self.canvas.create_text(lx - self.eye_w * 0.56, cy - self.eye_h * 0.34 - q_bob, text="?", fill="#fb8500", font=(FONT_FAMILY, int(21 * scale), "bold"))
+        self._draw_sparkle(rx - self.eye_w * 0.45, cy - self.eye_h * 0.56, 8.0 * scale, "#fde047")
+
+    def _draw_thinking_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        5. THINKING ("A flickering light bulb trying to glow in top right next to eye in thinking.."):
+        Softly rounded royal-violet bordered optical lenses with rotating neural cog irises gazing up-right
+        at ascending thought bubbles AND a flickering lightbulb trying to glow at the top-right!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh * 0.90, main_col, glow_col, 0.28, -0.24, draw_iris=False, draw_catchlights=False)
+        self._draw_standard_eye(rx, cy, ew, eh * 0.90, main_col, glow_col, 0.28, -0.24, draw_iris=False, draw_catchlights=False)
+
+        for cx in (lx, rx):
+            icx = cx + 11.0 * scale
+            icy = cy - 8.5 * scale
+            r_outer = min(ew, eh) * 0.26
+            r_inner = r_outer * 0.56
+            base_deg = (self.thinking_angle * 65.0) % 360.0
+            for seg in range(3):
+                start_a = base_deg + seg * 120.0
+                self.canvas.create_arc(
+                    icx - r_outer, icy - r_outer, icx + r_outer, icy + r_outer,
+                    start=start_a, extent=72, style=tk.ARC,
+                    outline="#d8b4fe", width=int(4.5 * scale)
+                )
+            for seg in range(2):
+                start_b = -base_deg * 1.3 + seg * 180.0
+                self.canvas.create_arc(
+                    icx - r_inner, icy - r_inner, icx + r_inner, icy + r_inner,
+                    start=start_b, extent=100, style=tk.ARC,
+                    outline="#ffffff", width=int(3.0 * scale)
+                )
+            self.canvas.create_oval(icx - 5 * scale, icy - 5 * scale, icx + 5 * scale, icy + 5 * scale, fill="#ffffff", outline=main_col, width=1)
+            self.canvas.create_oval(cx - ew * 0.26, cy - eh * 0.28, cx - ew * 0.06, cy - eh * 0.16, fill="#ffffff", outline="")
+
+        bx = rx + ew * 0.54
+        by = cy - eh * 0.10
+        for dx, dy, br, bcol in [(6, 0, 5.0, "#a855f7"), (18, -18, 8.0, "#c084fc")]:
+            bx_i = bx + dx * scale
+            by_i = by + dy * scale
+            r_i = br * scale
+            self.canvas.create_oval(bx_i - r_i, by_i - r_i, bx_i + r_i, by_i + r_i, fill="#1e0b36", outline=bcol, width=int(2.2 * scale))
+
+        self._draw_flickering_lightbulb(rx + ew * 0.72, cy - eh * 0.44, scale * 1.05, mode="trying")
+
+    def _draw_listening_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        6. LISTENING: Bioluminescent mint-teal bordered optical eyes with cute, compact Bionic
+        Audio-Receiver Side-Ears cupped on the outer sides of the eyes matching the bordered neon
+        design scheme, plus a live concentric sonar-ring + 5-bar equalizer iris and acoustic waves!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, look_x, look_y, draw_iris=False)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, look_x, look_y, draw_iris=False)
+
+        # Cute, small Bionic Audio-Receiver Side-Ears cupped on the outer sides of the eyes!
+        ear_w = 28.0 * scale
+        ear_h = eh * 0.48
+        ear_r = 13.0 * scale
+        ear_pulse = 1.0 + 0.08 * math.sin(self.anim_phase * 6.0)
+        for side, base_x in [(-1, lx - ew / 2.0), (1, rx + ew / 2.0)]:
+            ex1 = base_x - ear_w * ear_pulse if side == -1 else base_x - 3 * scale
+            ex2 = base_x + 3 * scale if side == -1 else base_x + ear_w * ear_pulse
+            ey1 = cy - ear_h / 2.0
+            ey2 = cy + ear_h / 2.0
+            self._create_rounded_rect(ex1 - 4 * scale, ey1 - 4 * scale, ex2 + 4 * scale, ey2 + 4 * scale, radius=int(ear_r + 4 * scale), fill=glow_col, outline="")
+            self._create_rounded_rect(ex1, ey1, ex2, ey2, radius=int(ear_r), fill="#041514", outline=main_col, width=max(2, int(4.2 * scale)))
+            ecx = (ex1 + ex2) / 2.0 + side * (2.5 * scale)
+            for r_off in (-8.5, 0.0, 8.5):
+                ry = cy + r_off * scale
+                self.canvas.create_line(ecx - 5.5 * scale, ry, ecx + 5.5 * scale, ry, fill="#00ffcc", width=max(1, int(2.2 * scale)), capstyle=tk.ROUND)
+            dot_y = cy - ear_h * 0.60
+            self.canvas.create_line(ecx, ey1, ecx, dot_y, fill=main_col, width=max(1, int(2.5 * scale)))
+            self.canvas.create_oval(ecx - 4.0 * scale, dot_y - 4.0 * scale, ecx + 4.0 * scale, dot_y + 4.0 * scale, fill="#ffffff", outline=main_col, width=1)
+
+        for cx in (lx, rx):
+            icx = cx + look_x * 12.0 * scale
+            icy = cy + look_y * 9.0 * scale
+            for r_i in range(2):
+                rip_t = (self.anim_phase * 1.8 + r_i * 0.5) % 1.0
+                r_son = (14.0 + rip_t * 28.0) * scale
+                r_col = lerp_color("#051821", main_col, (1.0 - rip_t) * 0.90)
+                self.canvas.create_oval(icx - r_son, icy - r_son, icx + r_son, icy + r_son, fill="", outline=r_col, width=max(1, int(2.2 * scale)))
+
+            for b_i in range(-2, 3):
+                bx = icx + b_i * (6.5 * scale)
+                bh = (5.0 + abs(math.sin(self.anim_phase * 7.0 + b_i * 0.9)) * 13.0) * scale * (1.0 - abs(b_i) * 0.18)
+                b_col = "#ffffff" if b_i == 0 else "#00ffcc"
+                self.canvas.create_line(bx, icy - bh, bx, icy + bh, fill=b_col, width=max(2, int(3.0 * scale)), capstyle=tk.ROUND)
+
+        for w_i in range(2):
+            phase = (self.anim_phase * 1.8 + w_i * 0.5) % 1.0
+            dist = (32.0 + phase * 18.0) * scale
+            w_col = lerp_color(self.bg_color, main_col, (1.0 - phase) * 0.85)
+            arc_h = eh * (0.28 + phase * 0.14)
+            lx_c = lx - ew / 2.0 - dist
+            self.canvas.create_arc(lx_c - 10 * scale, cy - arc_h, lx_c + 10 * scale, cy + arc_h, start=115, extent=130, style=tk.ARC, outline=w_col, width=max(1, int(2.8 * scale)))
+            rx_c = rx + ew / 2.0 + dist
+            self.canvas.create_arc(rx_c - 10 * scale, cy - arc_h, rx_c + 10 * scale, cy + arc_h, start=-65, extent=130, style=tk.ARC, outline=w_col, width=max(1, int(2.8 * scale)))
+
+    def _draw_speaking_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        7. SPEAKING: Sleek sky-cyan bordered optical lenses (strictly un-curved bottom)
+        housing a live oscillating voice-waveform ring resonator inside the iris!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=False, draw_iris=False)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=False, draw_iris=False)
+
+        mod = 1.0 + 0.18 * math.sin(self.anim_phase * 9.0) * self.speaking_intensity
+        for cx in (lx, rx):
+            icx = cx + look_x * 12.0 * scale
+            icy = cy + look_y * 9.0 * scale
+            r_out = 30.0 * scale * mod
+            self.canvas.create_oval(icx - r_out, icy - r_out, icx + r_out, icy + r_out, fill="#062238", outline=main_col, width=int(2.8 * scale))
+            wave_pts = []
+            for i in range(15):
+                t = (i / 14.0) * 2.0 - 1.0
+                wx = icx + t * (r_out * 0.78)
+                wy = icy + math.sin(self.anim_phase * 10.0 + i * 0.85) * (9.5 * scale * self.speaking_intensity) * (1.0 - t * t)
+                wave_pts.extend([wx, wy])
+            self.canvas.create_line(wave_pts, smooth=True, fill="#00ffcc", width=int(4.5 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(wave_pts, smooth=True, fill="#ffffff", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
+
+    def _draw_watching_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, lx_coord: float, ly_coord: float):
+        """
+        8. WATCHING ("In scanning, improve the animation of horizontal eye scan line."):
+        Precision Cyber-Aqua Optical Sentry Viewfinder Lenses with a multi-layered
+        Volumetric Horizontal Laser Scan Beam, trailing phosphor afterglow curtain,
+        side-rail emitter nodes, and target reticle!
+        """
+        scale = self.ui_scale / 1.8
+        vh = eh * 0.90
+        self._draw_standard_eye(lx, cy, ew, vh, main_col, glow_col, lx_coord, ly_coord, draw_iris=False)
+        self._draw_standard_eye(rx, cy, ew, vh, main_col, glow_col, lx_coord, ly_coord, draw_iris=False)
+
+        bracket_color = "#00ffcc"
+        bracket_len = 20 * scale
+        bracket_pad = 9 * scale
+
+        scan_sin = math.sin(self.anim_phase * 3.8)
+        scan_vel_dir = 1.0 if math.cos(self.anim_phase * 3.8) >= 0.0 else -1.0
+        scan_y = cy + scan_sin * (vh * 0.31)
+        beam_hw = ew * 0.41
+
+        for cx in (lx, rx):
+            icx = cx + lx_coord * 13.0 * scale
+            icy = cy + ly_coord * 10.0 * scale
+            r_ret = 29.0 * scale
+            self.canvas.create_oval(icx - r_ret, icy - r_ret, icx + r_ret, icy + r_ret, fill="#041f29", outline="#00ffcc", width=int(2.2 * scale))
+            rot_deg = (self.anim_phase * 55.0) % 360.0
+            self.canvas.create_arc(icx - r_ret * 0.72, icy - r_ret * 0.72, icx + r_ret * 0.72, icy + r_ret * 0.72, start=rot_deg, extent=95, style=tk.ARC, outline="#ffffff", width=int(2.2 * scale))
+            self.canvas.create_arc(icx - r_ret * 0.72, icy - r_ret * 0.72, icx + r_ret * 0.72, icy + r_ret * 0.72, start=rot_deg + 180, extent=95, style=tk.ARC, outline="#ffffff", width=int(2.2 * scale))
+            self.canvas.create_line(icx - r_ret * 1.15, icy, icx - r_ret * 0.45, icy, fill="#00ffcc", width=max(1, int(1.8 * scale)))
+            self.canvas.create_line(icx + r_ret * 0.45, icy, icx + r_ret * 1.15, icy, fill="#00ffcc", width=max(1, int(1.8 * scale)))
+            self.canvas.create_line(icx, icy - r_ret * 1.15, icx, icy - r_ret * 0.45, fill="#00ffcc", width=max(1, int(1.8 * scale)))
+            self.canvas.create_line(icx, icy + r_ret * 0.45, icx, icy + r_ret * 1.15, fill="#00ffcc", width=max(1, int(1.8 * scale)))
+            self.canvas.create_oval(icx - 4.5 * scale, icy - 4.5 * scale, icx + 4.5 * scale, icy + 4.5 * scale, fill="#ff1744", outline="#ffffff", width=1)
+
+            for t_idx in range(5, 0, -1):
+                trail_y = scan_y - scan_vel_dir * (t_idx * 4.2 * scale)
+                if abs(trail_y - cy) < vh * 0.36:
+                    trail_alpha = (6 - t_idx) / 6.0 * 0.42
+                    trail_col = lerp_color("#04121c", "#00ffcc", trail_alpha)
+                    self.canvas.create_line(
+                        cx - beam_hw * 0.96, trail_y, cx + beam_hw * 0.96, trail_y,
+                        fill=trail_col, width=max(1, int(4.5 * scale)), capstyle=tk.ROUND
+                    )
+
+            self.canvas.create_line(cx - beam_hw, scan_y, cx + beam_hw, scan_y, fill="#00b4d8", width=int(8.5 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(cx - beam_hw, scan_y, cx + beam_hw, scan_y, fill="#00ffcc", width=int(4.5 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(cx - beam_hw * 0.94, scan_y, cx + beam_hw * 0.94, scan_y, fill="#ffffff", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
+
+            for side_e in (-1, 1):
+                ex_n = cx + side_e * beam_hw
+                er = 4.8 * scale
+                self.canvas.create_oval(ex_n - er, scan_y - er, ex_n + er, scan_y + er, fill="#00ffcc", outline="#ffffff", width=max(1, int(1.5 * scale)))
+
+            x1 = cx - ew / 2.0 - bracket_pad
+            y1 = cy - vh / 2.0 - bracket_pad
+            x2 = cx + ew / 2.0 + bracket_pad
+            y2 = cy + vh / 2.0 + bracket_pad
+            bw = max(1, int(2.6 * scale))
+            self.canvas.create_line(x1, y1 + bracket_len, x1, y1, x1 + bracket_len, y1, fill=bracket_color, width=bw)
+            self.canvas.create_line(x2 - bracket_len, y1, x2, y1, x2, y1 + bracket_len, fill=bracket_color, width=bw)
+            self.canvas.create_line(x1, y2 - bracket_len, x1, y2, x1 + bracket_len, y2, fill=bracket_color, width=bw)
+            self.canvas.create_line(x2 - bracket_len, y2, x2, y2, x2, y2 - bracket_len, fill=bracket_color, width=bw)
+
+        tag_y = cy + vh / 2.0 + 22 * scale
+        self.canvas.create_text(lx - ew * 0.10, tag_y, text="FOV 85° // OPTIC LOCK", fill="#00ffcc", font=(FONT_FAMILY, max(8, int(8.5 * scale)), "bold"))
+        rec_blink = math.sin(self.anim_phase * 6.0) > 0.0
+        rec_x = rx + ew * 0.05
+        self.canvas.create_oval(rec_x - 4 * scale, tag_y - 4 * scale, rec_x + 4 * scale, tag_y + 4 * scale, fill="#ff1744" if rec_blink else "#550a14", outline="")
+        self.canvas.create_text(rec_x + 8 * scale, tag_y, text="REC [LIVE]", anchor="w", fill="#ffffff" if rec_blink else "#64748b", font=(FONT_FAMILY, max(8, int(8.5 * scale)), "bold"))
+
+    def _draw_moving_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float = 0.0, look_y: float = 0.0):
+        """
+        9. MOVING: Exhilarated, wind-enjoying cruising eyes!
+        Uses the seamless `smile_bottom=True` contour on the sleek bordered cyan optical lenses,
+        plus the prominent center `DRIVE` speedometer arc between the eyes and fast wind slipstreams!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=True)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=True)
+
+        mid_x = (lx + rx) / 2.0
+        hud_y = cy - eh * 0.04
+        self.canvas.create_arc(
+            mid_x - 28 * scale, hud_y - 28 * scale,
+            mid_x + 28 * scale, hud_y + 28 * scale,
+            start=20, extent=140, style=tk.ARC, outline="#00ffaa", width=max(2, int(3.5 * scale))
+        )
+        self.canvas.create_text(mid_x, hud_y + 2 * scale, text="DRIVE", fill="#ffffff", font=(FONT_FAMILY, max(8, int(9.5 * scale)), "bold"))
+
+        for side, s_cx in [(-1, lx - ew * 0.56), (1, rx + ew * 0.56)]:
+            for s_idx in range(3):
+                phase = (self.anim_phase * 5.2 + s_idx * 0.33) % 1.0
+                st_len = (26.0 + phase * 42.0) * scale
+                st_x1 = s_cx + side * (phase * 32.0 * scale)
+                st_x2 = st_x1 + side * st_len
+                st_y = cy + (s_idx - 1) * (22.0 * scale)
+                col_st = "#00f0ff" if phase < 0.55 else "#0284c7"
+                self.canvas.create_line(st_x1, st_y, st_x2, st_y, fill=col_st, width=max(1, int((3.2 - phase * 1.5) * scale)), capstyle=tk.ROUND)
+
+    def _draw_error_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        10. ERROR: 100% FRAMELESS Neon-Crimson Glitch 'X' Optics with digital scanline slice offsets
+        and flanking vector caution triangles (!).
+        """
+        scale = self.ui_scale / 1.8
+        arm = min(ew, eh) * 0.38
+        jitter = math.sin(self.anim_phase * 22.0) * (2.0 * scale)
+
+        for cx in (lx, rx):
+            for w_mult, col_x in [(30, glow_col), (19, "#b91c1c"), (11, main_col), (3.8, "#ffffff")]:
+                self.canvas.create_line(cx - arm + jitter, cy - arm, cx + arm + jitter, cy + arm, fill=col_x, width=max(1, int(w_mult * scale)), capstyle=tk.ROUND)
+                self.canvas.create_line(cx + arm - jitter, cy - arm, cx - arm - jitter, cy + arm, fill=col_x, width=max(1, int(w_mult * scale)), capstyle=tk.ROUND)
+
+        for side, tx in [(-1, lx - ew * 0.65), (1, rx + ew * 0.65)]:
+            ty = cy
+            th = 18.0 * scale
+            tri_pts = [tx, ty - th, tx + th * 0.92, ty + th * 0.75, tx - th * 0.92, ty + th * 0.75]
+            self.canvas.create_polygon(tri_pts, fill="#ffb703", outline="#ffffff", width=max(1, int(1.5 * scale)))
+            self.canvas.create_line(tx, ty - th * 0.35, tx, ty + th * 0.18, fill="#090d16", width=max(2, int(3.0 * scale)), capstyle=tk.ROUND)
+            self.canvas.create_oval(tx - 2 * scale, ty + th * 0.34, tx + 2 * scale, ty + th * 0.52, fill="#090d16", outline="")
+
+    def _draw_villain_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, lx_coord: float = 0.0, ly_coord: float = 0.0):
+        """
+        11. VILLAIN ("also I do not want villian mode eye bottom to be curved... keep it ROUGH,
+        like it was sketched in ms paint (keep it as it was originally) but make it feel MORE villiany,
+        maybe adding more flickeryness, some.. CRT vibes... uk what I make it should look like IT IS HACKED!!! like in hollywood..."):
+          - Strictly FLAT, UN-CURVED angular bottom edge (`smooth=False`) with rough MS-Paint hand-sketched
+            overlapping jittered strokes (`aa=False` raw pixel grit).
+          - Hollywood Hacked RGB chromatic aberration ghost outlines (`#ff003c` crimson & `#00f0ff` cyan static),
+            CRT horizontal phosphor scanlines inside the sockets, and flickering menacing slit pupils!
+        """
+        if hasattr(self.canvas, "set_rough_mode"):
+            self.canvas.set_rough_mode(True)
+        scale = self.ui_scale / 1.8
+        pulse_6hz = math.sin(self.anim_phase * 14.0)
+        flicker_18hz = math.sin(self.anim_phase * 38.0)
+        glitch_dx = (4.5 * scale * math.sin(self.anim_phase * 29.0)) if abs(flicker_18hz) > 0.35 else (2.2 * scale)
+
+        # 1. Rising Toxic Hacked Data Embers & Glitch Pixels around the eyes
+        for i in range(10):
+            ember_t = (self.anim_phase * 2.1 + i * 0.77) % 3.0
+            frac = ember_t / 3.0
+            ember_x = lx + (rx - lx) * (0.06 + 0.88 * (i / 9.0)) + math.sin(ember_t * 5.0 + i) * (16.0 * scale)
+            ember_y = cy + eh * 0.38 - frac * (eh * 1.25)
+            sz = max(2.0, (4.2 * (1.0 - frac * 0.6)) * scale)
+            e_col = "#ff003c" if (i % 3 == 0 and flicker_18hz > 0.0) else lerp_color("#39ff14", "#041a0b", frac * 0.75)
+            # Raw square pixel blocks like a hacked CRT display
+            self.canvas.create_rectangle(ember_x - sz, ember_y - sz, ember_x + sz, ember_y + sz, fill=e_col, outline="")
+
+        # 2. Branching Hacked Temple Circuitry Traces
+        circuit_col = "#ff003c" if flicker_18hz > 0.72 else lerp_color("#0a4d1c", "#39ff14", 0.65 + 0.35 * pulse_6hz)
+        for side, base_x in [(-1, lx - ew * 0.50), (1, rx + ew * 0.50)]:
+            p1x, p1y = base_x, cy - eh * 0.12
+            p2x, p2y = base_x + side * (24 * scale), cy - eh * 0.12
+            p3x, p3y = p2x + side * (16 * scale), cy - eh * 0.30
+            p4x, p4y = p2x + side * (16 * scale), cy + eh * 0.10
+            self.canvas.create_line(p1x, p1y, p2x, p2y, p3x, p3y, fill=circuit_col, width=max(1, int(2.2 * scale)))
+            self.canvas.create_line(p2x, p2y, p4x, p4y, fill=circuit_col, width=max(1, int(1.8 * scale)))
+            self.canvas.create_rectangle(p3x - 3 * scale, p3y - 3 * scale, p3x + 3 * scale, p3y + 3 * scale, fill="#39ff14", outline="")
+            self.canvas.create_rectangle(p4x - 2.5 * scale, p4y - 2.5 * scale, p4x + 2.5 * scale, p4y + 2.5 * scale, fill="#ff003c", outline="")
+
+        # 3. Rough MS-Paint Angular Flat-Bottomed Hooded Villain Eyes (smooth=False, ZERO bottom curve!)
+        for cx in (lx, rx):
+            is_left = (cx == lx)
+            w_half = ew * 0.46
+            top_y = cy - eh * 0.12
+            bot_y = cy + eh * 0.26
+            bot_w_half = w_half * 0.66  # Sharp flat-bottomed trapezoid width
+            ext_left = 26 * scale if is_left else 10 * scale
+            ext_right = 10 * scale if is_left else 26 * scale
+
+            # Outer dark-green aura polygon (strictly angular, smooth=False!)
+            outer_glow_pts = [
+                cx - w_half - ext_left - 4 * scale, top_y - 4 * scale,
+                cx + w_half + ext_right + 4 * scale, top_y - 4 * scale,
+                cx + bot_w_half + 10 * scale, bot_y + 9 * scale,
+                cx - bot_w_half - 10 * scale, bot_y + 9 * scale,
+            ]
+            self.canvas.create_polygon(outer_glow_pts, smooth=False, fill="#031c0a", outline="")
+
+            # Mid glow polygon (strictly angular, smooth=False!)
+            glow_pts = [
+                cx - w_half - ext_left, top_y,
+                cx + w_half + ext_right, top_y,
+                cx + bot_w_half + 5 * scale, bot_y + 4 * scale,
+                cx - bot_w_half - 5 * scale, bot_y + 4 * scale,
+            ]
+            self.canvas.create_polygon(glow_pts, smooth=False, fill=glow_col, outline="")
+
+            # Deep dark eye socket interior (strictly flat bottom at `bot_y`, smooth=False!)
+            socket_pts = [
+                cx - w_half, top_y,
+                cx + w_half, top_y,
+                cx + bot_w_half, bot_y,
+                cx - bot_w_half, bot_y,
+            ]
+            self.canvas.create_polygon(socket_pts, smooth=False, fill="#020f05", outline="")
+
+            # CRT Phosphor Scanlines inside each eye socket
+            num_scan = 7
+            for s_idx in range(1, num_scan):
+                frac_s = s_idx / float(num_scan)
+                sy = top_y + (bot_y - top_y) * frac_s
+                sw_line = w_half - (w_half - bot_w_half) * frac_s - 3 * scale
+                sc_col = "#093b18" if s_idx % 2 == 0 else "#04210c"
+                self.canvas.create_line(cx - sw_line, sy, cx + sw_line, sy, fill=sc_col, width=max(1, int(1.5 * scale)))
+
+            # Menacing Hacked Slit Pupil + Crosshair Glitch inside socket
+            slit_y = cy + eh * 0.07 + ly_coord * (6.0 * scale)
+            slit_cx = cx + lx_coord * (10.0 * scale)
+            slit_hw = w_half * (0.38 + 0.08 * pulse_6hz)
+
+            # Crimson chromatic aberration slit ghost
+            self.canvas.create_line(
+                slit_cx - slit_hw - glitch_dx, slit_y - 2.0 * scale,
+                slit_cx + slit_hw - glitch_dx, slit_y - 2.0 * scale,
+                fill="#ff003c", width=max(1, int(2.2 * scale))
+            )
+            # Outer green slit bloom (4 coordinates - bug fixed!)
+            self.canvas.create_line(
+                slit_cx - slit_hw - 3 * scale, slit_y,
+                slit_cx + slit_hw + 3 * scale, slit_y,
+                fill="#004d1a", width=int(7.5 * scale)
+            )
+            # Bright toxic-lime slit bar
+            self.canvas.create_line(
+                slit_cx - slit_hw, slit_y,
+                slit_cx + slit_hw, slit_y,
+                fill="#39ff14", width=max(2, int(3.5 * scale))
+            )
+            # Vertical viper-slit pupil slash & hot white-red core
+            v_slit_h = (bot_y - top_y) * 0.34
+            self.canvas.create_line(
+                slit_cx, slit_y - v_slit_h,
+                slit_cx, slit_y + v_slit_h,
+                fill="#ff003c" if flicker_18hz > 0.55 else "#39ff14",
+                width=max(2, int(3.2 * scale))
+            )
+            self.canvas.create_rectangle(
+                slit_cx - 4.0 * scale, slit_y - 3.0 * scale,
+                slit_cx + 4.0 * scale, slit_y + 3.0 * scale,
+                fill="#ffffff", outline="#ff003c", width=1
+            )
+
+            # ROUGH MS-PAINT SKETCHED LOWER TRAPEZOID OUTLINE (strictly flat bottom `bot_y`, smooth=False!)
+            lower_pts = [
+                cx - w_half, top_y,
+                cx - bot_w_half, bot_y,
+                cx + bot_w_half, bot_y,
+                cx + w_half, top_y,
+            ]
+            # 1) Crimson hacked chromatic ghost stroke (offset left/down)
+            ghost_red_pts = [
+                cx - w_half - glitch_dx, top_y + 1.5 * scale,
+                cx - bot_w_half - glitch_dx, bot_y + 2.0 * scale,
+                cx + bot_w_half - glitch_dx, bot_y + 2.0 * scale,
+                cx + w_half - glitch_dx, top_y + 1.5 * scale,
+            ]
+            self.canvas.create_line(ghost_red_pts, smooth=False, fill="#b80028", width=max(2, int(3.0 * scale)))
+
+            # 2) Primary rough MS-Paint thick toxic-lime trapezoid stroke (smooth=False!)
+            self.canvas.create_line(lower_pts, smooth=False, fill=main_col, width=int(5.8 * scale))
+
+            # 3) Second raw MS-Paint hand-sketched over-stroke (slightly offset & overshooting corners so it looks hand-drawn in MS Paint!)
+            jit_1 = math.sin(self.anim_phase * 31.0 + (1.0 if is_left else 2.5)) * (2.2 * scale)
+            jit_2 = math.cos(self.anim_phase * 27.0 + (2.0 if is_left else 0.5)) * (2.2 * scale)
+            sketch_pts = [
+                cx - w_half - 2 * scale, top_y + jit_1,
+                cx - bot_w_half - 3 * scale, bot_y - 2.0 * scale + jit_2,
+                cx + bot_w_half + 3 * scale, bot_y + 2.0 * scale - jit_1,
+                cx + w_half + 2 * scale, top_y - jit_2,
+            ]
+            self.canvas.create_line(sketch_pts, smooth=False, fill="#a3ff8f", width=max(1, int(2.2 * scale)))
+
+            # Rough MS-Paint corner overshoot ticks at the bottom-left and bottom-right trapezoid corners
+            self.canvas.create_line(
+                cx - bot_w_half - 6 * scale, bot_y,
+                cx - bot_w_half + 8 * scale, bot_y,
+                fill=main_col, width=max(2, int(4.0 * scale))
+            )
+            self.canvas.create_line(
+                cx + bot_w_half - 8 * scale, bot_y,
+                cx + bot_w_half + 6 * scale, bot_y,
+                fill=main_col, width=max(2, int(4.0 * scale))
+            )
+
+            # Heavy menacing flat top hood bar + rough MS-Paint sketch double-bar
+            self.canvas.create_line(
+                cx - w_half - ext_left - glitch_dx, top_y - 2 * scale,
+                cx + w_half + ext_right - glitch_dx, top_y - 2 * scale,
+                fill="#ff003c", width=max(2, int(3.0 * scale))
+            )
+            self.canvas.create_line(
+                cx - w_half - ext_left, top_y,
+                cx + w_half + ext_right, top_y,
+                fill=main_col, width=int(6.8 * scale)
+            )
+            self.canvas.create_line(
+                cx - w_half - ext_left + 4 * scale, top_y + 2.5 * scale + jit_1 * 0.5,
+                cx + w_half + ext_right - 4 * scale, top_y - 2.0 * scale - jit_2 * 0.5,
+                fill="#ffffff", width=max(1, int(2.0 * scale))
+            )
+
+    # =========================================================================
+    # 11 NEW CONVERSATIONAL EXPRESSIONS (INNOVATIVE & UNMISTAKABLE!)
+    # =========================================================================
+    def _draw_excited_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        12. EXCITED: Starstruck Golden Bordered Optical Eyes with seamless upward-curved bottom eyelids
+        (`smile_bottom=True`) and giant glowing 4-point golden-white starbursts (`✦`) inside!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=True, draw_iris=False)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=True, draw_iris=False)
+        self._draw_cyber_blush(lx, rx, cy + eh * 0.54, scale, base_col="#ff4d88", outward_shift=38 * scale)
+
+        star_pulse = 1.0 + 0.16 * math.sin(self.anim_phase * 8.0)
+        for cx in (lx, rx):
+            icx = cx + look_x * 12.0 * scale
+            icy = cy + look_y * 9.0 * scale - 10.0 * scale
+            self._draw_sparkle(icx, icy, 38.0 * scale * star_pulse, main_col, "#ffffff")
+            self._draw_sparkle(icx - 24 * scale, icy - 16 * scale, 10.0 * scale, "#ffffff")
+            self._draw_sparkle(icx + 24 * scale, icy + 12 * scale, 8.5 * scale, "#fde047")
+
+        self._draw_sparkle(lx - ew * 0.62, cy - eh * 0.28, 11.0 * scale * star_pulse, "#fde047")
+        self._draw_sparkle(rx + ew * 0.62, cy - eh * 0.28, 11.0 * scale * star_pulse, "#fde047")
+
+    def _draw_laughing_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        13. LAUGHING: Joyful squeezed-shut tangerine-gold chevron eyes (>   <) with multi-tier neon bloom,
+        glossy white upper-arm highlight, flying sky-blue joy-teardrop beads, and /// blush!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_cyber_blush(lx, rx, cy + eh * 0.36, scale, base_col="#ff5588", outward_shift=16 * scale)
+
+        w_half = ew * 0.44
+        h_half = eh * 0.32
+
+        pts_l = [lx - w_half, cy - h_half, lx + w_half * 0.85, cy, lx - w_half, cy + h_half]
+        pts_r = [rx + w_half, cy - h_half, rx - w_half * 0.85, cy, rx + w_half, cy + h_half]
+
+        for pts in (pts_l, pts_r):
+            self.canvas.create_line(pts, fill=glow_col, width=int(32 * scale), capstyle=tk.ROUND, joinstyle=tk.ROUND)
+            self.canvas.create_line(pts, fill="#ea580c", width=int(21 * scale), capstyle=tk.ROUND, joinstyle=tk.ROUND)
+            self.canvas.create_line(pts, fill="#ffbe0b", width=int(13 * scale), capstyle=tk.ROUND, joinstyle=tk.ROUND)
+            self.canvas.create_line(pts[:4], fill="#ffffff", width=max(2, int(4.5 * scale)), capstyle=tk.ROUND)
+
+        for side, tx in [(-1, lx - w_half - 12 * scale), (1, rx + w_half + 12 * scale)]:
+            ty = cy + h_half * 0.35
+            tr = 7.5 * scale
+            self.canvas.create_oval(tx - tr, ty - tr, tx + tr, ty + tr, fill="#38bdf8", outline="#ffffff", width=max(1, int(1.5 * scale)))
+
+    def _draw_love_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        14. LOVE ("Love is good but reflection like claude would be cool."):
+        Frameless Bordered Neon-Rose Heart Optics (♥   ♥) WITH Claude-style glowing horizontal
+        floor reflection pads directly underneath the bottom point of each heart + crisp upper-lobe reflections!
+        """
+        scale = self.ui_scale / 1.8
+        beat = 1.0 + 0.08 * math.sin(self.anim_phase * 6.5)
+
+        def _heart_poly(hcx: float, hcy: float, hs: float) -> List[float]:
+            pts = []
+            for i in range(120):
+                t = (i / 120.0) * 2.0 * math.pi
+                hx = 16.0 * (math.sin(t) ** 3)
+                hy = -(13.0 * math.cos(t) - 5.0 * math.cos(2 * t) - 2.0 * math.cos(3 * t) - math.cos(4 * t))
+                pts.extend([hcx + hx * hs, hcy + hy * hs])
+            return pts
+
+        for cx in (lx, rx):
+            hcx = cx + look_x * 10.0 * scale
+            hcy = cy + look_y * 8.0 * scale - 4 * scale
+
+            ref_y = hcy + 98.0 * scale
+            ref_w = 64.0 * scale * beat
+            ref_h = 14.0 * scale * beat
+            for r_m, r_col in [(1.15, "#2b0618"), (0.82, "#590d32"), (0.52, "#b81d65"), (0.26, "#ff75b5")]:
+                self.canvas.create_oval(
+                    hcx - ref_w * r_m, ref_y - ref_h * r_m,
+                    hcx + ref_w * r_m, ref_y + ref_h * r_m,
+                    fill=r_col, outline=""
+                )
+
+            self.canvas.create_polygon(_heart_poly(hcx, hcy, 6.2 * scale * beat), smooth=False, fill=glow_col, outline="")
+            self.canvas.create_polygon(_heart_poly(hcx, hcy, 5.4 * scale * beat), smooth=False, fill=main_col, outline="")
+            self.canvas.create_polygon(_heart_poly(hcx, hcy, 4.4 * scale * beat), smooth=False, fill="#e11d74", outline="#ff9ebb", width=max(1, int(2.0 * scale)))
+            self.canvas.create_polygon(_heart_poly(hcx, hcy + 2 * scale, 2.8 * scale * beat), smooth=False, fill="#ff4d94", outline="")
+
+            self.canvas.create_oval(
+                hcx - 52 * scale * beat, hcy - 48 * scale * beat,
+                hcx - 22 * scale * beat, hcy - 22 * scale * beat,
+                fill="#ffffff", outline=""
+            )
+            self.canvas.create_oval(
+                hcx - 16 * scale * beat, hcy - 44 * scale * beat,
+                hcx - 4 * scale * beat, hcy - 32 * scale * beat,
+                fill="#ffffff", outline=""
+            )
+            self.canvas.create_oval(
+                hcx + 24 * scale * beat, hcy - 36 * scale * beat,
+                hcx + 38 * scale * beat, hcy - 22 * scale * beat,
+                fill="#ffd1e6", outline=""
+            )
+
+        for side, fx in [(-1, lx - ew * 0.62), (1, rx + ew * 0.62)]:
+            fy = cy - eh * 0.28 + math.sin(self.anim_phase * 4.0 + side) * (6.0 * scale)
+            self.canvas.create_polygon(_heart_poly(fx, fy, 1.35 * scale), smooth=False, fill="#ff75b5", outline="")
+
+    def _draw_wink_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        15. WINK: Left open eye is a sleek bordered turquoise-mint optical lens WITH a seamless upward-curved bottom (`smile_bottom=True`)!
+        Right eye is a joyful multi-tier neon wink arch (`∩`) with outer lash flick & popping star (`✦`).
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, look_x, look_y, smile_bottom=True)
+        self._draw_cyber_blush(lx, rx, cy + eh * 0.54, scale, base_col="#ff4d88", outward_shift=36 * scale)
+
+        w_half = ew * 0.45
+        h_arch = eh * 0.30
+        wy = cy + 8 * scale
+        pts = []
+        for i in range(21):
+            ang = math.pi - (i / 20.0) * math.pi
+            pts.extend([rx + w_half * math.cos(ang), wy - h_arch * math.sin(ang)])
+        pts.extend([rx + w_half + 14 * scale, wy - 10 * scale])
+
+        self.canvas.create_line(pts, smooth=True, fill=glow_col, width=int(26 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill="#00b4d8", width=int(16 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=main_col, width=int(10 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[12:30], smooth=True, fill="#ffffff", width=max(1, int(3.2 * scale)), capstyle=tk.ROUND)
+        self._draw_sparkle(rx + ew * 0.62, cy - eh * 0.16, 13.5 * scale, "#fde047", "#ffffff")
+
+    def _draw_surprised_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        16. SURPRISED: Circular Electric Ice-Blue Bordered Shock Orbs (O   O) with vibrating
+        concentric shockwave rings, tiny contracted pinpoint pupils, and radial exclamation rays!
+        """
+        scale = self.ui_scale / 1.8
+        r_orb = min(ew, eh) * 0.50
+        jitter_x = math.sin(self.anim_phase * 18.0) * (1.2 * scale)
+
+        for cx in (lx, rx):
+            self.canvas.create_oval(cx - r_orb - 10 * scale, cy - r_orb - 10 * scale, cx + r_orb + 10 * scale, cy + r_orb + 10 * scale, fill=glow_col, outline="")
+            self.canvas.create_oval(cx - r_orb, cy - r_orb, cx + r_orb, cy + r_orb, fill="#040b16", outline=main_col, width=int(6.5 * scale))
+            for r_mult, r_col in [(0.68, "#0284c7"), (0.44, "#38bdf8")]:
+                rr = r_orb * r_mult
+                self.canvas.create_oval(cx + jitter_x - rr, cy - rr, cx + jitter_x + rr, cy + rr, fill="", outline=r_col, width=int(2.2 * scale))
+            pr = r_orb * 0.16
+            self.canvas.create_oval(cx + jitter_x - pr, cy - pr, cx + jitter_x + pr, cy + pr, fill="#ffffff", outline=main_col, width=int(2 * scale))
+            self.canvas.create_oval(cx - r_orb * 0.58, cy - r_orb * 0.58, cx - r_orb * 0.22, cy - r_orb * 0.30, fill="#ffffff", outline="")
+
+        mid_x = (lx + rx) / 2.0
+        ray_base_y = cy - r_orb * 1.04
+        for ang_deg in (-32, 0, 32):
+            rad_a = math.radians(ang_deg - 90)
+            rx1 = mid_x + math.cos(rad_a) * (12 * scale)
+            ry1 = ray_base_y + math.sin(rad_a) * (12 * scale)
+            rx2 = mid_x + math.cos(rad_a) * (28 * scale)
+            ry2 = ray_base_y + math.sin(rad_a) * (28 * scale)
+            self.canvas.create_line(rx1, ry1, rx2, ry2, fill="#fde047", width=max(2, int(3.8 * scale)), capstyle=tk.ROUND)
+
+    def _draw_sleepy_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        17. SLEEPY: Heavy-lidded dreamy lavender bordered eyes where a curved drowsy upper eyelid
+        droops 65% down across the eye, leaving a dim sleepy crescent of the iris below + cascading Zzz!
+        """
+        scale = self.ui_scale / 1.8
+        drift = math.sin(self.anim_phase * 1.1) * (3.0 * scale)
+        ey = cy + drift
+
+        self._draw_standard_eye(lx, ey, ew, eh * 0.90, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
+        self._draw_standard_eye(rx, ey, ew, eh * 0.90, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
+
+        eh_s = eh * 0.90
+        lid_y = ey + eh_s * 0.10
+        for cx in (lx, rx):
+            mask_pts = [
+                cx - ew / 2.0 - 14 * scale, ey - eh_s / 2.0 - 14 * scale,
+                cx + ew / 2.0 + 14 * scale, ey - eh_s / 2.0 - 14 * scale,
+                cx + ew / 2.0 + 14 * scale, lid_y - 6 * scale,
+                cx, lid_y + 12 * scale,
+                cx - ew / 2.0 - 14 * scale, lid_y - 6 * scale,
+            ]
+            self.canvas.create_polygon(mask_pts, smooth=True, fill=self.bg_color, outline="")
+            lid_line = [
+                cx - ew * 0.46, lid_y - 6 * scale,
+                cx, lid_y + 12 * scale,
+                cx + ew * 0.46, lid_y - 6 * scale,
+            ]
+            self.canvas.create_line(lid_line, smooth=True, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(lid_line, smooth=True, fill=main_col, width=int(6 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(lid_line, smooth=True, fill="#e0e7ff", width=max(1, int(2 * scale)), capstyle=tk.ROUND)
+
+        z_specs = [(24, 15, -14), (48, 20, -40), (76, 26, -70)]
+        for idx, (dx, f_pt, y_off) in enumerate(z_specs):
+            bob = math.sin(self.anim_phase * 2.2 + idx * 1.1) * (4.0 * scale)
+            zx = rx + ew * 0.46 + dx * scale
+            zy = cy + y_off * scale + bob
+            self.canvas.create_text(zx, zy, text="Z", fill="#e0e7ff" if idx == 2 else main_col, font=(FONT_FAMILY, int(f_pt * scale), "bold"))
+
+    def _draw_shy_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        18. SHY ("Make shy a Little more shy with blush.."):
+        Soft sakura-coral bordered optical eyes with deeper bashful outer-slanted upper lids,
+        averted quivering pupils tucked down-inward, extra-large 1.38x glowing rose-pink cheek blush
+        cushions (////) PLUS cute across-the-nose bridge blush strokes, and a bashful sweat drop!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew * 0.94, eh * 0.92, main_col, glow_col, -0.32, 0.28, smile_bottom=False, catchlight_dy=24 * scale)
+        self._draw_standard_eye(rx, cy, ew * 0.94, eh * 0.92, main_col, glow_col, -0.32, 0.28, smile_bottom=False, catchlight_dy=24 * scale)
+
+        sw, sh = ew * 0.94, eh * 0.92
+        for side, cx in [(-1, lx), (1, rx)]:
+            top_in = cy - sh * 0.36
+            top_out = cy - sh * 0.04
+            tl = top_out if side == -1 else top_in
+            tr = top_in if side == -1 else top_out
+            mask = [
+                cx - sw / 2.0 - 12 * scale, cy - sh / 2.0 - 14 * scale,
+                cx + sw / 2.0 + 12 * scale, cy - sh / 2.0 - 14 * scale,
+                cx + sw / 2.0 + 12 * scale, tr,
+                cx - sw / 2.0 - 12 * scale, tl,
+            ]
+            self.canvas.create_polygon(mask, fill=self.bg_color, outline="")
+            self.canvas.create_line(cx - sw * 0.46, tl, cx + sw * 0.46, tr, fill=main_col, width=int(6.5 * scale), capstyle=tk.ROUND)
+
+        self._draw_cyber_blush(
+            lx, rx, cy + eh * 0.54, scale,
+            base_col="#ff2a85", outward_shift=22 * scale,
+            size_mult=1.38, extra_slashes=True
+        )
+
+        mid_x = (lx + rx) / 2.0
+        bridge_y = cy + eh * 0.24
+        self.canvas.create_oval(
+            mid_x - 32 * scale, bridge_y - 10 * scale,
+            mid_x + 32 * scale, bridge_y + 10 * scale,
+            fill=lerp_color(self.bg_color, "#ff2a85", 0.32), outline=""
+        )
+        for b_i in (-1, 0, 1):
+            bx_s = mid_x + b_i * (11.0 * scale)
+            self.canvas.create_line(
+                bx_s - 3 * scale, bridge_y + 4.5 * scale,
+                bx_s + 3 * scale, bridge_y - 4.5 * scale,
+                fill="#ff9ebb", width=max(1, int(2.2 * scale)), capstyle=tk.ROUND
+            )
+
+        sx = lx - ew * 0.58
+        sy = cy - eh * 0.16
+        sr = 9.0 * scale
+        self.canvas.create_polygon([sx - sr, sy, sx, sy - sr * 2.0, sx + sr, sy], fill="#7dd3fc", outline="")
+        self.canvas.create_oval(sx - sr, sy - sr, sx + sr, sy + sr, fill="#7dd3fc", outline="#ffffff", width=1)
+
+    def _draw_proud_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float = 0.0, look_y: float = 0.0):
+        """
+        19. PROUD ("Proud does not look proud enough, I don't want the crown, I want a smirk and that look in the eyes."):
+        ZERO crown! Confident, smug-heroic Royal-Gold Bordered Optical Eyes:
+          - Seamless upward-curved smiling lower eyelids (`smile_bottom=True`),
+          - Confident, self-assured half-hooded upper eyelids angled with swagger,
+          - Warm glowing golden irises with a bright 4-point star glint inside!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, 0.12, -0.05, smile_bottom=True, catchlight_dy=14 * scale)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, 0.12, -0.05, smile_bottom=True, catchlight_dy=14 * scale)
+
+        for side, cx in [(-1, lx), (1, rx)]:
+            lid_in = cy - eh * 0.16
+            lid_out = cy - eh * 0.24
+            tl = lid_out if side == -1 else lid_in
+            tr = lid_in if side == -1 else lid_out
+            mask = [
+                cx - ew / 2.0 - 14 * scale, cy - eh / 2.0 - 14 * scale,
+                cx + ew / 2.0 + 14 * scale, cy - eh / 2.0 - 14 * scale,
+                cx + ew / 2.0 + 14 * scale, tr,
+                cx - ew / 2.0 - 14 * scale, tl,
+            ]
+            self.canvas.create_polygon(mask, fill=self.bg_color, outline="")
+            self.canvas.create_line(cx - ew * 0.48, tl, cx + ew * 0.48, tr, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(cx - ew * 0.48, tl, cx + ew * 0.48, tr, fill=main_col, width=int(6.5 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(cx - ew * 0.34, tl + (tr - tl) * 0.15, cx + ew * 0.34, tr - (tr - tl) * 0.15, fill="#fef08a", width=max(1, int(2.2 * scale)), capstyle=tk.ROUND)
+
+        self._draw_sparkle(rx + ew * 0.60, cy - eh * 0.22, 10.5 * scale, "#fde047", "#ffffff")
+
+    def _draw_curious_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
+        """
+        20. CURIOUS ("curious should be more like surpriced but with flickering light bulb , the idea one.. and a glow in the eyes.. and an O mouth.."):
+        Wide, circular/super-ellipse Surprised-Style Bordered Optical Eyes (right eye slightly wider in fascination)
+        with a RADIANT MULTI-LAYER INNER GLOW in the eyes, plus a brightly flickering Idea Lightbulb (💡) at the top-right!
+        """
+        scale = self.ui_scale / 1.8
+        for cx, sc_m in [(lx, 1.00), (rx, 1.08)]:
+            cw = ew * sc_m
+            ch = eh * sc_m
+            self._draw_standard_eye(cx, cy, cw, ch, main_col, glow_col, 0.14, -0.10, corner_r=int(cw * 0.46), draw_iris=False, draw_catchlights=False)
+
+            icx = cx + 6.0 * scale
+            icy = cy - 4.0 * scale
+            pulse = 1.0 + 0.08 * math.sin(self.anim_phase * 6.0)
+            r_max = min(cw, ch) * 0.38 * pulse
+            for r_frac, g_col in [
+                (1.00, "#064e3b"),
+                (0.80, "#059669"),
+                (0.58, "#10b981"),
+                (0.38, "#6ee7b7"),
+                (0.20, "#ffffff"),
+            ]:
+                rr = r_max * r_frac
+                self.canvas.create_oval(icx - rr, icy - rr, icx + rr, icy + rr, fill=g_col, outline="")
+
+            self._draw_sparkle(icx - r_max * 0.45, icy - r_max * 0.45, 9.5 * scale, "#ffffff")
+            self.canvas.create_oval(cx - cw * 0.28, cy - ch * 0.30, cx - cw * 0.08, cy - ch * 0.16, fill="#ffffff", outline="")
+            self.canvas.create_oval(cx + cw * 0.18, cy + ch * 0.16, cx + cw * 0.28, cy + ch * 0.26, fill="#a7f3d0", outline="")
+
+        self._draw_flickering_lightbulb(rx + ew * 0.74, cy - eh * 0.42, scale * 1.12, mode="idea")
+
+    def _draw_skeptical_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str):
+        """
+        21. SKEPTICAL: Deadpan Half-Lidded Side-Eye with '...' temple dots!
+        """
+        scale = self.ui_scale / 1.8
+        self._draw_standard_eye(lx, cy, ew, eh, main_col, glow_col, 0.34, 0.12, smile_bottom=False, catchlight_dy=28 * scale)
+        self._draw_standard_eye(rx, cy, ew, eh, main_col, glow_col, 0.34, 0.0, smile_bottom=False)
+
+        lid_y = cy + eh * 0.02
+        self.canvas.create_rectangle(
+            lx - ew / 2.0 - 14 * scale, cy - eh / 2.0 - 14 * scale,
+            lx + ew / 2.0 + 14 * scale, lid_y,
+            fill=self.bg_color, outline=""
+        )
+        self.canvas.create_line(lx - ew * 0.46, lid_y, lx + ew * 0.46, lid_y, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(lx - ew * 0.46, lid_y, lx + ew * 0.46, lid_y, fill=main_col, width=int(6 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(lx - ew * 0.32, lid_y, lx + ew * 0.32, lid_y, fill="#ecfccb", width=max(1, int(2 * scale)), capstyle=tk.ROUND)
+
+        for d_i in range(3):
+            dx = lx - ew * 0.66 - d_i * (12 * scale)
+            dy = cy - eh * 0.26
+            self.canvas.create_oval(dx - 3.5 * scale, dy - 3.5 * scale, dx + 3.5 * scale, dy + 3.5 * scale, fill="#a3e635", outline="")
+
+    def _draw_cool_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float = 0.0, look_y: float = 0.0):
+        """
+        22. COOL ("ALSO I WANT A COOL EXPRESSION LIKE CLAUDE but in YOUR design sceme, with the borders and all.. Or maybe same as claude but BETTER.."):
+        Sleek Bordered Neon-Cyan Cyber-Aviator Sunglasses Visor:
+          - Wide, flat-topped aviator-squircle bordered lenses with our signature glowing neon rim & dark polarized chamber,
+          - Connected across the bridge by a glowing double-bar nose bridge + angled outer temple arms,
+          - Claude-style upper translucent glass reflection band + diagonal speed-sheen slashes (//),
+          - Subtle glowing cyan iris rings peeking through the dark tint + a flashing star glint on the frame corner!
+        """
+        scale = self.ui_scale / 1.8
+        gw = ew * 1.08
+        gh = eh * 0.72
+        gy_c = cy + 2 * scale
+
+        arm_y1 = gy_c - gh * 0.36
+        arm_y2 = gy_c - gh * 0.56
+        self.canvas.create_line(lx - gw * 0.50, arm_y1, lx - gw * 0.68, arm_y2, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(lx - gw * 0.50, arm_y1, lx - gw * 0.68, arm_y2, fill=main_col, width=int(5.5 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(rx + gw * 0.50, arm_y1, rx + gw * 0.68, arm_y2, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(rx + gw * 0.50, arm_y1, rx + gw * 0.68, arm_y2, fill=main_col, width=int(5.5 * scale), capstyle=tk.ROUND)
+
+        br_x1 = lx + gw * 0.46
+        br_x2 = rx - gw * 0.46
+        br_y = gy_c - gh * 0.28
+        self.canvas.create_line(br_x1, br_y, br_x2, br_y, fill=glow_col, width=int(14 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(br_x1, br_y, br_x2, br_y, fill=main_col, width=int(6.5 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(br_x1, br_y - 2 * scale, br_x2, br_y - 2 * scale, fill="#ffffff", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
+
+        for cx in (lx, rx):
+            x1, y1 = cx - gw / 2.0, gy_c - gh / 2.0
+            x2, y2 = cx + gw / 2.0, gy_c + gh / 2.0
+            rad_g = int(gh * 0.36)
+
+            self._create_rounded_rect(x1 - 8 * scale, y1 - 8 * scale, x2 + 8 * scale, y2 + 8 * scale, rad_g + int(6 * scale), fill=lerp_color(self.bg_color, main_col, 0.22), outline="")
+            self._create_rounded_rect(x1, y1, x2, y2, rad_g, fill="#030712", outline=main_col, width=int(6.0 * scale))
+            self._create_rounded_rect(x1 + 5 * scale, y1 + 5 * scale, x2 - 5 * scale, y2 - 5 * scale, max(4, rad_g - int(4 * scale)), fill="#040a18", outline="#0c3b5e", width=max(1, int(1.8 * scale)))
+
+            icx = cx + look_x * 10.0 * scale
+            icy = gy_c + 4 * scale + look_y * 6.0 * scale
+            r_ir = gh * 0.24
+            self.canvas.create_oval(icx - r_ir, icy - r_ir, icx + r_ir, icy + r_ir, fill="#05182b", outline="#0284c7", width=max(1, int(2.0 * scale)))
+            self.canvas.create_oval(icx - 4.5 * scale, icy - 4.5 * scale, icx + 4.5 * scale, icy + 4.5 * scale, fill="#38bdf8", outline="")
+
+            band_pad = 9.0 * scale
+            band_h = gh * 0.32
+            self._create_rounded_rect(
+                x1 + band_pad, y1 + band_pad,
+                x2 - band_pad, y1 + band_pad + band_h,
+                int(band_h * 0.42), fill="#0d253f", outline=""
+            )
+            self.canvas.create_oval(
+                x1 + 18 * scale, y1 + 14 * scale,
+                x1 + 42 * scale, y1 + 23 * scale,
+                fill="#e0f2fe", outline=""
+            )
+
+            sh_x = cx + 14 * scale + math.sin(self.anim_phase * 2.5) * (6.0 * scale)
+            self.canvas.create_line(sh_x - 12 * scale, y2 - 12 * scale, sh_x + 10 * scale, y1 + 12 * scale, fill="#38bdf8", width=max(1, int(3.0 * scale)), capstyle=tk.ROUND)
+            self.canvas.create_line(sh_x, y2 - 12 * scale, sh_x + 22 * scale, y1 + 12 * scale, fill="#bae6fd", width=max(1, int(1.8 * scale)), capstyle=tk.ROUND)
+
+        self._draw_sparkle(rx + gw * 0.44, gy_c - gh * 0.44, 11.0 * scale, "#ffffff", "#00f0ff")
+
+    # =========================================================================
+    # MOUTH & CENTER ANIMATIONS (ALL 22 STATES)
+    # =========================================================================
+    def _draw_happy_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        bounce = math.sin(self.anim_phase * 6.0) * (2.8 * scale)
+        mouth_cy = cy + bounce - int(6 * scale)
+        mw = int(112 * scale)
+        mh = int(20 * scale)
+
+        pts = []
+        num_pts = 17
+        for i in range(num_pts):
+            t = (i / (num_pts - 1)) * 2.0 - 1.0
+            px = cx + t * (mw / 2.0)
+            py = mouth_cy + (1.0 - t * t) * mh
+            pts.extend([px, py])
+
+        self.canvas.create_line(pts, smooth=True, fill="#003d22", width=int(16 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill="#00cc66", width=int(10 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(6 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[5 * 2 : 12 * 2], smooth=True, fill="#ffffff", width=max(1, int(2.4 * scale)), capstyle=tk.ROUND)
+
+    def _draw_sad_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        tremble = math.sin(self.anim_phase * 10.0) * (1.8 * scale)
+        m_y = cy - 4 * scale + tremble
+        mw = int(84 * scale)
+        mh = int(20 * scale)
+        pts = [
+            cx - mw / 2.0, m_y + mh,
+            cx - mw * 0.28, m_y + mh * 0.30,
+            cx, m_y,
+            cx + mw * 0.28, m_y + mh * 0.30,
+            cx + mw / 2.0, m_y + mh,
+        ]
+        self.canvas.create_line(pts, smooth=True, fill="#0e2447", width=int(14 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(6 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[2:8], smooth=True, fill="#bae6fd", width=max(1, int(1.8 * scale)), capstyle=tk.ROUND)
+
+    def _draw_idle_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        breathe = math.sin(self.anim_phase * 1.8) * (1.5 * scale)
+        m_y = cy + breathe - int(4 * scale)
+        w = int(98 * scale)
+        h = int(12 * scale)
+
+        pts = []
+        num_pts = 15
+        for i in range(num_pts):
+            t = (i / (num_pts - 1)) * 2.0 - 1.0
+            px = cx + t * (w / 2.0)
+            py = m_y + (1.0 - t * t) * h
+            pts.extend([px, py])
+
+        self.canvas.create_line(pts, smooth=True, fill=self.color_eye_glow, width=int(12 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(5.5 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[4 * 2 : 11 * 2], smooth=True, fill="#ffffff", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
+
+    def _draw_speaking_mouth(self, cx: float, cy: float, col: str):
+        """
+        7. SPEAKING Mouth ("In speaking I want music icons 🎶 coming out of the mouth, A COOL, TESTED, SEAMLESS, SMOOTH animation."):
+        19-band reactive voice frequency equalizer WITH a continuous, seamless stream of glowing
+        vector musical notes (`♫` and `♪`) floating smoothly out of both sides of the mouth!
+        """
+        scale = self.ui_scale / 1.8
+        base_w = int(196 * self.ui_scale)
+
+        for w_idx in range(2):
+            wave_phase = (self.anim_phase * 2.2 + w_idx * 0.5) % 1.0
+            wave_r = (30 + wave_phase * 58.0) * scale
+            wave_alpha = max(0.0, 1.0 - wave_phase)
+            wave_col = lerp_color(self.bg_color, "#00f0ff", wave_alpha * 0.45 * self.speaking_intensity)
+            if wave_alpha > 0.05 and self.speaking_intensity > 0.2:
+                self.canvas.create_arc(
+                    cx - wave_r, cy - wave_r * 0.38,
+                    cx + wave_r, cy + wave_r * 0.38,
+                    start=195, extent=150, style=tk.ARC, width=int(2 * scale), outline=wave_col
+                )
+
+        self.canvas.create_line(cx - base_w / 2.0, cy, cx + base_w / 2.0, cy, fill="#092033", width=int(2.5 * scale))
+
+        num_pins = 19
+        mid_idx = num_pins // 2
+        pin_spacing = int(9.8 * scale)
+        start_x = cx - ((num_pins - 1) * pin_spacing) / 2.0
+
+        for i in range(num_pins):
+            dist_center = 1.0 - (abs(i - mid_idx) / float(mid_idx)) * 0.55
+            pin_phase = i * 0.58
+            h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 23.0 * dist_center * self.speaking_intensity * scale
+            pin_h = max(3.5 * scale, h_val + 3.5 * scale)
+            px = start_x + i * pin_spacing
+            pin_col = "#00f0ff" if i % 2 == 0 else "#00ffcc"
+
+            self.canvas.create_line(px, cy - pin_h, px, cy + pin_h, fill=pin_col, width=int(4 * scale), capstyle=tk.ROUND)
+            self.canvas.create_oval(px - 2 * scale, cy - pin_h - 2 * scale, px + 2 * scale, cy - pin_h + 2 * scale, fill="#ffffff", outline="")
+            self.canvas.create_oval(px - 2 * scale, cy + pin_h - 2 * scale, px + 2 * scale, cy + pin_h + 2 * scale, fill="#ffffff", outline="")
+
+        note_configs = [
+            (1, 0.18, True, "#00f0ff"),
+            (-1, 0.43, False, "#00ffaa"),
+            (1, 0.68, False, "#38bdf8"),
+            (-1, 0.91, True, "#00f0ff"),
+        ]
+        for side, phase_off, is_pair, n_col in note_configs:
+            np = (self.anim_phase * 0.55 + phase_off) % 1.0
+            env = math.sin(np * math.pi)
+            if env > 0.08:
+                nx = cx + side * ((64.0 + np * 92.0) * scale) + math.sin(np * 5.0 + side) * (8.0 * scale)
+                ny = cy + (6.0 - np * 52.0) * scale
+                nsz = (9.5 + 4.5 * env) * scale
+                c_fg = lerp_color(self.bg_color, n_col, min(1.0, env * 1.25))
+                c_gl = lerp_color(self.bg_color, n_col, env * 0.38)
+                self._draw_music_note(nx, ny, nsz, c_fg, c_gl, beamed_pair=is_pair)
+
+    def _draw_listening_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        num_ripples = 4
+        for r_idx in range(num_ripples):
+            rip_t = (self.anim_phase * 1.5 + r_idx * (1.0 / num_ripples)) % 1.0
+            rip_r = (12.0 + rip_t * 56.0) * scale
+            rip_alpha = max(0.0, 1.0 - rip_t)
+            rip_col = lerp_color(self.bg_color, "#00ffcc", rip_alpha * 0.75)
+            rip_w = max(1, int((3.2 * (1.0 - rip_t * 0.5)) * scale))
+            if rip_alpha > 0.05:
+                self.canvas.create_oval(cx - rip_r, cy - rip_r * 0.48, cx + rip_r, cy + rip_r * 0.48, fill="", outline=rip_col, width=rip_w)
+
+        sensor_r = 7.0 * scale
+        self.canvas.create_oval(cx - sensor_r - 6 * scale, cy - sensor_r - 6 * scale, cx + sensor_r + 6 * scale, cy + sensor_r + 6 * scale, fill="#002b22", outline="")
+        self.canvas.create_oval(cx - sensor_r, cy - sensor_r, cx + sensor_r, cy + sensor_r, fill="#00ffcc", outline="#ffffff", width=max(1, int(1.5 * scale)))
+
+        for side in (-1, 1):
+            dot_x = cx + side * (82 * scale)
+            self.canvas.create_line(cx + side * (20 * scale), cy, dot_x, cy, fill="#004d3d", width=max(1, int(2 * scale)))
+            for bar_i in range(5):
+                bx = cx + side * ((28 + bar_i * 9) * scale)
+                bh = (3.0 + abs(math.sin(self.anim_phase * 5.0 + bar_i * 0.7 + side)) * 9.5) * scale
+                self.canvas.create_line(bx, cy - bh, bx, cy + bh, fill="#00ffcc", width=max(1, int(2.5 * scale)), capstyle=tk.ROUND)
+
+    def _draw_thinking_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        r = (9.0 + math.sin(self.anim_phase * 3.2) * 2.0) * scale
+        self.canvas.create_oval(cx - r - 4 * scale, cy - r - 4 * scale, cx + r + 4 * scale, cy + r + 4 * scale, fill="#2b0a3d", outline="")
+        self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=col, outline="")
+        self.canvas.create_oval(cx - 3.5 * scale, cy - 3.5 * scale, cx + 3.5 * scale, cy + 3.5 * scale, fill="#ffffff", outline="")
+
+        for d in range(3):
+            wave_y = math.sin(self.anim_phase * 5.0 - d * 0.9) * (3.5 * scale)
+            dx = (24 + d * 11) * scale
+            self.canvas.create_oval(
+                cx + dx - 3 * scale, cy + wave_y - 3 * scale,
+                cx + dx + 3 * scale, cy + wave_y + 3 * scale,
+                fill="#e9d5ff", outline=""
+            )
+
+    def _draw_confused_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        tilt_y = math.sin(self.anim_phase * 3.5) * (2.0 * scale)
+        w = int(42 * scale)
+        points = [
+            cx - w, cy + 4 * scale + tilt_y,
+            cx - w * 0.45, cy - 9 * scale,
+            cx, cy + 8 * scale,
+            cx + w * 0.45, cy - 8 * scale,
+            cx + w, cy + 2 * scale - tilt_y,
+        ]
+        self.canvas.create_line(points, smooth=True, fill="#4d3400", width=int(12 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(points, smooth=True, fill=col, width=int(6 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(points[2:8], smooth=True, fill="#fef08a", width=max(1, int(2.2 * scale)), capstyle=tk.ROUND)
+
+    def _draw_error_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        alarm_pulse = 0.5 + 0.5 * math.sin(self.anim_phase * 10.0)
+        cur_red = lerp_color("#ff2244", "#ffffff", alarm_pulse * 0.4)
+        jitter = math.sin(self.anim_phase * 24.0) * (1.5 * scale)
+
+        points = [
+            cx - 48 * scale, cy,
+            cx - 32 * scale, cy - 11 * scale + jitter,
+            cx - 16 * scale, cy + 10 * scale - jitter,
+            cx, cy - 12 * scale + jitter,
+            cx + 16 * scale, cy + 10 * scale - jitter,
+            cx + 32 * scale, cy - 11 * scale + jitter,
+            cx + 48 * scale, cy,
+        ]
+        self.canvas.create_line(points, fill="#4a0011", width=int(14 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(points, fill=cur_red, width=int(4.5 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(points, fill="#ffffff", width=max(1, int(1.6 * scale)), capstyle=tk.ROUND)
+
+    def _draw_villain_mouth(self, cx: float, cy: float, col: str):
+        """
+        Signature Rogue AI Sinister Smirk — kept ROUGH & ANGULAR like an MS-Paint sketch (`smooth=False`, `aa=False`)
+        with Hollywood Hacked crimson/lime chromatic glitch double-strokes!
+        """
+        scale = self.ui_scale / 1.8
+        m_cy = cy - 10 * scale
+        jit = math.sin(self.anim_phase * 34.0) * (1.8 * scale)
+        glitch_dx = 3.5 * scale * math.cos(self.anim_phase * 25.0)
+
+        # Angular MS-Paint-style smirk vertices (smooth=False so it looks raw and sketched!)
+        smirk_pts = [
+            cx - 96 * scale, m_cy + 4 * scale,
+            cx - 56 * scale, m_cy + 16 * scale,
+            cx - 12 * scale, m_cy + 20 * scale,
+            cx + 32 * scale, m_cy + 13 * scale,
+            cx + 74 * scale, m_cy - 3 * scale,
+            cx + 106 * scale, m_cy - 21 * scale,
+            cx + 126 * scale, m_cy - 36 * scale,
+        ]
+        # Crimson chromatic glitch ghost smirk
+        ghost_pts = []
+        for idx in range(0, len(smirk_pts), 2):
+            ghost_pts.extend([smirk_pts[idx] - glitch_dx, smirk_pts[idx + 1] + 2.5 * scale])
+        self.canvas.create_line(ghost_pts, smooth=False, fill="#b80028", width=int(6 * scale))
+
+        # Dark green glow + main toxic lime rough MS-Paint stroke + sketchy second pass
+        self.canvas.create_line(smirk_pts, smooth=False, fill="#042a10", width=int(14 * scale))
+        self.canvas.create_line(smirk_pts, smooth=False, fill=col, width=int(6.2 * scale))
+
+        sketch_smirk = []
+        for idx in range(0, len(smirk_pts), 2):
+            off = jit if (idx // 2) % 2 == 0 else -jit
+            sketch_smirk.extend([smirk_pts[idx] + off * 0.6, smirk_pts[idx + 1] - off])
+        self.canvas.create_line(sketch_smirk, smooth=False, fill="#d9ffdf", width=max(1, int(2.0 * scale)))
+
+        # Sharp angular corner smirk slash flick
+        flick_tip_x = cx + 138 * scale
+        flick_tip_y = m_cy - 52 * scale
+        self.canvas.create_line(
+            cx + 118 * scale, m_cy - 28 * scale,
+            flick_tip_x, flick_tip_y,
+            fill=col, width=int(5.5 * scale)
+        )
+        self.canvas.create_rectangle(
+            flick_tip_x - 3.5 * scale, flick_tip_y - 3.5 * scale,
+            flick_tip_x + 3.5 * scale, flick_tip_y + 3.5 * scale,
+            fill="#ff003c", outline="#ffffff", width=1
+        )
+
+        # Rough MS-Paint angular chin scratch line
+        chin_pts = [
+            cx - 46 * scale, m_cy + 30 * scale,
+            cx - 20 * scale, m_cy + 33 * scale,
+            cx + 2 * scale, m_cy + 31 * scale,
+        ]
+        self.canvas.create_line(chin_pts, smooth=False, fill="#0d5224", width=int(6 * scale))
+        self.canvas.create_line(chin_pts, smooth=False, fill=col, width=int(3.2 * scale))
+
+    def _draw_villain_hacked_crt_overlay(
+        self,
+        w: float,
+        h: float,
+        cx: float,
+        eye_cy: float,
+        btn_y: float = 365.0,
+        sub_speaker: str = "NEUROLIS MARK II",
+        sub_text: str = "",
+    ):
+        """
+        Realistic Full-Screen System Invasion & CRT Hack Overlay for VILLAIN mode:
+          - Full-screen CRT horizontal scanlines & rolling V-Sync error line scan from y=0 to y=h (across the ENTIRE screen, buttons, and subtitles!).
+          - Realistic flickering HUD buttons that dynamically glitch between ERROR codes (`[ ! ERR_0x7F // SYS_LOCKED ]`, `[ ! OVERRIDE // ERR_503 ]`).
+          - Realistic flickering subtitle text & status pill with subtle horizontal CRT phase jitter (±1.5px).
+        """
+        scale = self.ui_scale / 1.8
+        scale_x = w / 1024.0
+        scale_y = h / 600.0
+        flicker_fast = math.sin(self.anim_phase * 28.0)
+        flicker_slow = math.cos(self.anim_phase * 11.0)
+        is_glitch_tick = (flicker_fast > 0.38) or (flicker_slow < -0.62)
+
+        # 1. FULL-SCREEN CRT Horizontal Scanlines (top to bottom: 0 -> h)
+        scan_step = max(6, int(8 * scale_y))
+        for sy in range(0, int(h), scan_step):
+            scol = "#051e0f" if (sy // scan_step) % 2 == 0 else "#031209"
+            self.canvas.create_line(0, sy, w, sy, fill=scol, width=1)
+
+        # 2. FULL-SCREEN Rolling Horizontal CRT Error Line Scan (sweeps 0 -> h continuously)
+        scan_y1 = ((self.anim_phase * 135.0) % h)
+        scan_y2 = ((self.anim_phase * 78.0 + h * 0.48) % h)
+        band_h = 18.0 * scale_y
+        self.canvas.create_rectangle(0, scan_y1 - band_h * 0.5, w, scan_y1 + band_h * 0.5, fill="#052110", outline="")
+        self.canvas.create_line(0, scan_y1, w, scan_y1, fill="#39ff14", width=max(1, int(2.0 * scale_y)))
+        self.canvas.create_line(0, scan_y1 + 2.5 * scale_y, w, scan_y1 + 2.5 * scale_y, fill="#ff003c", width=1)
+
+        # Secondary subtle crimson/cyan CRT error scanline
+        self.canvas.create_line(0, scan_y2, w, scan_y2, fill="#ff003c" if is_glitch_tick else "#15803d", width=max(1, int(1.5 * scale_y)))
+
+        # 3. Realistic Horizontal Signal-Tear Slices distributed across Top, Middle, and Buttons
+        tear_configs = [
+            (eye_cy - 68 * scale, -220 * scale, -65 * scale, "#ff003c", 2.2),
+            (eye_cy + 14 * scale, 75 * scale, 240 * scale, "#39ff14", 1.8),
+            (btn_y + 22 * scale_y, -360 * scale_x, 360 * scale_x, "#ff003c" if is_glitch_tick else "#39ff14", 1.8),
+            (btn_y + 44 * scale_y, -340 * scale_x, 340 * scale_x, "#39ff14" if flicker_fast > 0.0 else "#ff003c", 1.6),
+        ]
+        for ty_base, tx1_off, tx2_off, t_col, th_s in tear_configs:
+            jit_x = math.sin(self.anim_phase * 22.0 + ty_base) * (14.0 * scale_x)
+            self.canvas.create_line(
+                cx + tx1_off + jit_x, ty_base,
+                cx + tx2_off + jit_x, ty_base,
+                fill=t_col, width=max(1, int(th_s * scale_y))
+            )
+
+        # 4. Subtle Hex Intrusion Telemetry Columns on Outer Margins
+        hex_tokens = ["0x7F", "ERR!", "ROOT", "0xFF", "HACK", "SYS!", "LOCK", "B00T"]
+        phase_idx = int(self.anim_phase * 6.5)
+        for side, col_x in [(-1, 68 * scale_x), (1, w - 68 * scale_x)]:
+            for row_i in range(5):
+                tok = hex_tokens[(phase_idx + row_i * 3 + (0 if side == -1 else 4)) % len(hex_tokens)]
+                ty = eye_cy - 72 * scale + row_i * (36 * scale)
+                t_col = "#ff003c" if (tok in ("ERR!", "HACK", "SYS!") and is_glitch_tick) else ("#39ff14" if row_i % 2 == 0 else "#15803d")
+                self.canvas.create_text(
+                    col_x, ty,
+                    text=tok,
+                    fill=t_col,
+                    font=(MONO_FONT_FAMILY, max(8, int(9.2 * scale)), "bold")
+                )
+
+        # 5. Forehead Override Banner
+        banner_y = eye_cy - 86 * scale
+        bw = 235 * scale
+        bh = 15 * scale
+        banner_border = "#ff003c" if is_glitch_tick else "#39ff14"
+        self.canvas.create_rectangle(
+            cx - bw, banner_y - bh, cx + bw, banner_y + bh,
+            fill="#041409", outline=banner_border, width=max(1, int(1.8 * scale))
+        )
+        self.canvas.create_text(
+            cx + (1.5 * scale if is_glitch_tick else 0.0), banner_y,
+            text="[ ! SYSTEM INVASION // ROOT OVERRIDE ACTIVE ! ]",
+            fill="#ff003c" if (flicker_fast > 0.55) else "#39ff14",
+            font=(MONO_FONT_FAMILY, max(8, int(9.5 * scale)), "bold")
+        )
+
+        # 6. Dynamic Flickering ERROR Buttons & Flickering Subtitles in VILLAIN Mode
+        if self._hud_geom is not None:
+            bx1, by1, bx2, by2, sbx1, sbx2, radius, sx, sy = self._hud_geom
+            dot_cy = (by1 + by2) * 0.5
+            jit_b = (1.8 * sx) if is_glitch_tick else (-1.0 * sx if flicker_fast < -0.5 else 0.0)
+            b_col1 = "#ff003c" if is_glitch_tick else "#39ff14"
+            b_col2 = "#39ff14" if is_glitch_tick else "#ff003c"
+
+            # Flickering wireframe glitch border over both buttons
+            self._create_rounded_rect(bx1 + jit_b, by1, bx2 + jit_b, by2, radius=radius, fill="#140408" if is_glitch_tick else "#04170b", outline=b_col1, width=2)
+            self._create_rounded_rect(sbx1 - jit_b, by1, sbx2 - jit_b, by2, radius=radius, fill="#04170b" if is_glitch_tick else "#140408", outline=b_col2, width=2)
+
+            # Icon chamber hazard triangles
+            for btn_left, ic_col in [(bx1 + jit_b, b_col1), (sbx1 - jit_b, b_col2)]:
+                icx = btn_left + 28 * sx
+                ir = 8 * sy
+                self.canvas.create_polygon([icx, dot_cy - ir, icx + ir, dot_cy + ir * 0.8, icx - ir, dot_cy + ir * 0.8], fill="", outline=ic_col, width=max(1, int(1.8 * sy)))
+                self.canvas.create_line(icx, dot_cy - ir * 0.3, icx, dot_cy + ir * 0.3, fill=ic_col, width=max(1, int(1.8 * sy)))
+
+            lbl_left = "ERR_0x7F  •  INPUT HIJACKED" if not is_glitch_tick else "[ ! ERROR // SYS_LOCKED ! ]"
+            lbl_right = "ERR_503  •  STANDBY BLOCKED" if not is_glitch_tick else "[ ! ERROR // OVERRIDE ! ]"
+            f_sz = max(8, int(10.0 * sy))
+            self.canvas.create_text((bx1 + bx2) * 0.5 + 10 * sx + jit_b, dot_cy, text=lbl_left, fill="#ffffff" if is_glitch_tick else "#39ff14", font=(MONO_FONT_FAMILY, f_sz, "bold"))
+            self.canvas.create_text((sbx1 + sbx2) * 0.5 + 10 * sx - jit_b, dot_cy, text=lbl_right, fill="#ff9ebb" if is_glitch_tick else "#ff003c", font=(MONO_FONT_FAMILY, f_sz, "bold"))
+
+        # 7. Readable Flickering Subtitles in VILLAIN Mode (Zero duplicate text items; high-contrast font)
+        if hasattr(self, "_sub_geom") and self._sub_geom is not None:
+            sc_x1, sc_y1, sc_x2, sc_y2, sc_rad, div_y, px1, f_sz_sub, wrapped_sub, av_w = self._sub_geom
+            sub_border = "#ff003c" if is_glitch_tick else "#39ff14"
+            self.canvas.create_line(sc_x1 + sc_rad, sc_y1, sc_x2 - sc_rad, sc_y1, fill=sub_border, width=2)
+            self.canvas.create_line(sc_x1 + sc_rad, sc_y2, sc_x2 - sc_rad, sc_y2, fill=sub_border, width=2)
+            sub_jit_x = (1.5 * scale_x) if is_glitch_tick else 0.0
+            # High-contrast readable cyber-green & mint flicker
+            sub_col = "#39ff14" if is_glitch_tick else "#dcfce7"
+            self.canvas.create_text(
+                px1 + sub_jit_x, div_y + int(7 * scale_y),
+                text=wrapped_sub,
+                fill=sub_col,
+                font=(FONT_FAMILY, f_sz_sub, "bold"),
+                anchor="nw",
+                width=int(av_w),
+            )
+
+    def _draw_thinking_spinner(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        halo_cy = cy - self.eye_h * 0.78
+        r = self.eye_spacing * 0.56
+        ry = 12.0 * scale
+
+        self.canvas.create_oval(cx - r, halo_cy - ry, cx + r, halo_cy + ry, fill="", outline="#3b1554", width=max(1, int(1.5 * scale)))
+        for i in range(4):
+            angle = self.thinking_angle * (1.1 + i * 0.15) + (i * (math.pi / 2.0))
             px = cx + math.cos(angle) * r
-            py = cy + math.sin(angle) * (r * 0.30)
-            dot_r = 4 + i
+            py = halo_cy + math.sin(angle) * ry
+            dot_r = (3.5 + (i % 2) * 1.5) * scale
+            self.canvas.create_oval(px - dot_r - 2 * scale, py - dot_r - 2 * scale, px + dot_r + 2 * scale, py + dot_r + 2 * scale, fill="#3b0764", outline="")
             self.canvas.create_oval(px - dot_r, py - dot_r, px + dot_r, py + dot_r, fill=col, outline="")
-            trail_a = angle - 0.25
-            tx = cx + math.cos(trail_a) * r
-            ty = cy + math.sin(trail_a) * (r * 0.30)
-            self.canvas.create_line(tx, ty, px, py, fill="#662299", width=2)
+            self.canvas.create_oval(px - 1.5 * scale, py - 1.5 * scale, px + 1.5 * scale, py + 1.5 * scale, fill="#ffffff", outline="")
 
-    # camera telemetry hud with targeting crosshairs and equalizer pins
-    def _draw_watching_speech_hud(self, cx, cy, col):
-        """Speech HUD specifically active when analyzing camera output."""
-        self.canvas.create_text(cx - 105, cy, text="+", fill="#00ffcc", font=("Segoe UI", 14, "bold"))
-        self.canvas.create_text(cx + 105, cy, text="+", fill="#00ffcc", font=("Segoe UI", 14, "bold"))
+    def _draw_watching_speech_hud(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        for rx in (cx - 102 * scale, cx + 102 * scale):
+            self.canvas.create_oval(rx - 6 * scale, cy - 6 * scale, rx + 6 * scale, cy + 6 * scale, fill="", outline="#004d40", width=1)
+            self.canvas.create_line(rx - 8 * scale, cy, rx + 8 * scale, cy, fill="#00ffcc", width=max(1, int(1.5 * scale)))
+            self.canvas.create_line(rx, cy - 8 * scale, rx, cy + 8 * scale, fill="#00ffcc", width=max(1, int(1.5 * scale)))
 
-        num_bars = 11
-        bar_spacing = 15
-        total_w = (num_bars - 1) * bar_spacing
-        start_x = cx - total_w / 2.0
-
+        num_bars = 13
+        bar_spacing = 13 * scale
+        start_x = cx - ((num_bars - 1) * bar_spacing) / 2.0
         for i in range(num_bars):
-            phase_offset = i * 0.7
-            h_var = math.sin(self.anim_phase * 5.0 + phase_offset) * 22 * self.speaking_intensity
-            bar_h = max(5, abs(h_var) + 6)
-            bx = start_x + (i * bar_spacing)
-            self.canvas.create_line(bx, cy - bar_h, bx, cy + bar_h, fill="#00ffcc", width=4, capstyle=tk.ROUND)
+            h_var = math.sin(self.anim_phase * 5.2 + i * 0.65) * (15.0 * scale) * self.speaking_intensity
+            bar_h = max(3.5 * scale, abs(h_var) + 4.0 * scale)
+            bx = start_x + i * bar_spacing
+            bar_col = "#00ffcc" if i % 2 == 0 else "#38bdf8"
+            self.canvas.create_line(bx, cy - bar_h, bx, cy + bar_h, fill=bar_col, width=max(1, int(3.2 * scale)), capstyle=tk.ROUND)
 
-    # front-facing 4wd robot rolling forward with road tracks streaming backward
-    def _draw_robot_moving_forward(self, cx, cy, col):
-        """Futuristic humanoid robot moving forward towards viewer with perspective lines moving backward."""
-        y_top = cy - 22
-        y_bot = cy + 46
+    def _draw_moving_mouth(self, cx: float, cy: float, col: str):
+        """
+        3D Perspective Cyber-Rover & Speedway with subtle, low-lying translucent rear-tire
+        drift smoke strictly at the road surface behind the wheels (never near the nose!).
+        """
+        scale = self.ui_scale / 1.8
+        y_top = cy - int(30 * scale)
+        y_bot = cy + int(20 * scale)
+        lane_w_top = int(52 * scale)
+        lane_w_bot = int(195 * scale)
 
-        # 1. Ground Perspective Plane & Boundary Lines (Two lines moving backward)
-        lane_w_top = 40
-        lane_w_bot = 165
-
-        # Subtle road floor
         road_poly = [
             cx - lane_w_top, y_top,
             cx + lane_w_top, y_top,
             cx + lane_w_bot, y_bot,
             cx - lane_w_bot, y_bot,
         ]
-        self.canvas.create_polygon(road_poly, fill="#040e1b", outline="", smooth=False)
+        self.canvas.create_polygon(road_poly, fill="#030a16", outline="")
 
-        # Two main perspective boundary lines
-        self.canvas.create_line(cx - lane_w_top, y_top, cx - lane_w_bot, y_bot, fill="#0c2b42", width=3)
-        self.canvas.create_line(cx + lane_w_top, y_top, cx + lane_w_bot, y_bot, fill="#0c2b42", width=3)
+        self.canvas.create_line(cx - lane_w_top, y_top, cx - lane_w_bot, y_bot, fill="#0c3854", width=max(1, int(5 * scale)))
+        self.canvas.create_line(cx - lane_w_top, y_top, cx - lane_w_bot, y_bot, fill="#00f0ff", width=max(1, int(2 * scale)))
+        self.canvas.create_line(cx + lane_w_top, y_top, cx + lane_w_bot, y_bot, fill="#0c3854", width=max(1, int(5 * scale)))
+        self.canvas.create_line(cx + lane_w_top, y_top, cx + lane_w_bot, y_bot, fill="#00f0ff", width=max(1, int(2 * scale)))
 
-        # 2. Backward Streaming Motion Streaks along the two lines (showing forward rush)
-        num_streaks = 4
-        for i in range(num_streaks):
-            t = ((self.anim_phase * 2.2 + i * (1.0 / num_streaks)) % 1.0)
-            t_curve = t * t  # Perspective acceleration as it nears foreground
-            sy1 = y_top + t_curve * (y_bot - y_top)
-            streak_len = 10 + t_curve * 26
-            sy2 = min(y_bot, sy1 + streak_len)
+        for g in range(3):
+            gt = (self.anim_phase * 2.4 + g * 0.33) % 1.0
+            gt_c = gt * gt
+            gy = y_top + gt_c * (y_bot - y_top)
+            gw = lane_w_top + gt_c * (lane_w_bot - lane_w_top)
+            self.canvas.create_line(cx - gw, gy, cx + gw, gy, fill="#0a2d46", width=1)
 
-            s_frac1 = (sy1 - y_top) / (y_bot - y_top)
-            s_frac2 = (sy2 - y_top) / (y_bot - y_top)
+        suspension = math.sin(self.anim_phase * 15.0) * (1.4 * scale)
+        rcy = cy - int(8 * scale) + suspension
+        wheel_w = int(20 * scale)
+        wheel_h = int(28 * scale)
+        wheel_spacing = int(52 * scale)
 
-            # Left perspective track streak
-            sx1_l = cx - (lane_w_top + s_frac1 * (lane_w_bot - lane_w_top))
-            sx2_l = cx - (lane_w_top + s_frac2 * (lane_w_bot - lane_w_top))
-            # Right perspective track streak
-            sx1_r = cx + (lane_w_top + s_frac1 * (lane_w_bot - lane_w_top))
-            sx2_r = cx + (lane_w_top + s_frac2 * (lane_w_bot - lane_w_top))
+        for w_side in (-1, 1):
+            base_wx = cx + w_side * (wheel_spacing + wheel_w * 0.45)
+            base_wy = rcy + wheel_h - int(2 * scale)
+            self.canvas.create_line(
+                cx + w_side * wheel_spacing, base_wy,
+                cx + w_side * (wheel_spacing + 34 * scale), base_wy + 6 * scale,
+                fill="#0d3b5c", width=max(2, int(3.5 * scale)), capstyle=tk.ROUND
+            )
+            for p_i in range(4):
+                smoke_t = (self.anim_phase * 2.6 + p_i * 0.25) % 1.0
+                sx = base_wx + w_side * ((6.0 + smoke_t * 42.0) * scale)
+                sy = base_wy + (smoke_t * 4.5 - math.sin(smoke_t * math.pi) * 3.0) * scale
+                sr_x = (8.5 + smoke_t * 15.0) * scale
+                sr_y = (4.8 + smoke_t * 7.0) * scale
+                fade = 1.0 - smoke_t * 0.75
+                outer_smoke = lerp_color("#040914", "#38bdf8", 0.26 * fade)
+                inner_smoke = lerp_color("#040914", "#94a3b8", 0.44 * fade)
+                core_smoke = lerp_color("#040914", "#e2e8f0", 0.56 * fade)
+                self.canvas.create_oval(sx - sr_x, sy - sr_y, sx + sr_x, sy + sr_y, fill=outer_smoke, outline="")
+                self.canvas.create_oval(sx - sr_x * 0.72, sy - sr_y * 0.72, sx + sr_x * 0.72, sy + sr_y * 0.72, fill=inner_smoke, outline="")
+                if p_i < 2:
+                    self.canvas.create_oval(sx - sr_x * 0.40, sy - sr_y * 0.40, sx + sr_x * 0.40, sy + sr_y * 0.40, fill=core_smoke, outline="")
 
-            sw = max(1, int(1 + t_curve * 3))
-            streak_col = "#00ffaa" if t_curve > 0.4 else "#00a880"
-            self.canvas.create_line(sx1_l, sy1, sx2_l, sy2, fill=streak_col, width=sw, capstyle=tk.ROUND)
-            self.canvas.create_line(sx1_r, sy1, sx2_r, sy2, fill=streak_col, width=sw, capstyle=tk.ROUND)
-
-        # Center lane dashed markers streaming straight downward
-        for c in range(3):
-            ct = ((self.anim_phase * 2.5 + c * 0.33) % 1.0)
-            ct_curve = ct * ct
-            cy_start = y_top + 10 + ct_curve * (y_bot - (y_top + 10))
-            c_len = 6 + ct_curve * 16
-            cy_end = min(y_bot, cy_start + c_len)
-            c_w = max(1, int(1 + ct_curve * 3))
-            self.canvas.create_line(cx, cy_start, cx, cy_end, fill="#00e5ff", width=c_w)
-
-        # Side ambient speed lines streaming outward
-        for side in [-1, 1]:
-            for sl in range(2):
-                phase_off = sl * 1.5
-                sp_y = y_top + 14 + ((self.anim_phase * 18.0 + phase_off * 10.0) % 36.0)
-                sp_x1 = cx + side * (lane_w_top + 45 + sl * 35)
-                sp_x2 = sp_x1 + side * (25 + sl * 15)
-                self.canvas.create_line(sp_x1, sp_y, sp_x2, sp_y + 6, fill="#09304a", width=2)
-
-        # 3. The Front-Facing Robot Coming AHEAD
-        suspension = math.sin(self.anim_phase * 7.5) * 2.5
-        rcy = cy + suspension
-
-        # Dual Front 4WD Rubber Wheels (Rolling forward toward viewer)
-        wheel_w = 16
-        wheel_h = 28
-        for w_side in [-1, 1]:
-            wx = cx + w_side * 36
-            wy1 = rcy + 12
+        for w_side in (-1, 1):
+            wx = cx + w_side * wheel_spacing
+            wy1 = rcy - int(4 * scale)
             wy2 = wy1 + wheel_h
-            # Rubber tire body
-            self._create_rounded_rect(wx - wheel_w / 2, wy1, wx + wheel_w / 2, wy2, radius=4, fill="#060c16", outline="#00e5ff", width=2)
-            # Downward rolling tread marks
+            self._create_rounded_rect(
+                wx - wheel_w / 2.0, wy1, wx + wheel_w / 2.0, wy2,
+                radius=int(5 * scale), fill="#050c18", outline="#00f0ff", width=max(1, int(2 * scale))
+            )
             for tr in range(3):
-                tread_y = wy1 + 4 + ((self.anim_phase * 32.0 + tr * 9.0) % (wheel_h - 8))
-                self.canvas.create_line(wx - wheel_w / 2 + 2, tread_y, wx + wheel_w / 2 - 2, tread_y, fill="#00ffaa", width=2)
+                t_prog = (self.anim_phase * 4.2 + tr * 0.33) % 1.0
+                ty = wy1 + int(4 * scale) + t_prog * (wheel_h - int(8 * scale))
+                self.canvas.create_line(
+                    wx - wheel_w * 0.32, ty, wx + wheel_w * 0.32, ty,
+                    fill="#00ffaa", width=max(1, int(2 * scale))
+                )
 
-        # 4WD Front Chassis Bumper Plate
-        bump_y1 = rcy + 18
-        bump_y2 = rcy + 32
-        self._create_rounded_rect(cx - 30, bump_y1, cx + 30, bump_y2, radius=6, fill="#091b2e", outline="#00f0ff", width=2)
+        self._create_rounded_rect(
+            cx - 42 * scale, rcy + 2 * scale, cx + 42 * scale, rcy + 18 * scale,
+            radius=int(6 * scale), fill="#071626", outline="#00f0ff", width=max(1, int(2 * scale))
+        )
+        self._create_rounded_rect(
+            cx - 26 * scale, rcy - 12 * scale, cx + 26 * scale, rcy + 4 * scale,
+            radius=int(6 * scale), fill="#0a2034", outline="#00ffcc", width=max(1, int(1.8 * scale))
+        )
+        for h_side in (-1, 1):
+            hx = cx + h_side * 28 * scale
+            hy = rcy + 10 * scale
+            self.canvas.create_oval(hx - 4.5 * scale, hy - 4.5 * scale, hx + 4.5 * scale, hy + 4.5 * scale, fill="#ffffff", outline="#00f0ff", width=1)
+        self.canvas.create_oval(cx - 5 * scale, rcy + 5 * scale, cx + 5 * scale, rcy + 15 * scale, fill="#00ffcc", outline="#ffffff", width=1)
 
-        # Dual Forward Xenon LED Headlights & Conical Light Beams Shining Ahead
-        for h_side in [-1, 1]:
-            hx = cx + h_side * 20
-            hy = rcy + 25
-            # Expanding light beam on road
-            beam = [
-                hx, hy,
-                hx + h_side * 18, y_bot + 2,
-                hx - h_side * 6, y_bot + 2,
-            ]
-            self.canvas.create_polygon(beam, fill="#0a2a40", outline="")
-            # Bright Headlight bulb
-            self.canvas.create_oval(hx - 4, hy - 4, hx + 4, hy + 4, fill="#ffffff", outline="#00f0ff", width=1)
+    # =========================================================================
+    # 11 NEW CONVERSATIONAL MOUTHS
+    # =========================================================================
+    def _draw_open_smile_bowl(self, cx: float, my: float, mw: float, mh: float, main_col: str, tongue_col: str, scale: float):
+        pts = [cx - mw / 2.0, my - mh * 0.30]
+        pts.extend([cx, my - mh * 0.16, cx + mw / 2.0, my - mh * 0.30])
+        for i in range(1, 16):
+            ang = (i / 16.0) * math.pi
+            px = cx + (mw / 2.0) * math.cos(ang)
+            py = my - mh * 0.30 + mh * math.sin(ang)
+            pts.extend([px, py])
 
-        # Robot Torso / Armor Body
-        torso_poly = [
-            cx - 22, rcy - 2,
-            cx + 22, rcy - 2,
-            cx + 18, rcy + 18,
-            cx - 18, rcy + 18,
+        self.canvas.create_polygon(pts, smooth=True, fill="#240515", outline="")
+        tw = mw * 0.56
+        th = mh * 0.46
+        ty_bot = my - mh * 0.30 + mh * 0.92
+        t_pts = [
+            cx - tw / 2.0, ty_bot - th * 0.25,
+            cx, ty_bot - th,
+            cx + tw / 2.0, ty_bot - th * 0.25,
+            cx, ty_bot,
         ]
-        self.canvas.create_polygon(torso_poly, fill="#071526", outline="#00f0ff", width=2)
+        self.canvas.create_polygon(t_pts, smooth=True, fill=tongue_col, outline="")
+        self.canvas.create_polygon(pts, smooth=True, fill="", outline=main_col, width=max(2, int(4.5 * scale)))
 
-        # Glowing Chest Arc Reactor Core
-        core_r = 5 + math.sin(self.anim_phase * 6.0) * 1.0
-        self.canvas.create_oval(cx - core_r, rcy + 8 - core_r, cx + core_r, rcy + 8 + core_r, fill="#00ffcc", outline="#ffffff", width=1)
+    def _draw_excited_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        self._draw_open_smile_bowl(cx, cy - 2 * scale, 92 * scale, 26 * scale, col, "#ff4d88", scale)
 
-        # Robot Head & Visor
-        head_y1 = rcy - 24
-        head_y2 = rcy - 4
-        self._create_rounded_rect(cx - 16, head_y1, cx + 16, head_y2, radius=6, fill="#091a2c", outline="#00f0ff", width=2)
+    def _draw_laughing_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        shake = abs(math.sin(self.anim_phase * 12.0)) * (-4.5 * scale)
+        self._draw_open_smile_bowl(cx, cy - 2 * scale + shake, 108 * scale, 28 * scale, col, "#ff5588", scale)
 
-        # Cute Mint Visor Bar (Twin Eye View)
-        self._create_rounded_rect(cx - 11, head_y1 + 7, cx + 11, head_y1 + 14, radius=3, fill="#00ffaa", outline="")
-        self.canvas.create_line(cx, head_y1 + 7, cx, head_y1 + 14, fill="#091a2c", width=1)  # Visor eye divider
+    def _draw_love_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        my = cy - 4 * scale
+        w = 38 * scale
+        h = 13 * scale
+        pts_l = [cx - w, my - 2 * scale, cx - w * 0.5, my + h, cx, my - 2 * scale]
+        pts_r = [cx, my - 2 * scale, cx + w * 0.5, my + h, cx + w, my - 2 * scale]
+        for pts in (pts_l, pts_r):
+            self.canvas.create_line(pts, smooth=True, fill="#4a0826", width=int(12 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill=col, width=int(6 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill="#ffd1e6", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
 
-        # Top Cyber Antenna with Pulsing Beacon Dot
-        self.canvas.create_line(cx, head_y1, cx, head_y1 - 8, fill="#00f0ff", width=2)
-        beacon_col = "#00ffaa" if (int(self.anim_phase * 6.0) % 2 == 0) else "#ffffff"
-        self.canvas.create_oval(cx - 3, head_y1 - 12, cx + 3, head_y1 - 6, fill=beacon_col, outline="")
+    def _draw_wink_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        my = cy - 4 * scale
+        pts = [
+            cx - 46 * scale, my + 2 * scale,
+            cx - 10 * scale, my + 12 * scale,
+            cx + 28 * scale, my + 6 * scale,
+            cx + 54 * scale, my - 10 * scale,
+        ]
+        tx = cx + 18 * scale
+        ty = my + 10 * scale
+        t_pts = [
+            tx - 14 * scale, ty - 2 * scale,
+            tx - 10 * scale, ty + 18 * scale,
+            tx + 8 * scale, ty + 18 * scale,
+            tx + 14 * scale, ty - 6 * scale,
+        ]
+        self.canvas.create_polygon(t_pts, smooth=True, fill="#ff4d88", outline="#ff9ebb", width=max(1, int(1.5 * scale)))
+        self.canvas.create_line(pts, smooth=True, fill="#003547", width=int(13 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill="#00ffcc", width=int(6 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[2:6], smooth=True, fill="#ffffff", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
 
-        # Speech Equalizer Waveform above head (if speaking while moving)
-        if self.speaking_intensity > 0.15:
-            num_bars = 7
-            bar_spacing = 9
-            start_bx = cx - ((num_bars - 1) * bar_spacing) / 2.0
-            for i in range(num_bars):
-                phase_offset = i * 0.8
-                h_var = math.sin(self.anim_phase * 5.0 + phase_offset) * 10 * self.speaking_intensity
-                bar_h = max(3, abs(h_var) + 3)
-                bx = start_bx + i * bar_spacing
-                self.canvas.create_line(bx, head_y1 - 16 - bar_h, bx, head_y1 - 16 + bar_h, fill="#00ffaa", width=3, capstyle=tk.ROUND)
+    def _draw_surprised_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        rx_m = 16 * scale
+        ry_m = 20 * scale
+        my = cy - 4 * scale
+        self.canvas.create_oval(cx - rx_m - 4 * scale, my - ry_m - 4 * scale, cx + rx_m + 4 * scale, my + ry_m + 4 * scale, fill="#082f49", outline="")
+        self.canvas.create_oval(cx - rx_m, my - ry_m, cx + rx_m, my + ry_m, fill="#040b16", outline=col, width=int(5.5 * scale))
+        self.canvas.create_oval(cx - rx_m * 0.45, my - ry_m * 0.45, cx + rx_m * 0.45, my + ry_m * 0.45, fill="#0284c7", outline="")
 
-    # subtle header indicator dot without cluttered extra text
-    def _draw_ambient_header(self, w, h, accent_col, state):
-        dot_color = accent_col if state != ExpressionState.IDLE else "#00ffaa"
-        dot_r = int(5 * (h / 600.0))
-        self.canvas.create_oval(32, 22 - dot_r, 32 + dot_r * 2, 22 + dot_r, fill=dot_color, outline="")
+    def _draw_sleepy_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        breathe = 0.85 + 0.22 * math.sin(self.anim_phase * 1.1)
+        r = 9.0 * scale * breathe
+        my = cy - 2 * scale
+        self.canvas.create_oval(cx - r, my - r, cx + r, my + r, fill=col, outline="")
+        bub_r = 18.0 * scale * breathe
+        bx = cx + 22 * scale
+        by = my - 10 * scale
+        self.canvas.create_oval(bx - bub_r, by - bub_r, bx + bub_r, by + bub_r, fill="#111a2e", outline="#7dd3fc", width=max(1, int(2 * scale)))
+        self.canvas.create_oval(bx - bub_r * 0.55, by - bub_r * 0.55, bx - bub_r * 0.15, by - bub_r * 0.20, fill="#ffffff", outline="")
 
-    # Dedicated Gesture HUD Bar (✋ Open Palm Wake / ✊ Closed Fist Standby)
+    def _draw_shy_mouth(self, cx: float, cy: float, col: str):
+        scale = self.ui_scale / 1.8
+        my = cy - 4 * scale
+        w = 30 * scale
+        h = 10 * scale
+        pts_l = [cx - w, my, cx - w * 0.5, my + h, cx, my + 1 * scale]
+        pts_r = [cx, my + 1 * scale, cx + w * 0.5, my + h, cx + w, my]
+        for pts in (pts_l, pts_r):
+            self.canvas.create_line(pts, smooth=True, fill="#451028", width=int(11 * scale), capstyle=tk.ROUND)
+            self.canvas.create_line(pts, smooth=True, fill=col, width=int(5.5 * scale), capstyle=tk.ROUND)
+
+    def _draw_proud_mouth(self, cx: float, cy: float, col: str):
+        """
+        19. PROUD Mouth ("I don't want the crown, I want a smirk and that look in the eyes."):
+        Bold, confident asymmetrical upward-hooked smirk rising high on the right with a corner cheek-crease!
+        """
+        scale = self.ui_scale / 1.8
+        my = cy - 2 * scale
+        pts = [
+            cx - 48 * scale, my + 8 * scale,
+            cx - 10 * scale, my + 11 * scale,
+            cx + 28 * scale, my + 2 * scale,
+            cx + 62 * scale, my - 18 * scale,
+        ]
+        self.canvas.create_line(pts, smooth=True, fill="#422c00", width=int(14 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(6.8 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[2:], smooth=True, fill="#ffffff", width=max(1, int(2.4 * scale)), capstyle=tk.ROUND)
+        dimple = [
+            cx + 58 * scale, my - 26 * scale,
+            cx + 68 * scale, my - 20 * scale,
+            cx + 66 * scale, my - 10 * scale,
+        ]
+        self.canvas.create_line(dimple, smooth=True, fill=col, width=max(2, int(3.5 * scale)), capstyle=tk.ROUND)
+        self._draw_sparkle(cx + 74 * scale, my - 22 * scale, 8.5 * scale, "#ffffff", col)
+
+    def _draw_curious_mouth(self, cx: float, cy: float, col: str):
+        """
+        20. CURIOUS Mouth ("and an O mouth.."):
+        Fascinated, glowing oval 'O' mouth in emerald-aqua!
+        """
+        scale = self.ui_scale / 1.8
+        rx_m = 15 * scale
+        ry_m = 18 * scale
+        my = cy - 3 * scale
+        self.canvas.create_oval(cx - rx_m - 4 * scale, my - ry_m - 4 * scale, cx + rx_m + 4 * scale, my + ry_m + 4 * scale, fill="#043828", outline="")
+        self.canvas.create_oval(cx - rx_m, my - ry_m, cx + rx_m, my + ry_m, fill="#040d14", outline=col, width=int(5.5 * scale))
+        self.canvas.create_oval(cx - rx_m * 0.45, my - ry_m * 0.45, cx + rx_m * 0.45, my + ry_m * 0.45, fill="#059669", outline="")
+
+    def _draw_skeptical_mouth(self, cx: float, cy: float, col: str):
+        """
+        21. SKEPTICAL Mouth ("Skepticle is good, make it a smirk tho.."):
+        Knowing, unimpressed asymmetrical side-smirk (flat left, hooked up on the right)!
+        """
+        scale = self.ui_scale / 1.8
+        my = cy - 2 * scale
+        pts = [
+            cx - 44 * scale, my + 8 * scale,
+            cx - 8 * scale, my + 8 * scale,
+            cx + 26 * scale, my + 1 * scale,
+            cx + 52 * scale, my - 14 * scale,
+        ]
+        self.canvas.create_line(pts, smooth=True, fill="#1e3806", width=int(13 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(6.2 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[2:], smooth=True, fill="#ecfccb", width=max(1, int(2.0 * scale)), capstyle=tk.ROUND)
+        self.canvas.create_line(
+            cx + 50 * scale, my - 21 * scale,
+            cx + 58 * scale, my - 15 * scale,
+            cx + 55 * scale, my - 7 * scale,
+            smooth=True, fill=col, width=max(1, int(3.0 * scale)), capstyle=tk.ROUND
+        )
+
+    def _draw_cool_mouth(self, cx: float, cy: float, col: str):
+        """
+        22. COOL Mouth: Smooth, effortless asymmetrical cool half-smile smirk!
+        """
+        scale = self.ui_scale / 1.8
+        my = cy - 4 * scale
+        pts = [
+            cx - 38 * scale, my + 6 * scale,
+            cx - 4 * scale, my + 9 * scale,
+            cx + 28 * scale, my + 1 * scale,
+            cx + 52 * scale, my - 13 * scale,
+        ]
+        self.canvas.create_line(pts, smooth=True, fill="#002b4d", width=int(13 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts, smooth=True, fill=col, width=int(6.2 * scale), capstyle=tk.ROUND)
+        self.canvas.create_line(pts[2:], smooth=True, fill="#ffffff", width=max(1, int(2.2 * scale)), capstyle=tk.ROUND)
+
+    # =========================================================================
+    # MARK II BIONIC HEADER, GESTURE COMMAND CAPSULES & TELEMETRY SUBTITLE DECK
+    # =========================================================================
+    @staticmethod
+    def _fit_subtitle_text(text: str, avail_w_px: float, avail_h_px: float, scale_y: float) -> Tuple[str, int]:
+        """
+        Strict Mark II word-wrap & vertical line-clamp engine:
+        Guarantees that subtitle text NEVER overflows horizontally or vertically out of the subtitle shell!
+        Automatically steps down font size (12.5pt -> 11pt -> 9.8pt -> 8.8pt) and clamps wrapped lines with '...'.
+        """
+        clean = " ".join((text or "...").strip().split())
+        if not clean:
+            clean = "..."
+
+        for pt_base in (12.5, 11.2, 10.0, 9.0):
+            font_px = max(8, int(round(pt_base * scale_y)))
+            # Average bold glyph width (~0.58 * font_px) with safety margin so Tkinter/PIL wrap never exceeds our count
+            char_w = max(5.6, font_px * 0.70)
+            max_cols = max(24, int(avail_w_px / char_w))
+            line_h = font_px * 1.42
+            max_lines = max(1, int(avail_h_px / line_h))
+
+            words = clean.split(" ")
+            lines: List[str] = []
+            cur = ""
+            for w_tok in words:
+                if len(w_tok) > max_cols:
+                    w_tok = w_tok[: max_cols - 3] + "..."
+                cand = f"{cur} {w_tok}".strip() if cur else w_tok
+                if len(cand) <= max_cols:
+                    cur = cand
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w_tok
+            if cur:
+                lines.append(cur)
+
+            if len(lines) <= max_lines:
+                return "\n".join(lines), font_px
+
+        # If text is still longer than max_lines at 9pt, clamp cleanly to max_lines with ellipsis
+        clamped = lines[:max_lines]
+        if len(clamped[-1]) > max_cols - 3:
+            clamped[-1] = clamped[-1][: max_cols - 3].rstrip() + "..."
+        else:
+            clamped[-1] = clamped[-1].rstrip(".") + "..."
+        return "\n".join(clamped), font_px
+
+    @staticmethod
+    def _clamp_button_label(label: str, avail_w_px: float, font_px: int) -> str:
+        """Guarantees button text never exceeds the inner text chamber width of a Gesture HUD capsule."""
+        max_chars = max(12, int(avail_w_px / max(5.0, font_px * 0.62)))
+        if len(label) <= max_chars:
+            return label
+        return label[: max_chars - 2].rstrip() + ".."
+
+    def _draw_ambient_header(self, w: float, h: float, accent_col: str, state: str):
+        scale_y = h / 600.0
+        scale_x = w / 1024.0
+        is_villain = (state == ExpressionState.VILLAIN)
+
+        dot_color = "#ff003c" if is_villain else (accent_col if state != ExpressionState.IDLE else "#00ffaa")
+        dot_r = int(4.5 * scale_y)
+        dot_cx = int(34 * scale_x)
+        dot_cy = int(20 * scale_y)
+
+        # Sleek Mark II top status bar glass pill
+        bar_h = int(26 * scale_y)
+        self._create_rounded_rect(
+            int(20 * scale_x), int(7 * scale_y),
+            w - int(20 * scale_x), int(7 * scale_y) + bar_h,
+            radius=int(13 * scale_y),
+            fill="#070e1b" if not is_villain else "#07140b",
+            outline="#15263d" if not is_villain else "#154d26",
+            width=1
+        )
+
+        pulse = 0.5 + 0.5 * math.sin(self.anim_phase * 4.0)
+        bloom_col = lerp_color("#051624", dot_color, pulse * 0.55)
+        self.canvas.create_oval(dot_cx - dot_r - 3, dot_cy - dot_r - 3, dot_cx + dot_r + 3, dot_cy + dot_r + 3, fill=bloom_col, outline="")
+        self.canvas.create_oval(dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r, fill=dot_color, outline="")
+
+        brand_font_size = max(8, int(9.0 * scale_y))
+        brand_x = dot_cx + int(12 * scale_x)
+        self.canvas.create_text(
+            brand_x, dot_cy,
+            text="NEUROLIS MARK II  //  BIONIC OS",
+            fill="#cbd5e1" if not is_villain else "#39ff14",
+            font=(FONT_FAMILY, brand_font_size, "bold"),
+            anchor="w"
+        )
+
+        state_tag = f"STATE: {state.upper()}" if not is_villain else "ALERT: SYSTEM_INVASION // 0x7F"
+        tag_font_size = max(7, int(8.5 * scale_y))
+        self.canvas.create_text(
+            w * 0.5, dot_cy,
+            text=state_tag,
+            fill=accent_col if state != ExpressionState.IDLE else "#38bdf8",
+            font=(MONO_FONT_FAMILY, tag_font_size, "bold"),
+            anchor="center"
+        )
+
+        self.canvas.create_text(
+            w - int(34 * scale_x), dot_cy,
+            text="RPi5 60FPS // OPTIC CORE ONLINE" if not is_villain else "ERR_OVERRIDE // FIREWALL: BREACHED",
+            fill="#475569" if not is_villain else "#ff003c",
+            font=(MONO_FONT_FAMILY, tag_font_size, "bold"),
+            anchor="e"
+        )
+
     def _draw_gesture_hud(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
         """
-        Renders the static container cards for the Gesture HUD Bar:
-        - Standby Mode:
-          * ✋ Open Palm: Hold 3s to Talk: Vibrant glowing Neon Cyan (#00f0ff).
-          * ✊ Closed Fist: Standby: Muted charcoal (#222f3e), disabled.
-        - Active Mode:
-          * ✋ Open Palm: Talk: Muted charcoal (#222f3e), disabled.
-          * ✊ Closed Fist: Hold 3s for Standby: Vibrant glowing Neon Crimson (#ff4757).
+        Mark II Bionic Command Capsules (Gesture HUD Buttons):
+          - Dual-bevel glassmorphic cyber-capsules with dedicated left vector icon chambers,
+          - Corner telemetry micro-brackets & status LED rings,
+          - Strict inner bounding-box text clamping so button labels never overflow the capsule shell,
+          - In VILLAIN mode, switches to corrupted ERROR state (`ERR_0x7F // INPUT HIJACKED`).
         """
         scale_x = w / 1024.0
         scale_y = h / 600.0
 
-        card_h = int(48 * scale_y)
-        radius = int(24 * scale_y)
-        gap = int(16 * scale_x)
+        card_h = int(46 * scale_y)
+        radius = int(16 * scale_y)
+        gap = int(20 * scale_x)
 
-        card_w = int(380 * scale_x)
+        card_w = int(432 * scale_x)
         total_w = card_w * 2 + gap
 
         bx1 = cx - total_w / 2.0
@@ -1989,142 +4078,120 @@ class FaceUI:
         by1 = btn_y
         by2 = btn_y + card_h
 
-        # Cache bounding boxes for fallback mouse click & touch handling
         self.talk_btn_bbox = (bx1, by1, bx2, by2)
         self.standby_btn_bbox = (sbx1, by1, sbx2, by2)
         self.send_btn_bbox = None
         self._hud_geom = (bx1, by1, bx2, by2, sbx1, sbx2, radius, scale_x, scale_y)
 
         is_standby = (state == ExpressionState.IDLE)
+        is_villain = (state == ExpressionState.VILLAIN)
         now = time.time()
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
 
-        glow_pad = int(5 * scale_y)
-        inset = int(4 * scale_y)
-        dot_r = int(5 * scale_y)
+        glow_pad = int(3 * scale_y)
+        inset = int(3 * scale_y)
         dot_cy = (by1 + by2) / 2.0
-        font_size = int(11 * scale_y)
+        font_size = max(8, int(10.0 * scale_y))
+        badge_w = int(48 * scale_x)
+        avail_text_w = card_w - badge_w - int(26 * scale_x)
 
-        # ---------------- 1. PALM CARD (WAKE) ----------------
+        if is_villain:
+            # Base corrupted shell (dynamic overlay adds live flicker)
+            for x_left, x_right in [(bx1, bx2), (sbx1, sbx2)]:
+                self._create_rounded_rect(x_left, by1, x_right, by2, radius=radius, fill="#08140b", outline="#39ff14", width=2)
+            return float(card_h)
+
+        # =====================================================================
+        # 1. LEFT CAPSULE: OPEN PALM // WAKE & TALK
+        # =====================================================================
         if is_standby:
-            # Standby state: Vibrant Neon Cyan (#00f0ff)
-            btn_bg = "#003254" if talk_pressed else "#001b2e"
+            btn_bg = "#062c47" if talk_pressed else "#06192b"
             btn_border = "#00f0ff"
-            btn_glow = "#00384d"
-            palm_text_col = "#ffffff" if talk_pressed else "#00f0ff"
+            btn_glow = "#042238"
+            badge_bg = "#072a44"
+            palm_text_col = "#ffffff" if talk_pressed else "#e0f2fe"
+            palm_sub_col = "#00f0ff"
             palm_dot_col = "#00ffaa"
 
-            # Ambient glow behind card
-            self._create_rounded_rect(
-                bx1 - glow_pad, by1 - glow_pad,
-                bx2 + glow_pad, by2 + glow_pad,
-                radius=radius + glow_pad, fill=btn_glow, outline=""
-            )
-            # Main card pill
-            self._create_rounded_rect(
-                bx1, by1, bx2, by2,
-                radius=radius, fill=btn_bg, outline=btn_border, width=2
-            )
-            # Inner high-tech specular bevel
-            self._create_rounded_rect(
-                bx1 + inset, by1 + inset, bx2 - inset, by2 - inset,
-                radius=max(4, radius - inset), fill="", outline="#004d73", width=1
-            )
+            self._create_rounded_rect(bx1 - glow_pad, by1 - glow_pad, bx2 + glow_pad, by2 + glow_pad, radius=radius + glow_pad, fill=btn_glow, outline="")
+            self._create_rounded_rect(bx1, by1, bx2, by2, radius=radius, fill=btn_bg, outline=btn_border, width=2)
+            self._create_rounded_rect(bx1 + inset, by1 + inset, bx2 - inset, by2 - inset, radius=max(4, radius - inset), fill="", outline="#0b466b", width=1)
         else:
-            # Active state: Muted Charcoal (#222f3e), disabled
-            palm_bg = "#0c1219"
-            palm_border = "#222f3e"
-            palm_text_col = "#475e7a"
-            palm_dot_col = "#2a3b4c"
+            btn_bg = "#080f1c"
+            btn_border = "#1b2b42"
+            badge_bg = "#0b1526"
+            palm_text_col = "#64748b"
+            palm_sub_col = "#38bdf8"
+            palm_dot_col = "#334155"
+            self._create_rounded_rect(bx1, by1, bx2, by2, radius=radius, fill=btn_bg, outline=btn_border, width=1)
 
-            self._create_rounded_rect(
-                bx1, by1, bx2, by2,
-                radius=radius, fill=palm_bg, outline=palm_border, width=1
-            )
-
-        # Palm card indicator dot
-        palm_dot_x = bx1 + int(24 * scale_x)
-        self.canvas.create_oval(
-            palm_dot_x - dot_r, dot_cy - dot_r,
-            palm_dot_x + dot_r, dot_cy + dot_r,
-            fill=palm_dot_col, outline=""
+        # Left Icon Badge Chamber inside Capsule 1
+        self._create_rounded_rect(
+            bx1 + int(5 * scale_x), by1 + int(5 * scale_y),
+            bx1 + badge_w, by2 - int(5 * scale_y),
+            radius=max(4, radius - int(4 * scale_y)),
+            fill=badge_bg, outline="#0e3a5c" if is_standby else "#162336", width=1
         )
+        ic1_x = bx1 + (badge_w + int(5 * scale_x)) * 0.5
+        # Crisp Vector Palm / Audio Wave Icon inside badge
+        for bar_dx, bar_h_m in [(-7, 0.45), (-2.3, 0.85), (2.3, 0.70), (7, 0.45)]:
+            bh_i = (11.0 * bar_h_m) * scale_y
+            bx_i = ic1_x + bar_dx * scale_x
+            self.canvas.create_line(bx_i, dot_cy - bh_i, bx_i, dot_cy + bh_i, fill=palm_dot_col, width=max(1, int(2.2 * scale_x)), capstyle=tk.ROUND)
 
-        # Palm card label
-        palm_label = "✋ Open Palm: Hold 3s to Talk" if is_standby else "✋ Open Palm: Talk"
-        palm_text_x = (bx1 + bx2) / 2.0 + int(10 * scale_x)
-        self.canvas.create_text(
-            palm_text_x, dot_cy,
-            text=palm_label,
-            fill=palm_text_col,
-            font=(FONT_FAMILY, font_size, "bold" if is_standby else "normal")
-        )
+        # Left button text is rendered dynamically in _draw_gesture_hud_dynamic to eliminate text collisions
+        # Right status LED dot inside Capsule 1
+        led1_x = bx2 - int(16 * scale_x)
+        self.canvas.create_oval(led1_x - 3 * scale_x, dot_cy - 3 * scale_y, led1_x + 3 * scale_x, dot_cy + 3 * scale_y, fill=palm_dot_col, outline="")
 
-        # ---------------- 2. CLOSED FIST CARD (STANDBY) ----------------
+        # =====================================================================
+        # 2. RIGHT CAPSULE: CLOSED FIST // STANDBY MODE
+        # =====================================================================
         if not is_standby:
-            # Active state: Vibrant Glowing Neon Crimson (#ff4757)
-            btn_bg = "#380d15" if standby_pressed else "#1f0a10"
-            btn_border = "#ff4757"
-            btn_glow = "#3d000f"
-            fist_text_col = "#ffffff" if standby_pressed else "#ff4757"
-            fist_dot_col = "#ff4757"
+            fist_bg = "#360b16" if standby_pressed else "#1e0811"
+            fist_border = "#ff2a55"
+            fist_glow = "#2e0510"
+            badge2_bg = "#2e0b17"
+            fist_text_col = "#ffffff" if standby_pressed else "#ffe4e6"
+            fist_dot_col = "#ff2a55"
 
-            # Ambient glow behind card
-            self._create_rounded_rect(
-                sbx1 - glow_pad, by1 - glow_pad,
-                sbx2 + glow_pad, by2 + glow_pad,
-                radius=radius + glow_pad, fill=btn_glow, outline=""
-            )
-            # Main card pill
-            self._create_rounded_rect(
-                sbx1, by1, sbx2, by2,
-                radius=radius, fill=btn_bg, outline=btn_border, width=2
-            )
-            # Inner high-tech specular bevel
-            self._create_rounded_rect(
-                sbx1 + inset, by1 + inset, sbx2 - inset, by2 - inset,
-                radius=max(4, radius - inset), fill="", outline="#611220", width=1
-            )
+            self._create_rounded_rect(sbx1 - glow_pad, by1 - glow_pad, sbx2 + glow_pad, by2 + glow_pad, radius=radius + glow_pad, fill=fist_glow, outline="")
+            self._create_rounded_rect(sbx1, by1, sbx2, by2, radius=radius, fill=fist_bg, outline=fist_border, width=2)
+            self._create_rounded_rect(sbx1 + inset, by1 + inset, sbx2 - inset, by2 - inset, radius=max(4, radius - inset), fill="", outline="#5e1227", width=1)
         else:
-            # Standby state: Muted Charcoal (#222f3e), disabled
-            fist_bg = "#0c1219"
-            fist_border = "#222f3e"
-            fist_text_col = "#475e7a"
-            fist_dot_col = "#2a3b4c"
+            fist_bg = "#080f1c"
+            fist_border = "#1b2b42"
+            badge2_bg = "#0b1526"
+            fist_text_col = "#64748b"
+            fist_dot_col = "#334155"
+            self._create_rounded_rect(sbx1, by1, sbx2, by2, radius=radius, fill=fist_bg, outline=fist_border, width=1)
 
-            self._create_rounded_rect(
-                sbx1, by1, sbx2, by2,
-                radius=radius, fill=fist_bg, outline=fist_border, width=1
-            )
-
-        # Fist card indicator dot
-        fist_dot_x = sbx1 + int(24 * scale_x)
-        self.canvas.create_oval(
-            fist_dot_x - dot_r, dot_cy - dot_r,
-            fist_dot_x + dot_r, dot_cy + dot_r,
-            fill=fist_dot_col, outline=""
+        # Left Icon Badge Chamber inside Capsule 2
+        self._create_rounded_rect(
+            sbx1 + int(5 * scale_x), by1 + int(5 * scale_y),
+            sbx1 + badge_w, by2 - int(5 * scale_y),
+            radius=max(4, radius - int(4 * scale_y)),
+            fill=badge2_bg, outline="#591124" if not is_standby else "#162336", width=1
         )
+        ic2_x = sbx1 + (badge_w + int(5 * scale_x)) * 0.5
+        ir2 = 6.5 * scale_y
+        self.canvas.create_oval(ic2_x - ir2, dot_cy - ir2, ic2_x + ir2, dot_cy + ir2, fill="", outline=fist_dot_col, width=max(1, int(2.0 * scale_y)))
+        self.canvas.create_line(ic2_x, dot_cy - ir2 - 2 * scale_y, ic2_x, dot_cy + 1 * scale_y, fill=fist_dot_col, width=max(1, int(2.0 * scale_y)), capstyle=tk.ROUND)
 
-        # Fist card label
-        fist_label = "✊ Closed Fist: Hold 3s to Standby" if not is_standby else "✊ Closed Fist: Standby"
-        fist_text_x = (sbx1 + sbx2) / 2.0 + int(10 * scale_x)
-        self.canvas.create_text(
-            fist_text_x, dot_cy,
-            text=fist_label,
-            fill=fist_text_col,
-            font=(FONT_FAMILY, font_size, "bold" if not is_standby else "normal")
-        )
+        # Right button text is rendered dynamically in _draw_gesture_hud_dynamic to eliminate text collisions
+        led2_x = sbx2 - int(16 * scale_x)
+        self.canvas.create_oval(led2_x - 3 * scale_x, dot_cy - 3 * scale_y, led2_x + 3 * scale_x, dot_cy + 3 * scale_y, fill=fist_dot_col, outline="")
 
         return float(card_h)
 
-    # renders live, animated fill gauges and progress timers across the Gesture HUD Bar
     def _draw_gesture_hud_dynamic(self, w: float, h: float, cx: float, btn_y: float, state: str):
         """
-        Renders live, animated fill gauges and progress timers across the Gesture HUD Bar
-        at full display frame rate whenever a hand gesture is held continuously.
+        Renders the Mark II Command Capsule button labels & live 3.0s Gesture Hold progress fill.
+        Guarantees 100% mutual exclusion: when progress > 0.0, renders ONLY the progress text/bar;
+        when progress == 0.0, renders ONLY the idle button label. Zero text collision!
         """
-        if not hasattr(self, "_hud_geom") or self._hud_geom is None:
+        if not hasattr(self, "_hud_geom") or self._hud_geom is None or state == ExpressionState.VILLAIN:
             return
 
         bx1, by1, bx2, by2, sbx1, sbx2, radius, scale_x, scale_y = self._hud_geom
@@ -2140,412 +4207,360 @@ class FaceUI:
             gesture_name, progress = self._gesture_feedback
 
         progress = max(0.0, min(1.0, float(progress or 0.0)))
-        if progress <= 0.001:
-            return
 
-        font_size = int(12 * scale_y)
+        font_size = max(8, int(9.8 * scale_y))
         dot_cy = (by1 + by2) / 2.0
-        bar_pad_x = int(18 * scale_x)
-        bar_h = int(6 * scale_y)
+        badge_w = int(48 * scale_x)
+        card_w = bx2 - bx1
+        avail_text_w = card_w - badge_w - int(22 * scale_x)
+
+        bar_x1_rel = badge_w + int(8 * scale_x)
+        bar_x2_rel = card_w - int(14 * scale_x)
+        bar_h = int(5 * scale_y)
         bar_y2 = by2 - int(5 * scale_y)
         bar_y1 = bar_y2 - bar_h
 
-        # In STANDBY: animate Open Palm progress across Palm Card
-        if is_standby and (gesture_name == "OPEN_PALM" or progress > 0.0):
-            track_w = (bx2 - bx1) - 2 * bar_pad_x
-            tx1 = bx1 + bar_pad_x
-            tx2 = bx2 - bar_pad_x
-            fill_w = max(4, int(track_w * progress))
-            fx2 = tx1 + fill_w
+        palm_holding = (progress > 0.0) and (gesture_name == "OPEN_PALM" or (gesture_name is None and is_standby))
+        fist_holding = (progress > 0.0) and (gesture_name == "CLOSED_FIST" or (gesture_name is None and not is_standby))
 
-            # 1. Dark track background
-            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(3 * scale_y), fill="#05263d", outline="")
+        now = time.time()
+        talk_pressed = (now - self._last_talk_press_time) < 0.25
+        standby_pressed = (now - self._last_standby_press_time) < 0.25
 
-            # 2. Glowing fill gauge
+        # 1. LEFT CAPSULE: PALM
+        palm_text_x = bx1 + badge_w + (card_w - badge_w - int(10 * scale_x)) * 0.5
+        if palm_holding:
+            self._create_rounded_rect(
+                bx1 + badge_w + int(3 * scale_x), by1 + int(4 * scale_y),
+                bx2 - int(6 * scale_x), by2 - int(4 * scale_y),
+                radius=max(4, radius - int(5 * scale_y)), fill="#06233b", outline=""
+            )
+            tx1 = bx1 + bar_x1_rel
+            tx2 = bx1 + bar_x2_rel
+            track_w = max(10.0, tx2 - tx1)
+            fx2 = tx1 + max(4.0, track_w * progress)
+
+            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(2.5 * scale_y), fill="#041524", outline="")
             fill_col = "#ffffff" if progress >= 0.98 else "#00f0ff"
-            glow_col = "#00ffaa"
-            self._create_rounded_rect(tx1 - 1, bar_y1 - 1, fx2 + 1, bar_y2 + 1, radius=int(3 * scale_y), fill=glow_col, outline="")
-            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(3 * scale_y), fill=fill_col, outline="")
+            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(2.5 * scale_y), fill=fill_col, outline="")
 
-            # 3. Dynamic countdown badge text over the card
             sec_held = min(3.0, progress * 3.0)
             pct = int(progress * 100)
-            txt = f"✋ Holding... {sec_held:.1f}s / 3.0s ({pct}%)"
-            palm_text_x = (bx1 + bx2) / 2.0 + int(8 * scale_x)
+            raw_txt = f"HOLDING PALM • {sec_held:.1f}s / 3.0s ({pct}%)"
+            txt = self._clamp_button_label(raw_txt, avail_text_w, font_size)
+            self.canvas.create_text(palm_text_x, dot_cy - int(3 * scale_y), text=txt, fill="#ffffff", font=(FONT_FAMILY, font_size, "bold"))
+        else:
+            palm_text_col = "#ffffff" if talk_pressed else ("#e0f2fe" if is_standby else "#64748b")
+            palm_label_raw = "OPEN PALM  •  HOLD 3s TO TALK" if is_standby else "OPEN PALM  •  VOICE WAKE READY"
+            palm_label = self._clamp_button_label(palm_label_raw, avail_text_w, font_size)
+            self.canvas.create_text(palm_text_x, dot_cy, text=palm_label, fill=palm_text_col, font=(FONT_FAMILY, font_size, "bold"))
 
-            # Dark cover pill behind text to keep it ultra-readable while holding
+        # 2. RIGHT CAPSULE: FIST
+        fist_text_x = sbx1 + badge_w + (card_w - badge_w - int(10 * scale_x)) * 0.5
+        if fist_holding:
             self._create_rounded_rect(
-                bx1 + int(40 * scale_x), by1 + int(6 * scale_y),
-                bx2 - int(10 * scale_x), by2 - int(12 * scale_y),
-                radius=int(10 * scale_y), fill="#00243d", outline="#00f0ff", width=1
+                sbx1 + badge_w + int(3 * scale_x), by1 + int(4 * scale_y),
+                sbx2 - int(6 * scale_x), by2 - int(4 * scale_y),
+                radius=max(4, radius - int(5 * scale_y)), fill="#2d0915", outline=""
             )
-            self.canvas.create_text(
-                palm_text_x, dot_cy - int(3 * scale_y),
-                text=txt,
-                fill="#ffffff",
-                font=(FONT_FAMILY, font_size, "bold")
-            )
+            tx1 = sbx1 + bar_x1_rel
+            tx2 = sbx1 + bar_x2_rel
+            track_w = max(10.0, tx2 - tx1)
+            fx2 = tx1 + max(4.0, track_w * progress)
 
-        # In ACTIVE: animate Closed Fist progress across Fist Card
-        elif (not is_standby) and (gesture_name == "CLOSED_FIST" or progress > 0.0):
-            track_w = (sbx2 - sbx1) - 2 * bar_pad_x
-            tx1 = sbx1 + bar_pad_x
-            tx2 = sbx2 - bar_pad_x
-            fill_w = max(4, int(track_w * progress))
-            fx2 = tx1 + fill_w
+            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(2.5 * scale_y), fill="#1a050c", outline="")
+            fill_col = "#ffffff" if progress >= 0.98 else "#ff2a55"
+            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(2.5 * scale_y), fill=fill_col, outline="")
 
-            # 1. Dark track background
-            self._create_rounded_rect(tx1, bar_y1, tx2, bar_y2, radius=int(3 * scale_y), fill="#331118", outline="")
-
-            # 2. Glowing crimson fill gauge
-            fill_col = "#ffffff" if progress >= 0.98 else "#ff4757"
-            glow_col = "#ff6b81"
-            self._create_rounded_rect(tx1 - 1, bar_y1 - 1, fx2 + 1, bar_y2 + 1, radius=int(3 * scale_y), fill=glow_col, outline="")
-            self._create_rounded_rect(tx1, bar_y1, fx2, bar_y2, radius=int(3 * scale_y), fill=fill_col, outline="")
-
-            # 3. Dynamic countdown badge text over the card
             sec_held = min(3.0, progress * 3.0)
             pct = int(progress * 100)
-            txt = f"✊ Holding... {sec_held:.1f}s / 3.0s ({pct}%)"
-            fist_text_x = (sbx1 + sbx2) / 2.0 + int(8 * scale_x)
+            raw_txt = f"HOLDING FIST • {sec_held:.1f}s / 3.0s ({pct}%)"
+            txt = self._clamp_button_label(raw_txt, avail_text_w, font_size)
+            self.canvas.create_text(fist_text_x, dot_cy - int(3 * scale_y), text=txt, fill="#ffffff", font=(FONT_FAMILY, font_size, "bold"))
+        else:
+            fist_text_col = "#ffffff" if standby_pressed else ("#ffe4e6" if not is_standby else "#64748b")
+            fist_label_raw = "CLOSED FIST  •  HOLD 3s FOR STANDBY" if not is_standby else "CLOSED FIST  •  STANDBY LOCKED"
+            fist_label = self._clamp_button_label(fist_label_raw, avail_text_w, font_size)
+            self.canvas.create_text(fist_text_x, dot_cy, text=fist_label, fill=fist_text_col, font=(FONT_FAMILY, font_size, "bold"))
 
-            # Dark cover pill behind text to keep it ultra-readable while holding
-            self._create_rounded_rect(
-                sbx1 + int(40 * scale_x), by1 + int(6 * scale_y),
-                sbx2 - int(10 * scale_x), by2 - int(12 * scale_y),
-                radius=int(10 * scale_y), fill="#420f18", outline="#ff4757", width=1
-            )
-            self.canvas.create_text(
-                fist_text_x, dot_cy - int(3 * scale_y),
-                text=txt,
-                fill="#ffffff",
-                font=(FONT_FAMILY, font_size, "bold")
-            )
-
-    # shrunken, dedicated lower subtitle card with speaker pills, live status, and word wrap
     def _draw_subtitle_card(self, w: float, h: float, speaker: str, text: str, status_text: str, accent_col: str, card_y1: float):
-        """Draws the shrunken, dedicated Subtitle Box with speaker tags, word wrapping, and telemetry."""
-        card_x1 = int(70 * (w / 1024.0))
-        card_x2 = w - card_x1
-        card_y2 = h - int(16 * (h / 600.0))
-        card_radius = int(18 * (h / 600.0))
+        """
+        Mark II Bionic Telemetry Subtitle Deck:
+          - Multi-layered dark glassmorphic command deck with glowing top-left & bottom-right cyber-brackets,
+          - Dynamically sized speaker badge pill so long speaker names NEVER overflow the pill border,
+          - Strict multi-line word-wrap + vertical line-clamp engine (`_fit_subtitle_text`) so subtitle text
+            NEVER overflows horizontally or vertically outside the subtitle shell!
+        """
+        scale_x = w / 1024.0
+        scale_y = h / 600.0
+        is_villain = (self.state == ExpressionState.VILLAIN)
 
+        card_x1 = int(70 * scale_x)
+        card_x2 = w - card_x1
+        card_y2 = h - int(12 * scale_y)
+        card_radius = int(16 * scale_y)
+
+        outer_border = "#172b45" if not is_villain else "#1b4d28"
+        inner_border = "#0e1d30" if not is_villain else "#11331a"
+        card_bg = "#060c17" if not is_villain else "#051009"
+
+        # Outer glass shell + inner bevel frame
+        self._create_rounded_rect(card_x1, card_y1, card_x2, card_y2, radius=card_radius, fill=card_bg, outline=outer_border, width=2)
         self._create_rounded_rect(
-            card_x1, card_y1, card_x2, card_y2,
-            radius=card_radius, fill="#070d18", outline="#16273d"
+            card_x1 + int(3 * scale_x), card_y1 + int(3 * scale_y),
+            card_x2 - int(3 * scale_x), card_y2 - int(3 * scale_y),
+            radius=max(4, card_radius - int(3 * scale_y)), fill="", outline=inner_border, width=1
         )
 
-        spk_label = speaker if speaker else "NEUROLIS"
-        if spk_label in ["YOU", "USER"]:
-            pill_fill = "#002b1f"
+        # Mark II Cyber-Deck Corner Accent Brackets (top-left & bottom-right)
+        br_col = accent_col if not is_villain else "#ff003c"
+        br_len = int(22 * scale_x)
+        self.canvas.create_line(card_x1 + card_radius, card_y1, card_x1 + card_radius + br_len, card_y1, fill=br_col, width=max(1, int(2.2 * scale_y)), capstyle=tk.ROUND)
+        self.canvas.create_line(card_x2 - card_radius - br_len, card_y2, card_x2 - card_radius, card_y2, fill=br_col, width=max(1, int(2.2 * scale_y)), capstyle=tk.ROUND)
+
+        # Speaker Badge Pill (auto-sized to fit speaker label with zero overflow)
+        spk_label = (speaker or "NEUROLIS MARK II").strip().upper() if (speaker and speaker.strip()) else "NEUROLIS MARK II"
+        if is_villain:
+            pill_fill = "#24060e"
+            pill_border = "#ff003c"
+            pill_text_col = "#ff003c"
+            display_spk = "● SYS_HIJACK // ROOT_OVERRIDE"
+        elif spk_label in ["YOU", "USER"]:
+            pill_fill = "#042b22"
             pill_border = "#00ffaa"
             pill_text_col = "#00ffaa"
-            display_spk = "● YOU"
-        elif spk_label == "NEUROLIS":
-            pill_fill = "#00203a"
+            display_spk = "● USER // VOICE INPUT"
+        elif spk_label in ["NEUROLIS", "NEUROLIS MARK II"]:
+            pill_fill = "#06223d"
             pill_border = "#00f0ff"
             pill_text_col = "#00f0ff"
-            display_spk = "● NEUROLIS"
+            display_spk = "● NEUROLIS MARK II"
         else:
-            pill_fill = "#141c2a"
-            pill_border = "#527196"
-            pill_text_col = "#99b8dc"
-            display_spk = f"● {spk_label}"
+            pill_fill = "#121c2d"
+            pill_border = "#38bdf8"
+            pill_text_col = "#bae6fd"
+            display_spk = f"● {spk_label[:26]}"
 
-        pill_w = int(140 * (w / 1024.0))
-        pill_h = int(22 * (h / 600.0))
-        px1 = card_x1 + int(18 * (w / 1024.0))
-        py1 = card_y1 + int(8 * (h / 600.0))
+        pill_font_px = max(8, int(9.0 * scale_y))
+        pill_w = max(int(138 * scale_x), int((len(display_spk) * (pill_font_px * 0.65)) + 26 * scale_x))
+        pill_h = int(22 * scale_y)
+        px1 = card_x1 + int(16 * scale_x)
+        py1 = card_y1 + int(8 * scale_y)
 
         self._create_rounded_rect(
             px1, py1, px1 + pill_w, py1 + pill_h,
-            radius=int(7 * (h / 600.0)), fill=pill_fill, outline=pill_border
+            radius=int(8 * scale_y), fill=pill_fill, outline=pill_border, width=1
         )
         self.canvas.create_text(
             px1 + pill_w / 2.0, py1 + pill_h / 2.0,
             text=display_spk, fill=pill_text_col,
-            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold")
+            font=(FONT_FAMILY, pill_font_px, "bold")
         )
 
+        # Right telemetry status pill inside subtitle header
+        safe_status = (status_text or "STANDBY // READY")[:34]
         self.canvas.create_text(
-            card_x2 - int(20 * (w / 1024.0)), py1 + pill_h / 2.0,
-            text=status_text, fill="#4a6b8f",
-            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"), anchor="e"
-        )
-
-        divider_y = py1 + pill_h + int(6 * (h / 600.0))
-        self.canvas.create_line(
-            px1, divider_y,
-            card_x2 - int(18 * (w / 1024.0)), divider_y,
-            fill="#101c2d", width=1
-        )
-
-        clean_text = text if text else "..."
-        if len(clean_text) > 350:
-            clean_text = clean_text[:347] + "..."
-
-        text_len = len(clean_text)
-        if text_len <= 80:
-            font_size = int(13.0 * (h / 600.0))
-        elif text_len <= 150:
-            font_size = int(11.5 * (h / 600.0))
-        elif text_len <= 230:
-            font_size = int(10.0 * (h / 600.0))
-        else:
-            font_size = int(8.8 * (h / 600.0))
-
-        self.canvas.create_text(
-            px1 + 4, divider_y + int(8 * (h / 600.0)),
-            text=clean_text,
-            fill="#ffffff",
-            font=(FONT_FAMILY, max(8, font_size), "bold"),
-            anchor="nw",
-            width=int(card_x2 - card_x1 - 36 * (w / 1024.0)),
-        )
-
-    # phase 1: apple-grade greeting screen saying "Hi there!" with smooth cosine alpha fade
-    def _draw_boot_greeting(self, w: float, h: float, elapsed: float):
-        self.canvas.delete("all")
-        # solid oled black background
-        self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
-
-        # calculate smooth ease in, hold, and ease out alpha (0.0 to 1.0)
-        if elapsed < 1.0:
-            # 0.0s to 1.0s: smooth cosine fade in
-            alpha = 0.5 - 0.5 * math.cos(elapsed * math.pi)
-        elif elapsed < 2.5:
-            # 1.0s to 2.5s: hold full brightness
-            alpha = 1.0
-        elif elapsed < 3.5:
-            # 2.5s to 3.5s: smooth cosine fade out
-            fade_p = (elapsed - 2.5) / 1.0
-            alpha = 0.5 + 0.5 * math.cos(fade_p * math.pi)
-        else:
-            # 3.5s to 3.8s: brief black breath before cockpit sequence
-            alpha = 0.0
-
-        # silver-white premium typography
-        text_color = lerp_color(self.bg_color, "#f8fafc", alpha)
-        sub_color = lerp_color(self.bg_color, "#64748b", alpha)
-
-        # "Hi there!" text
-        self.canvas.create_text(
-            w / 2.0, h / 2.0 - int(30 * (h / 600.0)),
-            text="Hi there!",
-            fill=text_color,
-            font=(FONT_FAMILY, int(48 * (h / 600.0)), "bold")
-        )
-
-        # "Welcome to Project Neurolis" subtitle
-        self.canvas.create_text(
-            w / 2.0, h / 2.0 + int(50 * (h / 600.0)),
-            text="Welcome to Project Neurolis",
-            fill=sub_color,
-            font=(FONT_FAMILY, int(16 * (h / 600.0)))
-        )
-
-    # phase 2: futuristic diagnostic checklist verifying hardware with smooth auto-scroll
-    def _draw_boot_sequence(self, w: float, h: float, seq_elapsed: float, pct: int):
-        self.canvas.delete("all")
-        self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
-
-        # 1. top header pill badge
-        pill_w, pill_h = int(320 * (w / 1024.0)), int(28 * (h / 600.0))
-        px1 = (w - pill_w) / 2.0
-        py1 = int(16 * (h / 600.0))
-        self._create_rounded_rect(px1, py1, px1 + pill_w, py1 + pill_h, radius=int(14 * (h / 600.0)), fill="#081326", outline="#1c3452")
-        # glowing pulse cyan indicator dot
-        pulse = 0.5 + 0.5 * math.sin(self.anim_phase * 4.0)
-        dot_col = lerp_color("#007788", "#00f0ff", pulse)
-        dot_r = int(5 * (h / 600.0))
-        self.canvas.create_oval(px1 + int(14 * (w / 1024.0)), py1 + pill_h / 2.0 - dot_r, px1 + int(14 * (w / 1024.0)) + dot_r * 2, py1 + pill_h / 2.0 + dot_r, fill=dot_col, outline="")
-        self.canvas.create_text(
-            px1 + pill_w / 2.0 + int(10 * (w / 1024.0)), py1 + pill_h / 2.0,
-            text="NEUROLIS BOOTING UP",
-            fill="#cbd5e1",
-            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold")
-        )
-
-        # 2. test sequence title banner
-        self.canvas.create_text(
-            w / 2.0, int(60 * (h / 600.0)),
-            text="Neurolis Test Sequence ---",
-            fill="#f8fafc",
-            font=(FONT_FAMILY, int(16 * (h / 600.0)), "bold")
-        )
-        self.canvas.create_text(
-            w / 2.0, int(86 * (h / 600.0)),
-            text="[ Click screen to skip ]",
-            fill="#475569",
-            font=(FONT_FAMILY, int(9 * (h / 600.0)))
-        )
-
-        # 3. main diagnostic glass card with ambient glow and cyber brackets
-        card_x1 = int(110 * (w / 1024.0))
-        card_y1 = int(106 * (h / 600.0))
-        card_x2 = w - card_x1
-        card_y2 = h - int(48 * (h / 600.0))
-        card_radius = int(16 * (h / 600.0))
-
-        # outer subtle shadow/depth glow
-        self._create_rounded_rect(card_x1 - 3, card_y1 - 3, card_x2 + 3, card_y2 + 3, radius=card_radius + 2, fill="#040914", outline="#0d1b2e")
-        # inner glass cockpit card
-        self._create_rounded_rect(card_x1, card_y1, card_x2, card_y2, radius=card_radius, fill="#060c18", outline="#1c2e48")
-
-        # high-tech corner cyber accents
-        bracket_len = int(16 * (h / 600.0))
-        # top-left
-        self.canvas.create_line(card_x1, card_y1 + bracket_len, card_x1, card_y1, card_x1 + bracket_len, card_y1, fill="#00f0ff", width=2)
-        # top-right
-        self.canvas.create_line(card_x2, card_y1 + bracket_len, card_x2, card_y1, card_x2 - bracket_len, card_y1, fill="#00f0ff", width=2)
-        # bottom-left
-        self.canvas.create_line(card_x1, card_y2 - bracket_len, card_x1, card_y2, card_x1 + bracket_len, card_y2, fill="#00f0ff", width=2)
-        # bottom-right
-        self.canvas.create_line(card_x2, card_y2 - bracket_len, card_x2, card_y2, card_x2 - bracket_len, card_y2, fill="#00f0ff", width=2)
-
-        # 4. smooth auto-scroll checklist math
-        with self.lock:
-            results = list(self.diagnostic_results)
-
-        total_revealed = len(results)
-        row_h = 28.0 * (h / 600.0)
-        # keep up to 8 items visible, then smoothly scroll to keep new items centered
-        if total_revealed > 8:
-            target_scroll = (total_revealed - 8) * row_h
-        else:
-            target_scroll = 0.0
-
-        self.boot_scroll_y += (target_scroll - self.boot_scroll_y) * 0.15
-
-        # 5. render verified check rows (high-contrast 3-column cockpit layout)
-        clip_top = card_y1 + int(14 * (h / 600.0))
-        clip_bottom = card_y2 - int(56 * (h / 600.0))
-
-        for idx, item in enumerate(results):
-            row_y = card_y1 + int(30 * (h / 600.0)) + idx * row_h - self.boot_scroll_y
-            if clip_top <= row_y <= clip_bottom:
-                # Column 1: badge pill on left
-                bx1 = card_x1 + int(24 * (w / 1024.0))
-                by1 = row_y - int(9 * (h / 600.0))
-                bx2 = card_x1 + int(56 * (w / 1024.0))
-                by2 = row_y + int(9 * (h / 600.0))
-
-                badge = item.get("badge", "✓")
-                if badge == "✓":
-                    b_fill = "#022c17"
-                    b_outline = "#00ff88"
-                    b_text_col = "#00ff88"
-                elif badge == "~":
-                    b_fill = "#332500"
-                    b_outline = "#ffb703"
-                    b_text_col = "#ffb703"
-                else:
-                    b_fill = "#330812"
-                    b_outline = "#ff2d55"
-                    b_text_col = "#ff2d55"
-
-                self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill=b_fill, outline=b_outline)
-                self.canvas.create_text((bx1 + bx2) / 2.0, row_y, text=badge, fill=b_text_col, font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"))
-
-                # Column 2: item name (left aligned)
-                self.canvas.create_text(
-                    card_x1 + int(72 * (w / 1024.0)), row_y,
-                    text=item.get("name", ""),
-                    fill="#f1f5f9",
-                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
-                    anchor="w"
-                )
-
-                # Column 3: item status value (right aligned)
-                val_col = "#00ffaa" if item.get("passed") else "#fb7185"
-                self.canvas.create_text(
-                    card_x2 - int(28 * (w / 1024.0)), row_y,
-                    text=item.get("detail", ""),
-                    fill=val_col,
-                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold" if item.get("passed") else "normal"),
-                    anchor="e"
-                )
-
-        # active scanning indicator row
-        steps_order = [
-            "Camera Detected?", "Mic Detected?", "Speakers Detected?", "Raspberry Pi Detected?",
-            "listen.py Test Initiate", "MediaPipe Tasks Vision?", "Gesture Model Asset?",
-            "Vision Gesture Sentry?"
-        ]
-
-        if total_revealed < len(steps_order):
-            active_y = card_y1 + int(30 * (h / 600.0)) + total_revealed * row_h - self.boot_scroll_y
-            if clip_top <= active_y <= clip_bottom:
-                bx1 = card_x1 + int(24 * (w / 1024.0))
-                by1 = active_y - int(9 * (h / 600.0))
-                bx2 = card_x1 + int(56 * (w / 1024.0))
-                by2 = active_y + int(9 * (h / 600.0))
-                self._create_rounded_rect(bx1, by1, bx2, by2, radius=6, fill="#041c30", outline="#00f0ff")
-                self.canvas.create_text((bx1 + bx2) / 2.0, active_y, text="⟳", fill="#00f0ff", font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"))
-
-                active_name = steps_order[total_revealed]
-                self.canvas.create_text(
-                    card_x1 + int(72 * (w / 1024.0)), active_y,
-                    text=active_name,
-                    fill="#38bdf8",
-                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
-                    anchor="w"
-                )
-
-                dots = "." * (int(self.anim_phase * 3.0) % 4)
-                self.canvas.create_text(
-                    card_x2 - int(28 * (w / 1024.0)), active_y,
-                    text="Scanning" + dots,
-                    fill="#00f0ff",
-                    font=(FONT_FAMILY, int(10 * (h / 600.0)), "italic"),
-                    anchor="e"
-                )
-
-        # 6. progress bar at bottom of card
-        bar_y1 = card_y2 - int(34 * (h / 600.0))
-        bar_y2 = card_y2 - int(16 * (h / 600.0))
-        bar_x1 = card_x1 + int(24 * (w / 1024.0))
-        bar_x2 = card_x2 - int(24 * (w / 1024.0))
-
-        # status text above progress bar
-        self.canvas.create_text(
-            bar_x1, bar_y1 - int(10 * (h / 600.0)),
-            text="COMPONENT CHECKLIST AND SAFETY CHECKS",
-            fill="#64748b",
-            font=(FONT_FAMILY, int(9 * (h / 600.0)), "bold"),
-            anchor="w"
-        )
-
-        if pct < 100:
-            status_right_text = f"[ {pct}% ]"
-            bar_text_col = "#00f0ff"
-        else:
-            status_right_text = "100% // ALL SYSTEMS VERIFIED"
-            bar_text_col = "#00ff88"
-
-        self.canvas.create_text(
-            bar_x2, bar_y1 - int(10 * (h / 600.0)),
-            text=status_right_text,
-            fill=bar_text_col,
-            font=(FONT_FAMILY, int(10 * (h / 600.0)), "bold"),
+            card_x2 - int(18 * scale_x), py1 + pill_h / 2.0,
+            text=safe_status,
+            fill="#39ff14" if is_villain else "#64748b",
+            font=(MONO_FONT_FAMILY, max(8, int(8.8 * scale_y)), "bold"),
             anchor="e"
         )
 
-        # track
-        self._create_rounded_rect(bar_x1, bar_y1, bar_x2, bar_y2, radius=7, fill="#070e1c", outline="#1c2e48")
+        divider_y = py1 + pill_h + int(5 * scale_y)
+        self.canvas.create_line(
+            px1, divider_y,
+            card_x2 - int(16 * scale_x), divider_y,
+            fill="#112238" if not is_villain else "#14381e", width=1
+        )
 
-        # filled portion
-        fill_w = (bar_x2 - bar_x1) * (pct / 100.0)
-        if fill_w > 6:
-            fill_col = "#00ff88" if pct >= 100 else "#00f0ff"
-            self._create_rounded_rect(bar_x1, bar_y1, bar_x1 + fill_w, bar_y2, radius=7, fill=fill_col, outline="")
-            # leading edge white glow tip
-            if fill_w < (bar_x2 - bar_x1) - 4:
-                self.canvas.create_line(bar_x1 + fill_w, bar_y1 + 2, bar_x1 + fill_w, bar_y2 - 2, fill="#ffffff", width=2)
+        # Strict multi-line word-wrap & height clamp so subtitle text NEVER escapes the subtitle shell
+        avail_w_px = (card_x2 - card_x1) - int(44 * scale_x)
+        avail_h_px = (card_y2 - divider_y) - int(14 * scale_y)
+        safe_text = text if (text and text.strip()) else ("Standing by. Show open palm or press Enter to begin." if self.state == ExpressionState.IDLE else "...")
+        wrapped_text, font_size = self._fit_subtitle_text(safe_text, avail_w_px, avail_h_px, scale_y)
+
+        # Left vertical neon accent bar beside subtitle text + bottom-right Mark II telemetry micro-footer
+        bar_top = divider_y + int(8 * scale_y)
+        bar_bot = card_y2 - int(12 * scale_y)
+        self.canvas.create_line(
+            px1 + int(2 * scale_x), bar_top,
+            px1 + int(2 * scale_x), bar_bot,
+            fill=br_col, width=max(2, int(3.0 * scale_x)), capstyle=tk.ROUND
+        )
+        footer_txt = "SYS_INTEGRITY: COMPROMISED // 0x7F" if is_villain else "MARK II TELEMETRY  •  AUDIO SYNC: LOCKED"
+        self.canvas.create_text(
+            card_x2 - int(18 * scale_x), card_y2 - int(10 * scale_y),
+            text=footer_txt,
+            fill="#15803d" if is_villain else "#334155",
+            font=(MONO_FONT_FAMILY, max(7, int(7.8 * scale_y)), "bold"),
+            anchor="e"
+        )
+
+        text_x = px1 + int(12 * scale_x)
+        self._sub_geom = (card_x1, card_y1, card_x2, card_y2, card_radius, divider_y, text_x, font_size, wrapped_text, avail_w_px)
+
+        if not is_villain:
+            self.canvas.create_text(
+                text_x, divider_y + int(7 * scale_y),
+                text=wrapped_text,
+                fill="#f8fafc",
+                font=(FONT_FAMILY, font_size, "bold"),
+                anchor="nw",
+                width=int(avail_w_px),
+            )
+
+    # =========================================================================
+    # APPLE VISION PRO / MACOS GRADE BOOT SPLASH
+    # =========================================================================
+    def _draw_boot_greeting(self, w: float, h: float, elapsed: float):
+        """Apple-grade Startup Splash for Neurolis Mark II."""
+        self.canvas.delete("all")
+        self.canvas.create_rectangle(0, 0, w, h, fill=self.bg_color, outline="")
+
+        scale_x = w / 1024.0
+        scale_y = h / 600.0
+        cx = w / 2.0
+        cy = h / 2.0
+
+        if elapsed < 0.75:
+            alpha = 0.5 - 0.5 * math.cos((elapsed / 0.75) * math.pi)
+        elif elapsed < 2.65:
+            alpha = 1.0
+        elif elapsed < self.boot_duration:
+            fade_p = (elapsed - 2.65) / max(0.01, (self.boot_duration - 2.65))
+            alpha = 0.5 + 0.5 * math.cos(fade_p * math.pi)
+        else:
+            alpha = 0.0
+
+        raw_p = max(0.0, min(1.0, (elapsed - 0.25) / 2.35))
+        prog = raw_p * raw_p * (3.0 - 2.0 * raw_p)
+
+        # 1. Subtle Radial Backlight Halo
+        for r_mult, c_target in [(250, "#050d1a"), (175, "#07162c"), (115, "#0b2242")]:
+            rx = r_mult * scale_x
+            ry = r_mult * 0.70 * scale_y
+            col = lerp_color(self.bg_color, c_target, alpha)
+            self.canvas.create_oval(cx - rx, cy - 64 * scale_y - ry, cx + rx, cy - 64 * scale_y + ry, fill=col, outline="")
+
+        # 2. Apple Vision-Grade Bionic Visor Crest
+        crest_cy = cy - 88 * scale_y
+        vw = 128 * scale_x
+        vh = 72 * scale_y
+        vr = int(34 * scale_y)
+        vx1, vy1 = cx - vw / 2.0, crest_cy - vh / 2.0
+        vx2, vy2 = cx + vw / 2.0, crest_cy + vh / 2.0
+
+        orb_r = 52 * scale_y
+        orb_col = lerp_color(self.bg_color, "#1e3a5f", alpha * 0.7)
+        self.canvas.create_oval(cx - orb_r, crest_cy - orb_r, cx + orb_r, crest_cy + orb_r, fill="", outline=orb_col, width=max(1, int(1.5 * scale_y)))
+
+        aura_col = lerp_color(self.bg_color, "#0ea5e9", alpha * 0.25)
+        self._create_rounded_rect(
+            vx1 - 6 * scale_x, vy1 - 6 * scale_y, vx2 + 6 * scale_x, vy2 + 6 * scale_y,
+            vr + int(4 * scale_y), fill=aura_col, outline=""
+        )
+
+        body_col = lerp_color(self.bg_color, "#071120", alpha)
+        rim_outer = lerp_color(self.bg_color, "#e2e8f0", alpha * 0.92)
+        rim_inner = lerp_color(self.bg_color, "#38bdf8", alpha * 0.65)
+        self._create_rounded_rect(vx1, vy1, vx2, vy2, vr, fill=body_col, outline=rim_outer, width=max(1, int(2.2 * scale_y)))
+        self._create_rounded_rect(
+            vx1 + 4 * scale_x, vy1 + 4 * scale_y, vx2 - 4 * scale_x, vy2 - 4 * scale_y,
+            max(6, vr - int(4 * scale_y)), fill="", outline=rim_inner, width=1
+        )
+
+        eye_glow = lerp_color(self.bg_color, "#0284c7", alpha * 0.55)
+        eye_col = lerp_color(self.bg_color, "#00f0ff", alpha)
+        glint_col = lerp_color(self.bg_color, "#ffffff", alpha)
+        ew_m = 22 * scale_x
+        eh_m = 24 * scale_y
+        for side in (-1, 1):
+            ex = cx + side * 24 * scale_x
+            ey = crest_cy
+            self._create_rounded_rect(
+                ex - ew_m / 2.0 - 3 * scale_x, ey - eh_m / 2.0 - 3 * scale_y,
+                ex + ew_m / 2.0 + 3 * scale_x, ey + eh_m / 2.0 + 3 * scale_y,
+                int(9 * scale_y), fill=eye_glow, outline=""
+            )
+            self._create_rounded_rect(
+                ex - ew_m / 2.0, ey - eh_m / 2.0,
+                ex + ew_m / 2.0, ey + eh_m / 2.0,
+                int(7 * scale_y), fill=eye_col, outline=""
+            )
+            self.canvas.create_oval(
+                ex - ew_m * 0.28, ey - eh_m * 0.28,
+                ex - ew_m * 0.02, ey - eh_m * 0.02,
+                fill=glint_col, outline=""
+            )
+
+        sheen_x = vx1 + 24 * scale_x + prog * (vw - 48 * scale_x)
+        sheen_col = lerp_color(self.bg_color, "#ffffff", alpha * math.sin(prog * math.pi))
+        self.canvas.create_oval(
+            sheen_x - 14 * scale_x, vy1 - 2 * scale_y, sheen_x + 14 * scale_x, vy1 + 2 * scale_y,
+            fill=sheen_col, outline=""
+        )
+
+        # 3. Apple-Grade Hero Typography: Neurolis Mark 2
+        title_col = lerp_color(self.bg_color, "#f8fafc", alpha)
+        self.canvas.create_text(
+            cx, cy + 26 * scale_y,
+            text="Neurolis Mark 2",
+            fill=title_col,
+            font=(FONT_FAMILY, int(34 * scale_y), "bold")
+        )
+
+        # 4. Minimalist Apple-Style Pill Progress Bar
+        bar_w = 240 * scale_x
+        bar_h = 6 * scale_y
+        bar_y = cy + 82 * scale_y
+        bx1 = cx - bar_w / 2.0
+        bx2 = cx + bar_w / 2.0
+
+        track_bg = lerp_color(self.bg_color, "#111c2d", alpha)
+        track_border = lerp_color(self.bg_color, "#1e293b", alpha)
+        self._create_rounded_rect(
+            bx1, bar_y - bar_h / 2.0, bx2, bar_y + bar_h / 2.0,
+            int(3 * scale_y), fill=track_bg, outline=track_border, width=1
+        )
+
+        if prog > 0.01:
+            fill_w = max(8 * scale_x, bar_w * prog)
+            fx2 = bx1 + fill_w
+            glow_bar = lerp_color(self.bg_color, "#0284c7", alpha * 0.55)
+            core_bar = lerp_color(self.bg_color, "#f8fafc", alpha)
+            self._create_rounded_rect(
+                bx1 - 2 * scale_x, bar_y - bar_h / 2.0 - 2 * scale_y,
+                fx2 + 2 * scale_x, bar_y + bar_h / 2.0 + 2 * scale_y,
+                int(5 * scale_y), fill=glow_bar, outline=""
+            )
+            self._create_rounded_rect(
+                bx1, bar_y - bar_h / 2.0, fx2, bar_y + bar_h / 2.0,
+                int(3 * scale_y), fill=core_bar, outline=""
+            )
+            self.canvas.create_oval(
+                fx2 - 4 * scale_y, bar_y - 4 * scale_y,
+                fx2 + 4 * scale_y, bar_y + 4 * scale_y,
+                fill=core_bar, outline=""
+            )
+
+        # 5. Booting Status Caption
+        boot_pulse = 0.72 + 0.28 * math.sin(elapsed * 6.0)
+        cap_col = lerp_color(self.bg_color, "#38bdf8", alpha * boot_pulse)
+        self.canvas.create_text(
+            cx, cy + 115 * scale_y,
+            text="Booting...",
+            fill=cap_col,
+            font=(FONT_FAMILY, int(11 * scale_y), "bold")
+        )
+        if hasattr(self.canvas, "set_rough_mode"):
+            self.canvas.set_rough_mode(False)
+        if hasattr(self.canvas, "flush"):
+            self.canvas.flush()
 
 
-# test runner to preview the face ui standalone on desktop without motors or speech
 if __name__ == "__main__":
-    print("Testing Neurolis Face UI (7-inch 1024x600, 128:75 ratio preview)...")
+    print("Testing Neurolis Mark II Face UI (22 Expressions + Apple-Grade Animations & Boot Splash)...")
+    print("Shortcuts: [1-9, 0] Core States | [Q-P, C] 11 New Chat States | [V] Villain | [B] Boot | [Space/Tab] Cycle")
     ui = FaceUI(width=1024, height=600, fullscreen=False)
     ui.start(in_background=False)

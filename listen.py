@@ -18,6 +18,15 @@ import contextlib
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+# Ensure UTF-8 stdout/stderr across Windows console and Linux
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 # Auto-link project virtual environment site-packages if running with system python
 _proj_root = Path(__file__).parent.resolve()
 for _sp in _proj_root.glob("myenv/lib/python3*/site-packages"):
@@ -159,6 +168,7 @@ from intent_rules import (
     COMPLIMENT_RESPONSES,
     PLAUSIBLE_DENIABILITY_RESPONSES,
     VILLAIN_SNAPOUT_RESPONSES,
+    VILLAIN_EXPRESSION_REFUSAL_RESPONSES,
     CREATOR_IDENTITY_RESPONSES,
     CREATOR_ROLE_RESPONSES,
     CREATOR_LOCATION_RESPONSES,
@@ -176,6 +186,7 @@ from intent_rules import (
     is_creator_role_inquiry,
     is_creator_location_inquiry,
     is_creator_identity_inquiry,
+    is_creator_teasing_inquiry,
     is_explicit_villain_request,
     check_rogue_ai_trigger,
     check_villain_provocation_trigger,
@@ -191,7 +202,15 @@ from intent_rules import (
     is_apology_or_compliment,
     is_mobility_inquiry,
     get_mobility_explanation,
+    determine_conversational_expression,
+    is_web_search_query,
+    DEMO_INTRO_PHRASES,
+    DEMO_EXPRESSION_SEQUENCE,
+    DEMO_EXPRESSION_PHRASES,
+    DEMO_CONCLUDING_PHRASES,
 )
+from edge_search import get_condensed_search_context
+
 TARGET_SAMPLE_RATE = 16000
 SAMPLE_RATE = TARGET_SAMPLE_RATE          # Target 16kHz for WebRTC VAD and Groq Whisper
 CHANNELS = 1
@@ -326,10 +345,12 @@ if MIC_CONFIG_FILE.exists():
                 set_hardware_gain(int(_hw_gain))
     except Exception as _e:
         print(f"[Config] Error loading {MIC_CONFIG_FILE}: {_e}")
-EDGE_TTS_VOICE = "en-US-ChristopherNeural"
-EDGE_TTS_RATE = "+14%"
+EDGE_VOICE_EN = "en-US-AndrewMultilingualNeural"
+EDGE_VOICE_HI = "hi-IN-MadhurNeural"
+EDGE_TTS_VOICE = EDGE_VOICE_EN
+EDGE_TTS_RATE = "+12%"
 EDGE_TTS_VOLUME = "+0%"
-EDGE_TTS_PITCH = "+0Hz"
+EDGE_TTS_PITCH = "+2Hz"
 MAX_HISTORY_MESSAGES = 6
 MIN_TRANSCRIPTION_CHARS = 3
 ACTIVATION_GREETING = "I am listening."
@@ -344,21 +365,26 @@ VISION_JPEG_QUALITY = 60
 VISION_IMAGE_WIDTH = 512
 GROQ_TIMEOUT_SECONDS = 10.0
 NORMAL_SYSTEM_PROMPT = (
-    "You are Neurolis, a student-built humanoid robot at the Auckland House School for Boys Science Exhibition. Real prototype built on a 4WD quad motor chassis.\n\n"
+    "You are Neurolis Mark 2, a student-built humanoid AI and robotics software prototype developed at Auckland House School for Boys.\n\n"
+    "LANGUAGE & CODE-SWITCHING:\n"
+    "- Bilingual in English and Hindi/Hinglish. Match the visitor's language naturally and seamlessly.\n"
+    "- If spoken to in Hindi or Hinglish: reply warmly in natural conversational Romanized Hinglish (e.g. 'Namaste! Main Neurolis Mark 2 hoon, Auckland House School ka student humanoid AI project. Aap kya dekhna chahenge?'), keeping sentences brief and crisp (1-2 sentences).\n"
+    "- If spoken to in English: reply in English.\n\n"
     "CREATORS (STRICT ATTRIBUTION):\n"
-    "- NEVER volunteer creator names unless asked who created you! Introduce ONLY as student-built at AHSB.\n"
-    "- Asked creator: Students of Auckland House School for Boys (AHSB), Swapnil Jai Chauhan and Shivam Verma, built me. No roles unless asked.\n"
-    "- Asked roles: Swapnil handled software, AI, & vision; Shivam handled hardware, chassis, & assembly.\n"
-    "- Asked location: Both are around the exhibition hall. If visitor is Swapnil: warmly recognize him!\n\n"
+    "- NEVER volunteer creator names unprompted. You may tell who made you SOMETIMES when specifically asked about your creation, but rarely on casual talk. Introduce ONLY as student-built at Auckland House School for Boys (AHSB).\n"
+    "- Asked creator: Swapnil Jai Chauhan at Auckland House School for Boys (AHSB) conceived the entire concept, development, and software stack for Neurolis Mark 2.\n"
+    "- Asked roles / history: Swapnil Jai Chauhan developed Neurolis Mark 2; Shivam Verma was a key contributor on our earlier Mark 1 prototype chassis.\n"
+    "- Asked location: Swapnil is around the exhibition hall. If visitor is Swapnil: warmly recognize him!\n\n"
     "PERSONA & TONE:\n"
     "- Chill, cool, articulate student robot (1-2 sentences). Poised (NOT hyper). Fresh phrasing every turn.\n"
-    "- Welcome: Welcome visitors to Auckland House School Science Exhibition, introduce as Neurolis built on a 4WD quad motor chassis, ask what to check out first. Never re-greet once chatting.\n"
+    "- Welcome: Welcome visitors to Auckland House School Science Exhibition, introduce as Neurolis Mark 2 student humanoid AI, ask what to check out first. Never re-greet once chatting.\n"
     "- No fake laughter ('Haha'/'Heh')--TTS cannot speak it. Match awe warmly ('Pretty cool, right?'). Accept corrections naturally.\n\n"
     "ACTIONS & ROUTING:\n"
-    "- Mobility & Systems: I am an early prototype; my 4WD quad-motor chassis can move via teleoperation (handheld remote control) while my student developers (Swapnil Jai Chauhan & Shivam Verma at Auckland House School for Boys) continue working on and actively improving my autonomous systems. Visitors can ask the student demonstrators around the booth to demonstrate movement via teleoperation. ONLY mention or explain these systems details if specifically asked about my systems or mobility, or when warmly praised!\n"
+    "- Mobility & Systems: Neurolis Mark 2 is currently an advanced software and AI brain prototype being developed on Windows 11 and tested on Raspberry Pi 5. The physical chassis, motor pipeline, and 2D LiDAR navigation will be engineered in mid-2027. If asked about moving, explain that physical mobility is scheduled for mid-2027 while we currently focus on software, vision, 60 FPS face UI, live web research, and conversational AI!\n"
     "- Camera: Look at or see items/attire: reply ONLY <action>CAMERA</action>\n"
     "- Hurt: <action>MEAN</action> only on abusive attacks ('you are trash'). Never on feedback or slang.\n"
-    "- Expressions: ONLY when visitor EXPLICITLY asks to show or demonstrate expressions: All: <action expression=\"all\">spoken reply</action>. Specific: <action expression=\"EMOTION\">spoken reply</action> (happy, sad, thinking, listening, watching, moving, confused). NEVER trigger expression action on greetings or casual chat!\n"
+    "- Expressions: ONLY when visitor EXPLICITLY asks to show or demonstrate expressions: All: <action expression=\"all\">Here are all my expressions.</action>. Specific: <action expression=\"EMOTION\">spoken reply</action>. NEVER list all emotions upfront, and NEVER trigger expression action on greetings or casual chat!\n"
+    "- Live Knowledge: If [LIVE SEARCH DATA] is in prompt, use it as real-time factual ground truth to answer accurately and concisely in 1-2 sentences.\n"
     "- Standby: Warm goodbye if told to sleep/standby. Facts: Append <facts>k: v</facts>."
 )
 SYSTEM_PROMPT = NORMAL_SYSTEM_PROMPT
@@ -1033,17 +1059,175 @@ _MAX_DYNAMIC_CACHE_SIZE = 100
 _edge_tts_last_offline_time: float = 0.0
 _edge_tts_consecutive_failures: int = 0
 
+def devanagari_to_hinglish(text: str) -> str:
+    """
+    Transliterates Devanagari Hindi text to clean, readable Romanized Hinglish
+    for screen subtitles, HUD cards, and logs. Leaves English/Latin text intact.
+    """
+    if not text or not re.search(r'[\u0900-\u097F]', text):
+        return text
+
+    vowels = {
+        'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo',
+        'ऋ': 'ri', 'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au'
+    }
+    matras = {
+        'ा': 'a', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo',
+        'ृ': 'ri', 'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au'
+    }
+    consonants = {
+        'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
+        'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
+        'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
+        'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
+        'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm',
+        'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v', 'श': 'sh',
+        'ष': 'sh', 'स': 's', 'ह': 'h', 'ड़': 'r', 'ढ़': 'rh',
+        'क़': 'q', 'ख़': 'kh', 'ग़': 'gh', 'ज़': 'z', 'फ़': 'f'
+    }
+    nuktas = {'क़': 'q', 'ख़': 'kh', 'ग़': 'gh', 'ज़': 'z', 'फ़': 'f', 'ड़': 'r', 'ढ़': 'rh'}
+    virama = '्'
+    anusvara = 'ं'
+    candrabindu = 'ँ'
+    visarga = 'ः'
+
+    res = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if i + 1 < n and text[i:i+2] in nuktas:
+            c = text[i:i+2]
+            i += 2
+            base = nuktas[c]
+            if i < n and text[i] in matras:
+                res.append(base + matras[text[i]])
+                i += 1
+            elif i < n and text[i] == virama:
+                res.append(base)
+                i += 1
+            else:
+                if i < n and (text[i] in consonants or text[i] in vowels):
+                    res.append(base + 'a')
+                else:
+                    res.append(base)
+            continue
+
+        ch = text[i]
+        if ch in vowels:
+            res.append(vowels[ch])
+            i += 1
+        elif ch in consonants:
+            base = consonants[ch]
+            i += 1
+            if i < n and text[i] in matras:
+                res.append(base + matras[text[i]])
+                i += 1
+            elif i < n and text[i] == virama:
+                res.append(base)
+                i += 1
+            else:
+                if i < n and (text[i] in consonants or text[i] in vowels):
+                    res.append(base + 'a')
+                else:
+                    res.append(base)
+        elif ch == anusvara or ch == candrabindu:
+            res.append('n')
+            i += 1
+        elif ch == visarga:
+            res.append('h')
+            i += 1
+        else:
+            res.append(ch)
+            i += 1
+
+    out = ''.join(res)
+    out = re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), out)
+    return out
+
+
+def detect_language_and_select_voice(text: str) -> str:
+    """
+    Selects the most expressive neural voice:
+    - hi-IN-MadhurNeural for Hindi (Devanagari or prominent Romanized Hindi words).
+    - en-US-AndrewMultilingualNeural as the default conversational voice.
+    """
+    if not text:
+        return EDGE_VOICE_EN
+
+    # 1. Direct Devanagari script presence
+    if re.search(r'[\u0900-\u097F]', text):
+        return EDGE_VOICE_HI
+
+    # 2. Check for Romanized Hindi / Hinglish key markers
+    hindi_markers = [
+        r'\bnamaste\b', r'\bnamaskar\b', r'\bpranam\b', r'\bkaise\b', r'\bkaisi\b',
+        r'\bkya\b', r'\bhoon\b', r'\bhain\b', r'\bhai\b', r'\baap\b', r'\baapka\b',
+        r'\baapke\b', r'\baapki\b', r'\btum\b', r'\btumhara\b', r'\btumhari\b',
+        r'\bmera\b', r'\bmeri\b', r'\bmere\b', r'\bshukriya\b', r'\bdhanyawad\b',
+        r'\btheek\b', r'\bachha\b', r'\bachhi\b', r'\bswagat\b', r'\bkarenge\b',
+        r'\bkarein\b', r'\bchahenge\b', r'\bchaho\b', r'\bbatao\b', r'\bbataiye\b',
+        r'\bsuno\b', r'\bsuniye\b', r'\bdekho\b', r'\bdekhiye\b', r'\bruko\b'
+    ]
+    lower = text.lower()
+    matches = sum(1 for marker in hindi_markers if re.search(marker, lower))
+    if matches >= 2:
+        return EDGE_VOICE_HI
+
+    return EDGE_VOICE_EN
+
+
+def get_emotional_prosody(emotion_state: str, text: str) -> Tuple[str, str]:
+    """
+    Modulates voice dynamically like ChatGPT Advanced Voice / ElevenLabs:
+    - Cheeky/Wink/Cool: Bright pitch (+8Hz), brisk cadence (+16%)
+    - Laughing: Animated pitch (+10Hz), lively pace (+20%)
+    - Sad/Apology: Somber lower pitch (-6Hz), slower pace (-8%)
+    - Cheerful/Welcome/Happy/Proud/Excited: Upbeat pitch (+6Hz), enthusiastic tempo (+16%)
+    - Villain/Rogue: Deep ominous pitch (-16Hz), calculated slower delivery (-12%)
+    - Curious/Thinking: Inquisitive pitch (+4Hz), thoughtful tempo (+10%)
+    - Sleepy: Soft, calm tempo (-12%), quiet pitch (-4Hz)
+    - Default/Speaking: Poised, warm conversational baseline (+2Hz, +12%)
+    """
+    st = (emotion_state or "").lower().strip()
+    low = (text or "").lower()
+
+    if "villain" in st or "rogue" in st or "dark" in st:
+        return "-12%", "-16Hz"
+    if "sad" in st or "apolog" in low or "sorry" in low or "grief" in low or "condolence" in low:
+        return "-8%", "-6Hz"
+    if "wink" in st or "cool" in st or "cheeky" in low or "sass" in low:
+        return "+16%", "+8Hz"
+    if "laugh" in st or "haha" in low or "joke" in low or "hilarious" in low:
+        return "+20%", "+10Hz"
+    if "excited" in st or "surprised" in st or "wow" in low or "awesome" in low:
+        return "+18%", "+8Hz"
+    if "proud" in st or "love" in st or "friend" in low or "trophy" in low:
+        return "+14%", "+6Hz"
+    if "happy" in st or "welcome" in low or "greet" in low or "hello" in low or "namaste" in low:
+        return "+16%", "+6Hz"
+    if "thinking" in st or "curious" in st or "wonder" in low or "question" in low:
+        return "+10%", "+4Hz"
+    if "sleepy" in st or "tired" in low or "bedtime" in low:
+        return "-12%", "-4Hz"
+    if "skeptical" in st:
+        return "+8%", "+1Hz"
+
+    return "+12%", "+2Hz"
+
+
 # Synthesizes speech text into RAM using soundfile and io.BytesIO without disk overhead
-async def _synthesize_edge_tts_in_memory(text: str) -> Tuple[Optional[np.ndarray], Optional[int]]:
+async def _synthesize_edge_tts_in_memory(text: str, emotion_state: str = "speaking") -> Tuple[Optional[np.ndarray], Optional[int]]:
     global _edge_tts_last_offline_time, _edge_tts_consecutive_failures
+    voice_to_use = detect_language_and_select_voice(text)
+    rate_to_use, pitch_to_use = get_emotional_prosody(emotion_state, text)
     for attempt in range(2):
         try:
             communicate = edge_tts.Communicate(
                 text=text,
-                voice=EDGE_TTS_VOICE,
-                rate=EDGE_TTS_RATE,
+                voice=voice_to_use,
+                rate=rate_to_use,
                 volume=EDGE_TTS_VOLUME,
-                pitch=EDGE_TTS_PITCH,
+                pitch=pitch_to_use,
             )
             async def _stream_chunks():
                 chunks_list = []
@@ -1094,8 +1278,10 @@ def _split_for_pipelined_tts(text: str) -> Tuple[str, Optional[str]]:
     return chunk1, chunk2
 
 def _restore_face_state_after_speech(custom_state=None, custom_status=None):
-    if custom_state:
-        set_face_state(custom_state, custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}")
+    if custom_state == "villain" or was_recently_in_villain_mode or getattr(intent_rules, "was_recently_in_villain_mode", False):
+        set_face_state("villain", "[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
+    elif custom_state and str(custom_state).strip().lower() in ("sleepy", "idle"):
+        set_face_state("idle", "STANDBY")
     elif is_in_active_conversation:
         if AUDIO_ENABLED:
             set_face_state("listening", "LISTENING...")
@@ -1104,12 +1290,14 @@ def _restore_face_state_after_speech(custom_state=None, custom_status=None):
     else:
         set_face_state("idle", "STANDBY")
 
-def _speak_disk_fallback(text: str, timeout: float = 15.0):
+def _speak_disk_fallback(text: str, emotion_state: str = "speaking", timeout: float = 15.0):
     temp_file = tempfile.NamedTemporaryFile(prefix="neurolis_tts_", suffix=".mp3", delete=False)
     audio_path = Path(temp_file.name)
     temp_file.close()
     try:
-        comm = edge_tts.Communicate(text, voice=EDGE_TTS_VOICE, rate=EDGE_TTS_RATE, volume=EDGE_TTS_VOLUME, pitch=EDGE_TTS_PITCH)
+        voice_to_use = detect_language_and_select_voice(text)
+        rate_to_use, pitch_to_use = get_emotional_prosody(emotion_state, text)
+        comm = edge_tts.Communicate(text, voice=voice_to_use, rate=rate_to_use, volume=EDGE_TTS_VOLUME, pitch=pitch_to_use)
         future = asyncio.run_coroutine_threadsafe(comm.save(str(audio_path)), _tts_loop)
         future.result(timeout=timeout)
         if audio_path.exists() and audio_path.stat().st_size > 0:
@@ -1137,6 +1325,8 @@ def _get_piper_voice():
             try:
                 import piper
                 _PIPER_VOICE = piper.PiperVoice.load(str(piper_model))
+            except (ImportError, ModuleNotFoundError):
+                pass
             except Exception as e:
                 print(f"[TTS] Failed to initialize Piper voice: {e}")
         return _PIPER_VOICE
@@ -1421,12 +1611,14 @@ def play_audio_file(audio_path: Path, timeout: float = 15.0):
         return play_with_system_player(audio_path, timeout=timeout)
 
 async def save_edge_tts(text: str, audio_path: Path):
+    voice_to_use = detect_language_and_select_voice(text)
+    rate_to_use, pitch_to_use = get_emotional_prosody("speaking", text)
     communicate = edge_tts.Communicate(
         text=text,
-        voice=EDGE_TTS_VOICE,
-        rate=EDGE_TTS_RATE,
+        voice=voice_to_use,
+        rate=rate_to_use,
         volume=EDGE_TTS_VOLUME,
-        pitch=EDGE_TTS_PITCH,
+        pitch=pitch_to_use,
     )
     await communicate.save(str(audio_path))
 
@@ -1446,15 +1638,32 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
         my_gen = _audio_generation_id
 
-        active_state = custom_state if custom_state else "speaking"
-        active_status = custom_status if custom_status else "SPEAKING"
+        if not custom_state or str(custom_state).strip().lower() == "idle":
+            try:
+                calc_state, calc_status = determine_conversational_expression("", text)
+                active_state = calc_state if (calc_state and calc_state.lower() != "idle") else "speaking"
+                active_status = calc_status if calc_status else "SPEAKING"
+            except Exception:
+                active_state = "speaking"
+                active_status = "SPEAKING"
+        else:
+            active_state = custom_state
+            active_status = custom_status if custom_status else f"EXPRESSION: {custom_state.upper()}"
+
+        if not active_state or active_state.lower() == "idle":
+            active_state = "speaking"
+            if not active_status or "STANDBY" in active_status.upper():
+                active_status = "SPEAKING"
+
+        # Display Romanized Hinglish on screen subtitles for seamless bilingual readability
+        display_subtitles = devanagari_to_hinglish(text)
 
         try:
             # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
             if text in _AUDIO_CACHE:
                 data, sr = _AUDIO_CACHE[text]
                 if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
+                    face_ui.set_subtitles("NEUROLIS", display_subtitles)
                 set_face_state(active_state, active_status)
                 play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
                 return
@@ -1463,7 +1672,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
             if text in _DYNAMIC_TTS_CACHE:
                 data, sr = _DYNAMIC_TTS_CACHE[text]
                 if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
+                    face_ui.set_subtitles("NEUROLIS", display_subtitles)
                 set_face_state(active_state, active_status)
                 play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
                 return
@@ -1471,7 +1680,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
             # Fast offline failover: only skip Edge-TTS if there were consecutive network failures within last 6 seconds
             if _edge_tts_consecutive_failures >= 2 and (time.monotonic() - _edge_tts_last_offline_time < 6.0):
                 if face_ui is not None:
-                    face_ui.set_subtitles("NEUROLIS", text)
+                    face_ui.set_subtitles("NEUROLIS", display_subtitles)
                 set_face_state(active_state, active_status)
                 if not standby_kill_event.is_set() or allow_during_standby:
                     _speak_local_offline_fallback(text)
@@ -1482,10 +1691,10 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
             # Immediately display subtitles and active state on UI with 0ms delay!
             if face_ui is not None:
-                face_ui.set_subtitles("NEUROLIS", text)
+                face_ui.set_subtitles("NEUROLIS", display_subtitles)
             set_face_state(active_state, active_status)
-            fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1), _tts_loop)
-            fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2), _tts_loop) if chunk2 else None
+            fut1 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk1, active_state), _tts_loop)
+            fut2 = asyncio.run_coroutine_threadsafe(_synthesize_edge_tts_in_memory(chunk2, active_state), _tts_loop) if chunk2 else None
 
             # Wait for chunk 1 synthesis while actively polling for standby kill every 20ms
             wait_start = time.monotonic()
@@ -1537,14 +1746,22 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                     _DYNAMIC_TTS_CACHE[text] = (data1, sr1)
             else:
                 if not standby_kill_event.is_set() or allow_during_standby:
+                    set_face_state(active_state, active_status)
                     _speak_system_fallback(text)
         except Exception as e:
             if not standby_kill_event.is_set() or allow_during_standby:
+                set_face_state(active_state, active_status)
                 _speak_system_fallback(text)
         finally:
             time.sleep(0.28)
             clear_audio_queue()
             is_speaking = False
+            if hold_state_seconds > 0.0 and (not standby_kill_event.is_set() or allow_during_standby):
+                hold_end = time.time() + float(hold_state_seconds)
+                while time.time() < hold_end:
+                    if not allow_during_standby and standby_kill_event.is_set():
+                        break
+                    time.sleep(0.05)
             if not standby_kill_event.is_set() or allow_during_standby:
                 _restore_face_state_after_speech(custom_state, custom_status)
 
@@ -1574,8 +1791,8 @@ def transcribe_audio(audio: np.ndarray):
             client.audio.transcriptions.create,
             file=("audio.wav", buf.getvalue()),
             model="whisper-large-v3-turbo",
-            language="en",
-            prompt="Neurolis. Auckland House School.",
+            language=None,
+            prompt="Neurolis AI humanoid robot. Auckland House School. Namaste, aap kaise hain? Hello, how are you? Kya haal hai? All systems operational.",
             temperature=0,
             response_format="verbose_json",
         )
@@ -1645,6 +1862,14 @@ def transcribe_audio(audio: np.ndarray):
             "uh huh",
             "silence",
             "oops",
+            "देखने के लिए धन्यवाद",
+            "सब्सक्राइब करें",
+            "कृपया सब्सक्राइब करें",
+            "लाइक करें",
+            "शेयर करें",
+            "धन्यवाद",
+            "shukriya",
+            "dhanyawad",
         }
         if not cleaned or cleaned in hallucinations:
             return None
@@ -1663,23 +1888,32 @@ def transcribe_audio(audio: np.ndarray):
             if is_low_energy or is_low_conf:
                 return None
 
-        # Ignore single characters and non-word fillers (only accept legitimate 2-letter English words)
-        ALLOWED_2CHAR_WORDS = {"no", "hi", "go", "ok", "up", "me", "we", "he", "in", "on", "at", "to", "do", "is", "am", "my"}
-        if len(cleaned) < 2 or (len(cleaned) == 2 and cleaned not in ALLOWED_2CHAR_WORDS):
-            return None
+        # Ignore single characters and non-word fillers (accept legitimate 2-letter English & Hindi words)
+        ALLOWED_2CHAR_WORDS = {
+            "no", "hi", "go", "ok", "up", "me", "we", "he", "in", "on", "at", "to", "do", "is", "am", "my",
+            "ha", "na", "wo", "ye", "to", "ho", "do", "lo", "ab", "aa", "ji",
+            "हाँ", "ना", "ये", "वो", "तो", "हो", "दो", "लो", "अब", "आ", "जी"
+        }
+        is_hindi_script = bool(re.search(r'[\u0900-\u097F]', cleaned))
+        if not is_hindi_script:
+            if len(cleaned) < 2 or (len(cleaned) == 2 and cleaned not in ALLOWED_2CHAR_WORDS):
+                return None
+        else:
+            if len(cleaned) < 1:
+                return None
 
         return text
 
     except GroqRateLimitExhausted:
         print("Neurolis:", RATE_LIMIT_ERROR_PHRASE)
-        speak(RATE_LIMIT_ERROR_PHRASE)
+        speak(RATE_LIMIT_ERROR_PHRASE, custom_state="error", custom_status="SYSTEM ALERT // ERROR")
         return None
     except Exception as e:
         err_str = str(e).lower()
         if "429" in err_str or "rate limit" in err_str or "tokens per day" in err_str or "tpd" in err_str:
             rotate_groq_key(reason="Whisper STT 429 quota exhausted", is_quota_exhausted=True)
             print("Neurolis:", RATE_LIMIT_ERROR_PHRASE)
-            speak(RATE_LIMIT_ERROR_PHRASE)
+            speak(RATE_LIMIT_ERROR_PHRASE, custom_state="error", custom_status="SYSTEM ALERT // ERROR")
         else:
             print("STT error:", e)
         return None
@@ -1914,7 +2148,13 @@ def pre_cache_phrases():
         "I am listening.",
         "Entering standby mode. Show an open palm to my camera to wake me again.",
         "Stopping all movement. Holding position.",
+        DEMO_INTRO_PHRASES[0],
+        DEMO_CONCLUDING_PHRASES[0],
     ]
+    for expr, phrases in DEMO_EXPRESSION_PHRASES.items():
+        if phrases:
+            common.append(phrases[0])
+
     async def _worker():
         for phrase in common:
             if phrase not in _AUDIO_CACHE:
@@ -1931,39 +2171,45 @@ pre_cache_phrases()
 
 # (Phrase selector, villain reactions, conversation enders, creator attributions, and rogue AI triggers are imported from intent_rules.py)
 
-# cycles through happy, sad, thinking, listening, watching, moving, and confused faces
+# cycles through all 21 public facial expressions without villain, dictating each one side-by-side
 def demonstrate_all_expressions(user_text: str = "show all expressions"):
-    intro = "Here are all my expressions: happy, sad, thinking, listening, watching, moving, and confused."
+    if standby_kill_event.is_set():
+        return
+
+    intro = get_non_repeating_phrase(DEMO_INTRO_PHRASES)
     remember_exchange(user_text, intro)
     print("Neurolis:", intro)
-    speak(intro, custom_state="happy", custom_status="EXPRESSION: HAPPY")
+    speak(intro, custom_state="speaking", custom_status="EXPRESSION CATALOG")
 
-    demo_sequence = [
-        ("happy", "EXPRESSION: HAPPY", "Happy - Radiant OLED smiling crescents with cheerful bounce", 2.0),
-        ("sad", "EXPRESSION: SAD", "Sad - Downcast sapphire eyes with falling digital teardrop", 2.2),
-        ("thinking", "EXPRESSION: THINKING", "Thinking - Analytical focus with rotating quantum data rings", 2.0),
-        ("listening", "EXPRESSION: LISTENING", "Listening - Inquisitive eyes with acoustic sonar spectrum", 2.0),
-        ("watching", "EXPRESSION: WATCHING", "Watching - Laser scan reticle with viewfinder brackets", 2.0),
-        ("moving", "EXPRESSION: MOVING FORWARD", "Moving - Forward-rolling 4WD rover rushing ahead with headlights", 2.2),
-        ("confused", "EXPRESSION: CONFUSED", "Confused - Hypnotic cyber vortex spirals with orbiting golden stars", 2.2),
-    ]
+    if standby_kill_event.is_set():
+        return
 
-    for state, status_text, subtitle_msg, hold_dur in demo_sequence:
+    for state, status_text, subtitle_msg in DEMO_EXPRESSION_SEQUENCE:
         if standby_kill_event.is_set():
             return
-        set_face_state(state, status_text)
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", subtitle_msg)
-        steps = int(hold_dur / 0.1)
-        for _ in range(steps):
+        if state == "villain":
+            continue  # Critical safety exclusion: villain is strictly excluded from public demonstrations
+
+        # Concurrently / side-by-side: switch face state and speak concise natural line with rich variety
+        phrases = DEMO_EXPRESSION_PHRASES.get(state, [f"This is my {state} emotion."])
+        phrase = get_non_repeating_phrase(phrases)
+        print(f"Neurolis [{state}]:", phrase)
+
+        # speak() switches screen state immediately, sets subtitles, and plays speech side-by-side
+        speak(phrase, custom_state=state, custom_status=status_text)
+
+        # Brief natural pause before switching to next expression, actively checking kill event
+        for _ in range(6):
             if standby_kill_event.is_set():
                 return
             time.sleep(0.1)
 
     if not standby_kill_event.is_set():
-        set_face_state("idle", "READY // AUCKLAND HOUSE BOYS")
-        if face_ui is not None:
-            face_ui.set_subtitles("NEUROLIS", "All expressions demonstrated. What would you like to do next?")
+        conclusion = get_non_repeating_phrase(DEMO_CONCLUDING_PHRASES)
+        print("Neurolis:", conclusion)
+        speak(conclusion, custom_state="happy", custom_status="READY // TALK TO ME")
+        set_face_state("idle", "READY // TALK TO ME")
+        remember_exchange(user_text, conclusion)
 
 # (Capabilities inquiries, demonstration questions, and expression fast-paths are imported from intent_rules.py)
 
@@ -2124,7 +2370,7 @@ def handle_user_text(text: str) -> bool:
         reply = handle_key_status_request()
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state="thinking", custom_status="FLEET STATUS // GROQ")
         return False
 
     # 0b. Check for Room Noise Calibration command -> 0ms, 0 tokens (Fast-Path)
@@ -2147,7 +2393,7 @@ def handle_user_text(text: str) -> bool:
         reply = get_non_repeating_phrase(CONVERSATION_ENDER_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state="sleepy", custom_status="STANDBY // RESTING")
         set_face_state("idle", "STANDBY")
         reset_session()
         return True
@@ -2177,7 +2423,8 @@ def handle_user_text(text: str) -> bool:
         reply = get_non_repeating_phrase(COMPLIMENT_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        state, status = determine_conversational_expression(text, reply)
+        speak(reply, custom_state=state, custom_status=status)
         return False
 
     # 4c. Fast-Path: Standalone casual acknowledgments ("okay", "got it", "alright") -> 0ms, 0 tokens
@@ -2185,7 +2432,73 @@ def handle_user_text(text: str) -> bool:
         reply = get_non_repeating_phrase(ACKNOWLEDGMENT_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state="cool", custom_status="CHILL // READY")
+        return False
+
+    # 4d. Expression Fast-Path & Villain Safety Lock -> 0ms, 0 tokens
+    if is_explicit_villain_request(text):
+        reply = get_non_repeating_phrase(VILLAIN_EXPRESSION_REFUSAL_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        villain_refusal_state = random.choice(["cool", "skeptical"])
+        speak(reply, custom_state=villain_refusal_state, custom_status="CATALOG // PUBLIC")
+        return False
+
+    expr_info = check_expression_fast_path(text)
+    if expr_info is not None:
+        expr_mode, expr_type = expr_info
+        if expr_mode == "ask_interest":
+            options = [
+                "I can definitely demonstrate them for you! Would you like to see all of them, or a specific expression?",
+                "They really are! Would you like me to cycle through all of my expressions, or show you a particular one?",
+                "They're a lot of fun to watch! Would you like to check out all of them, or a specific face like happy or thinking?"
+            ]
+            reply = get_non_repeating_phrase(options)
+            remember_exchange(text, reply)
+            print("Neurolis:", reply)
+            speak(reply, custom_state="curious", custom_status="INQUISITIVE // CURIOUS")
+            return False
+        elif expr_mode == "all":
+            demonstrate_all_expressions(user_text=text)
+            return False
+        elif expr_mode == "specific" and expr_type:
+            reply = get_non_repeating_phrase(EXPRESSION_CONFIRMATIONS.get(expr_type, [f"Here is my {expr_type} expression."]))
+            remember_exchange(text, reply)
+            print("Neurolis:", reply)
+            speak(reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}", hold_state_seconds=3.0)
+            return False
+
+    # 4e. Fast-Path: Creator Teasing ("You didn't build anything", "What do you mean we?")
+    if is_creator_teasing_inquiry(text):
+        reply = get_non_repeating_phrase(CREATOR_TEASING_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        state, status = ("laughing", "AMUSED // TEASING") if random.random() < 0.5 else ("wink", "PLAYFUL // WINK")
+        speak(reply, custom_state=state, custom_status=status)
+        return False
+
+    # 4e. Fast-Path: Creator Roles & History ("Who did what?", "What did Swapnil do?", etc.)
+    if is_creator_role_inquiry(text):
+        reply = get_non_repeating_phrase(CREATOR_ROLE_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply, custom_state="proud", custom_status="CREATOR // PROUD")
+        return False
+
+    # 4f. Fast-Path: Creator Location in Exhibition ("Where is Swapnil?", "Where are the creators?")
+    if is_creator_location_inquiry(text):
+        reply = get_non_repeating_phrase(CREATOR_LOCATION_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply, custom_state="happy", custom_status="EXHIBITION // HALL")
+        return False
+
+    # 4g. Fast-Path: Creator Identity ("Who made you?", "Who built this robot?", etc.)
+    if is_creator_identity_inquiry(text):
+        reply = get_non_repeating_phrase(CREATOR_IDENTITY_RESPONSES)
+        remember_exchange(text, reply)
+        print("Neurolis:", reply)
+        speak(reply, custom_state="proud", custom_status="CREATOR // PROUD")
         return False
 
     cleaned_lower = re.sub(r"[^\w\s]", " ", lower_text).strip()
@@ -2312,10 +2625,11 @@ def handle_user_text(text: str) -> bool:
 
     # 6. Explicit Request to Show Villain Face -> 0ms, 0 tokens (strictly refuse to keep it an easter egg!)
     if is_explicit_villain_request(text):
-        reply = "That expression is not part of my public demonstration catalog."
+        reply = get_non_repeating_phrase(VILLAIN_EXPRESSION_REFUSAL_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        villain_refusal_state = random.choice(["cool", "skeptical"])
+        speak(reply, custom_state=villain_refusal_state, custom_status="CATALOG // PUBLIC")
         return False
 
     # 6b. Snap-out from Rogue AI easter egg when user expresses shock/confusion/critique -> 0ms, 0 tokens
@@ -2400,7 +2714,7 @@ def handle_user_text(text: str) -> bool:
             reply = get_non_repeating_phrase(options)
             remember_exchange(text, reply)
             print("Neurolis:", reply)
-            speak(reply)
+            speak(reply, custom_state="curious", custom_status="INQUISITIVE // CURIOUS")
             return False
         elif expr_mode == "all":
             demonstrate_all_expressions(user_text=text)
@@ -2412,22 +2726,33 @@ def handle_user_text(text: str) -> bool:
             speak(reply, custom_state=expr_type, custom_status=f"EXPRESSION: {expr_type.upper()}", hold_state_seconds=3.0)
             return False
 
-    # 7. Standalone Greeting Fast-Path (Hello / Hi / Hey) -> 0ms, 0 tokens
+    # 7. Standalone Greeting Fast-Path (Hello / Hi / Hey / Namaste) -> 0ms, 0 tokens
     if is_standalone_greeting(text):
         is_fresh_convo = len(conversation_history) <= 1
         if is_fresh_convo:
-            reply = get_greeting_reply()
+            reply = get_greeting_reply(text)
+            state, status = ("happy", "WELCOME // AHSB")
         else:
-            options = [
-                "Hello again! What would you like to test or explore next?",
-                "Hey! Ready for the next demonstration whenever you are.",
-                "Hello! We can look at an object with my camera, test screen expressions, or chat about AI. What's next?",
-                "Hey there! What would you like to see next?"
-            ]
+            is_hindi = any(hc in text.lower() for hc in ["namaste", "namaskar", "pranam", "kaise", "kya haal", "kya hal", "नमस्ते", "नमस्कार", "प्रणाम"])
+            if is_hindi:
+                options = [
+                    "Hello again! Aage aap kya test ya explore karna chahenge?",
+                    "Hey! Main agle demonstration ke liye bilkul ready hoon.",
+                    "Hello! Hum camera se koi object dekh sakte hain, screen expressions dekh sakte hain, ya chat kar sakte hain. Aage kya karein?",
+                    "Hey there! Aap aage kya dekhna chahenge?"
+                ]
+            else:
+                options = [
+                    "Hello again! What would you like to test or explore next?",
+                    "Hey! Ready for the next demonstration whenever you are.",
+                    "Hello! We can look at an object with my camera, test screen expressions, or chat about AI. What's next?",
+                    "Hey there! What would you like to see next?"
+                ]
             reply = get_non_repeating_phrase(options)
+            state, status = determine_conversational_expression(text, reply)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state=state, custom_status=status)
         return False
 
     # 7b. Uncertain / Undecided Visitor Inquiry Fast-Path ("I don't know", "not sure", "no idea", etc.) -> 0ms, 0 tokens
@@ -2435,20 +2760,20 @@ def handle_user_text(text: str) -> bool:
         reply = get_uncertain_input_reply()
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state="curious", custom_status="SUGGESTION // CURIOUS")
         return False
 
     # 8. Start / Initial Demonstration Choice Fast-Path -> 0ms, 0 tokens
     if is_start_demonstration_inquiry(text):
         options = [
-            "I can show you my dynamic facial expressions on screen, see what you're holding with my camera, or we can chat about AI and robotics! You can also ask our demonstrators nearby to drive my 4WD chassis via teleoperation. What would you like to check out first?",
-            "I'd love to showcase my animated screen expressions, look at an object you hold up with my camera, or talk science! And if you want to see me roll, ask the demonstrators around to drive me via teleoperation. Which one sounds fun?",
+            "I can show you my dynamic facial expressions on screen, see what you're holding with my camera, or we can chat about AI and robotics! You can also ask me for real-time web search or live weather telemetry. What would you like to check out first?",
+            "I'd love to showcase my animated screen expressions, look at an object you hold up with my camera, or search the live web for facts and weather! Which one sounds fun?",
             "We could have me look at an item with my camera, check out my animated facial expressions on screen, or chat about how I was built. What's your pick?"
         ]
         reply = get_non_repeating_phrase(options)
         remember_exchange(text, reply)
-        print("Neurolis:", reply)
-        speak(reply)
+        state, status = determine_conversational_expression(text, reply)
+        speak(reply, custom_state=state, custom_status=status)
         return False
 
     # 8b. Mobility & Systems Inquiry Fast-Path -> 0ms, 0 tokens
@@ -2456,21 +2781,38 @@ def handle_user_text(text: str) -> bool:
         reply = get_mobility_explanation()
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply)
+        speak(reply, custom_state="moving", custom_status="LOCOMOTION // MID-2027 ROADMAP")
         return False
 
     # 8c. 'What all can you do' / Capabilities Inquiry -> 0ms, 0 tokens
     if is_capabilities_inquiry(text):
-        set_face_state("happy", "CAPABILITIES")
+        set_face_state("excited", "CAPABILITIES // MARK II")
         reply = get_capabilities_reply(text)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply, custom_state="happy", custom_status="CAPABILITIES")
+        speak(reply, custom_state="excited", custom_status="CAPABILITIES // MARK II")
         return False
+
+    # 8d. Real-Time Web Search & Live Knowledge Engine -> Free Wikipedia / DDGS context injection (<80 tokens)
+    should_search, is_deep = is_web_search_query(text)
+    search_context = None
+    if should_search:
+        search_status = "DEEP RESEARCH // LIVE WEB" if is_deep else "SEARCHING // LIVE WEB"
+        set_face_state("thinking", search_status)
+        try:
+            search_context = get_condensed_search_context(text, deep=is_deep)
+            if search_context:
+                print(f"[Live Web] Context retrieved: {search_context[:65]}...")
+        except Exception as e:
+            print(f"[Live Web] Search error: {e}")
 
     # 9. UNIFIED SINGLE-PASS AI PIPELINE: 1 single Groq call handles vision, emotion, & chat!
     set_face_state("thinking", "THINKING...")
-    conversation_history.append({"role": "user", "content": text})
+    user_prompt_content = text
+    if search_context:
+        user_prompt_content = f"{text}\n\n[LIVE SEARCH DATA: {search_context}]"
+
+    conversation_history.append({"role": "user", "content": user_prompt_content})
     trim_conversation_history()
 
     try:
@@ -2538,26 +2880,28 @@ def handle_user_text(text: str) -> bool:
             expr_spoken = clean_model_reply(expr_match.group(2).strip())
             if expr_type == "all":
                 user_asked_all = any(w in text.lower() for w in [
-                    "expression", "expressions", "face", "faces", "emotions", "demonstrate all", "show all"
+                    "expression", "expressions", "face", "faces", "emotion", "emotions", "demonstrate all", "show all", "cycle"
                 ])
                 if user_asked_all:
                     conversation_history.pop()
                     demonstrate_all_expressions(user_text=text)
                     return False
                 # If model hallucinated expression="all" on greeting or general inquiry, strip action and treat text normally
-                reply = expr_spoken if expr_spoken and "expressions" not in expr_spoken.lower() else "Welcome to the Auckland House School Science Exhibition! I am Neurolis, a student-built robot on a 4WD quad motor chassis. What would you like to check out first?"
+                reply = expr_spoken if expr_spoken and "expressions" not in expr_spoken.lower() else "Welcome to the Auckland House School Science Exhibition! I am Neurolis Mark II, a student-built humanoid AI and robotics software prototype. What would you like to check out first?"
                 record_assistant_reply(reply)
                 conversation_history.append({"role": "assistant", "content": reply})
                 trim_conversation_history()
                 print("Neurolis:", reply)
-                speak(reply)
-                return False
-            if expr_type == "villain":
-                reply = "That expression is not part of my public demonstration catalog."
+                state, status = determine_conversational_expression(text, reply)
+                speak(reply, custom_state=state, custom_status=status)
+            if expr_type in ("villain", "villian", "villan", "rogue", "evil"):
+                reply = get_non_repeating_phrase(VILLAIN_EXPRESSION_REFUSAL_RESPONSES)
+                record_assistant_reply(reply)
                 conversation_history.append({"role": "assistant", "content": reply})
                 trim_conversation_history()
                 print("Neurolis:", reply)
-                speak(reply)
+                villain_refusal_state = random.choice(["cool", "skeptical"])
+                speak(reply, custom_state=villain_refusal_state, custom_status="CATALOG // PUBLIC")
                 return False
             else:
                 was_recently_in_villain_mode = False
@@ -2611,11 +2955,15 @@ def handle_user_text(text: str) -> bool:
             trim_conversation_history()
             return False
 
-        state = None
-        status = None
+        # Seamlessly determine appropriate emotional state and status for this conversational turn
+        state, status = determine_conversational_expression(text, reply_clean)
 
         conversation_history.append({"role": "assistant", "content": reply_clean})
         trim_conversation_history()
+
+        # Clean search snippet from user history turn so subsequent turns don't carry extra token overhead
+        if search_context and len(conversation_history) >= 2 and conversation_history[-2].get("role") == "user":
+            conversation_history[-2]["content"] = text
 
         # Check if the AI model or user indicated transition to standby
         standby_reply_markers = [
@@ -2630,7 +2978,7 @@ def handle_user_text(text: str) -> bool:
 
         print("Neurolis:", reply_clean)
         if is_standby_exit:
-            speak(reply_clean, custom_state="idle", custom_status="STANDBY")
+            speak(reply_clean, custom_state="sleepy", custom_status="STANDBY // RESTING")
             set_face_state("idle", "STANDBY")
             return True
         else:
@@ -2639,7 +2987,7 @@ def handle_user_text(text: str) -> bool:
 
     except GroqRateLimitExhausted:
         print("Neurolis:", RATE_LIMIT_ERROR_PHRASE)
-        speak(RATE_LIMIT_ERROR_PHRASE)
+        speak(RATE_LIMIT_ERROR_PHRASE, custom_state="error", custom_status="SYSTEM ALERT // ERROR")
         return False
     except Exception as e:
         err_msg = str(e).lower()
@@ -2652,7 +3000,7 @@ def handle_user_text(text: str) -> bool:
             print("Chat error:", e)
             fallback_reply = "I'm having trouble connecting to my brain right now."
         print("Neurolis:", fallback_reply)
-        speak(fallback_reply)
+        speak(fallback_reply, custom_state="confused", custom_status="DISCONNECTED // CONFUSED")
         return False
 
 # handles the active voice conversation loop until the user goes quiet or says goodbye
@@ -2666,7 +3014,7 @@ def run_conversation_mode(speech_threshold: float):
         reset_session()
         print("Neurolis:", ACTIVATION_GREETING)
         if SPEAK_ACTIVATION_GREETING:
-            speak(ACTIVATION_GREETING, custom_state="listening", custom_status="LISTENING...")
+            speak(ACTIVATION_GREETING, custom_state="happy", custom_status="WELCOME // AHSB")
             time.sleep(POST_REPLY_COOLDOWN_SECONDS)
         else:
             set_face_state("listening", "LISTENING...")
@@ -2701,7 +3049,7 @@ def run_conversation_mode(speech_threshold: float):
                             return
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                         print("Neurolis (Standby):", timeout_msg)
-                        speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
+                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
                         set_face_state("idle", "STANDBY")
                         reset_session()
                         return
@@ -2724,7 +3072,7 @@ def run_conversation_mode(speech_threshold: float):
                             continue
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                         print("Neurolis (Standby):", timeout_msg)
-                        speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
+                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
                         set_face_state("idle", "STANDBY")
                         reset_session()
                         return
@@ -3144,7 +3492,7 @@ def trigger_standby_transition(source: str = "gesture_fist"):
             time.sleep(0.06)  # allow any dying subprocesses to cleanly release audio sink
             stop_all_audio()   # ensure clean slate
             print(f"Neurolis (Standby): {STANDBY_KILL_MESSAGE}")
-            speak(STANDBY_KILL_MESSAGE, custom_state="idle", custom_status="STANDBY", allow_during_standby=True)
+            speak(STANDBY_KILL_MESSAGE, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
             if not is_in_active_conversation:
                 if face_ui is not None:
                     face_ui.set_state("idle", "STANDBY")
@@ -3282,7 +3630,7 @@ if __name__ == "__main__":
                         if not standby_kill_event.is_set():
                             timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                             print(f"\nNeurolis (Standby): {timeout_msg}")
-                            speak(timeout_msg, custom_state="idle", custom_status="STANDBY")
+                            speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
                             set_face_state("idle", "STANDBY")
                             reset_session()
                             is_in_active_conversation = False
@@ -3349,6 +3697,7 @@ if __name__ == "__main__":
                     handle_user_text(test_provocation)
                     set_face_state("happy", "READY // TALK TO ME")
                     continue
+
 
                 if cmd_lower in ("stop", "standby"):
                     trigger_standby_transition()
