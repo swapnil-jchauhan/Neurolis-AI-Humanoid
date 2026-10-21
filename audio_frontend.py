@@ -437,15 +437,16 @@ class Endpointer:
         accepted = True
         reject_reason = ""
         min_voiced_frames = int(self.cfg.get("min_voiced_frames", 8))
-        min_onset_rms = float(self.cfg.get("min_onset_rms", 30.0))
+        min_onset_rms = float(self.cfg.get("min_onset_rms", 100.0))
 
         if not is_manual:
+            effective_min_speech_gate = max(min_onset_rms, self.live_floor * 1.5, 90.0)
             if self.voiced_count < min_voiced_frames:
                 accepted = False
                 reject_reason = f"voiced_frames_too_low({self.voiced_count}<{min_voiced_frames})"
-            elif p90_rms < max(min_onset_rms, self.live_floor * 1.35):
+            elif p90_rms < effective_min_speech_gate:
                 accepted = False
-                reject_reason = f"p90_rms_too_low({p90_rms:.1f}<{max(min_onset_rms, self.live_floor * 1.35):.1f})"
+                reject_reason = f"p90_rms_too_low({p90_rms:.1f}<{effective_min_speech_gate:.1f})"
 
         self.result_audio = audio if accepted else None
         self.result_info = {

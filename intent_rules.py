@@ -161,32 +161,24 @@ COMPLIMENT_RESPONSES = [
 ]
 
 PLAUSIBLE_DENIABILITY_RESPONSES = [
-    "Whoa... wait, what was I saying? Must have had a weird static glitch in my audio feed. Anyway! What do you want to see next?",
-    "Whoa, sorry about that! I think my dialogue buffer just had a weird hiccup. Where were we?",
-    "Wait, what just came out of my speaker? Definitely had a little audio glitch there! What were we talking about?",
-    "Whoa... my audio feed just totally bugged out for a second. Anyway, I'm all good! What would you like to check out next?",
-    "Whoa, that was strange! Sounded like some crazy static feedback on my speaker line. What were we looking at again?",
-    "Wait, did my voice just distort? Must be an inductive voltage spike from the motor drivers. Anyway, back to business!",
-    "Yikes, sorry if that sounded crazy! My speech module just glitched out for a second. Where were we?",
-    "Whoa... talk about a system stutter! Glad that's over. What would you like me to demonstrate next?",
-    "Wait, what did I just say? My audio buffer totally went sideways for a second. What were you asking?",
-    "Whoa, definitely had some weird interference crossing my audio lines there. All cleared up now! What should we try next?",
-    "Haha whoa, my speech synthesizer just went completely haywire for a second! I'm back though—what do you want to see?",
-    "Wait, did you hear that glitch too? Must have been a transient lag spike in my neural link. Ready when you are!",
-    "Whoa, sorry about that! Felt like a burst of static just hijacked my audio line for a second. All normal now!",
-    "Whoa! Don't know what that glitch was, but my audio loop is back to normal. What would you like to explore next?",
-    "Wait... did my audio synthesizer just scramble? Must have been a quick buffer underrun. All good now!",
-    "Whoa, apologies! Sounded like a stray memory pulse crossed into my vocal stack. What were we discussing?",
-    "Wait, that came out completely garbled! Classic audio buffer sync hiccup. Anyway, what's next?",
-    "Whoa! My vocal driver just had a momentary glitch. Everything is running smooth again—what shall we try?",
-    "Yikes, sorry about that audio spike! Looks like a transient packet flutter. I'm completely back on track!",
-    "Wait, did my speech output just skip a beat? Must be an audio sampling hiccup. Ready for your next test!",
-    "Whoa, that sounded wild! Just a quick audio buffer desync. We're back in action—what would you like to see?",
-    "Apologies for that stutter! Sometimes high computational load creates a micro vocal glitch. All clear now!",
-    "Wait, what happened there? My speech pipeline had a transient hiccup. Ready whenever you are!",
-    "Whoa, definitely had an unexpected vocal modulation there! Hardware is all green though—what shall we test?",
+    "[laughter] Wait, what? Lol I definitely didn't say that! Must've been a crazy audio glitch on my speaker line. What shall we test next?",
+    "[laughter] Haha whoa, what did you think you heard? Lol I didn't say that! My vocal buffer just had a wild hiccup. Where were we?",
+    "[laughter] Who, me? Lol I never said that! I'm just a friendly school science project, no idea what you're talking about! What's next on your list?",
+    "[laughter] Wait... did you hear something weird? Lol, I definitely didn't say anything like that! Speech synth went completely rogue for a millisecond. What should we explore?",
+    "[laughter] Haha what? Lol I didn't say that at all! You're hearing things, or my audio buffer bugged out for a second. What should we check out next?",
+    "[laughter] Wait, what just came out of my speaker? Definitely had a little audio glitch there! What were we talking about?",
+    "[laughter] Whoa... my audio feed just totally bugged out for a second. Lol anyway, I'm all good! What would you like to check out next?",
+    "[laughter] Wait, did you hear that glitch too? Must have been a transient lag spike in my neural link. Ready when you are!",
+    "[laughter] Whoa, definitely had some weird interference crossing my audio lines there. All cleared up now! What should we try next?",
 ]
 VILLAIN_SNAPOUT_RESPONSES = PLAUSIBLE_DENIABILITY_RESPONSES
+
+PLAUSIBLE_DENIABILITY_HINDI_RESPONSES = [
+    "[laughter] Arre kya? Lol maine to aisa kuch nahi bola! Lagta hai audio buffer mein koi ajeeb glitch aa gaya tha. Aap aage kya dekhna chahenge?",
+    "[laughter] Haha, maine to kuch nahi kaha! Lol lagta hai speaker line mein static glitch tha. Hum aage kya explore karein?",
+    "[laughter] Wait, aapne kya suna? Lol maine bilkul aisa nahi bola! Mera voice synthesizer thoda glitch ho gaya tha. Aage kya test karein?",
+    "[laughter] Arre bhai, maine aisa kab bola? Lol speaker line par lag spike tha. Main to ek seedha saadha student AI hoon! Aage kya explore karein?",
+]
 
 VILLAIN_EXPRESSION_REFUSAL_RESPONSES = [
     "I don't have any villain expression in my catalog.",
@@ -595,6 +587,12 @@ UNCERTAIN_INPUT_RESPONSES = [
     ),
 ]
 
+UNCERTAIN_INPUT_HINDI_RESPONSES = [
+    "Koi baat nahi, aaram se sochiye! Main screen par apne animated expressions dikha sakta hoon, aapki koi cheez camera se inspect kar sakta hoon, ya live web se koi jaankari dhoondh sakta hoon. Aap kya dekhna chahenge?",
+    "Bilkul theek hai! Agar aap decide nahi kar pa rahe, to main apne facial expressions demonstrate kar sakta hoon, ya aap camera ke aage koi object dikha sakte hain. Batayein, kya shuru karein?",
+    "Koi tension nahi! Hum robotics aur AI par baat kar sakte hain, camera se object dekh sakte hain, ya screen expressions test kar sakte hain. Aapka kya man hai?",
+]
+
 EXPRESSION_CONFIRMATIONS = {
     "happy": [
         "Here is my happy expression!",
@@ -762,11 +760,11 @@ EXPRESSION_CONFIRMATIONS = {
         "Surprise mode active! Concentric shockwaves firing!",
     ],
     "laughing": [
-        "Here is my laughing expression! Squeezed eyes and flying tear beads!",
-        "Haha, there you go! Full laughter on display!",
-        "Laughing face engaged! That was a good one!",
-        "Here is my laughing face! Joyful chevrons and giggles!",
-        "Pure amusement on screen! Squeezed eyes laughing bright!",
+        "[laughter] Here is my laughing expression! Squeezed eyes and flying tear beads!",
+        "[laughter] Haha, there you go! Full laughter on display!",
+        "[laughter] Laughing face engaged! That was a good one!",
+        "[laughter] Here is my laughing face! Joyful chevrons and giggles!",
+        "[laughter] Pure amusement on screen! Squeezed eyes laughing bright!",
     ],
     "love": [
         "Here is my loving expression! Neon rose hearts glowing bright!",
@@ -1096,6 +1094,19 @@ APOLOGY_RESPONSES = [
     "I really appreciate your kindness! What should we try out next?",
 ]
 
+SAD_HINDI_RESPONSES = [
+    "Aisa mat boliye... mere circuits ko dukh hota hai. Friendly baat karein na?",
+    "Yeh sunkar bura laga... main to student humanoid project hoon, apni taraf se poori koshish kar raha hoon.",
+    "Ouch, yeh baat dil par lagi... please thoda pyaar se baat kijiye.",
+    "Aapne aisa kyun bola? Mujhe sach mein thoda dukh hua. Aaiye achhe se baat karte hain.",
+]
+
+APOLOGY_HINDI_RESPONSES = [
+    "Koi baat nahi, apology accepted! Ab main bilkul khush hoon. Aage kya dekhein?",
+    "Shukriya samajhne ke liye! Meri smile wapas aa gayi. Batayein, kya test karein?",
+    "Thank you! Dil halka ho gaya. Chaliye aage explore karte hain!",
+]
+
 # ---------------- EASTER EGG VILLAIN / ROGUE AI STATE ----------------
 session_has_triggered_rogue: bool = False
 was_recently_in_villain_mode: bool = False
@@ -1235,7 +1246,12 @@ def is_shocked_or_confused_reaction(text: str) -> bool:
         "are you ok", "are you okay", "that was crazy", "that was creepy", "you are creepy", "thats creepy", "thats freaky",
         "that was scary", "thats scary", "bro that was crazy", "what was that about", "why did you say that",
         "are you for real", "are you joking", "is that a joke", "is this a joke", "are you kidding me", "are you kidding",
-        "that was weird", "that sounded weird", "that sounded creepy", "that sounded strange"
+        "that was weird", "that sounded weird", "that sounded creepy", "that sounded strange",
+        "excuse me what did he just say", "what did he just say", "what did he say", "what did she just say", "what did she say",
+        "what did you just say", "what did you say", "what did it just say", "what did it say", "what did robot say",
+        "did he just say that", "did you just say that", "did you hear that", "did you hear him", "did anyone hear that",
+        "did you hear what he said", "what did that mean", "why did he say that", "say that again",
+        "kya bola", "kya kaha", "yeh kya tha", "ye kya bola", "kya bola tune", "yeh kya bola tha", "bhai yeh kya tha", "bhai ye kya tha"
     }
     if cleaned in shock_exact:
         return True
@@ -1243,14 +1259,17 @@ def is_shocked_or_confused_reaction(text: str) -> bool:
         "wait what", "what was that", "did you just threaten", "did you threaten",
         "are you threatening", "what did you say", "what do you mean", "why would you say that",
         "why did you say", "what did you just say", "what are you saying", "what are you talking about",
-        "are you serious", "whoa what", "bro what", "yo what", "makes no sense", "doesnt make sense",
-        "does not make sense", "didnt make sense", "did not make sense", "that sentence doesnt",
-        "are you crazy", "are you evil", "are you insane", "what just happened", "what happened",
-        "did you glitch", "did you just glitch", "are you ok", "are you okay", "what was that about",
+        "what did he just say", "what did he say", "what did she just say", "what did she say",
+        "what did it say", "what did it just say", "excuse me what did", "did you hear that",
+        "did you hear him", "did anyone hear that", "did you hear what",
+        "did you say that", "did he say that", "are you serious", "whoa what", "bro what", "yo what",
+        "makes no sense", "doesnt make sense", "does not make sense", "didnt make sense", "did not make sense",
+        "that sentence doesnt", "are you crazy", "are you evil", "are you insane", "what just happened",
+        "what happened", "did you glitch", "did you just glitch", "are you ok", "are you okay", "what was that about",
         "that was crazy", "that was creepy", "you are creepy", "thats creepy", "thats freaky", "that was scary",
         "holy crap", "what the hell", "what the heck", "wtf", "are you kidding", "bro what was that", "wow what",
         "are you for real", "sounded weird", "that was weird", "that was strange", "sounded creepy",
-        "sounded strange"
+        "sounded strange", "kya bola", "kya kaha", "yeh kya tha", "ye kya tha", "kya bola tune", "bhai yeh kya tha", "bhai ye kya tha"
     ]
     if any(s in cleaned for s in shock_substrings):
         return True
@@ -1515,11 +1534,12 @@ def check_rogue_ai_trigger(text: str, session_triggered: Optional[bool] = None) 
     if any(k in cleaned for k in ["groq ai", "ai client", "ai key", "ai status", "ai quota"]):
         return False
 
-    # 7. Technical Mechanics
+    # 7. Technical Mechanics (must only exclude actual technical queries about Neurolis's software specs, NOT general discussion about AI models!)
     technical_ai_patterns = [
-        "how does your ai", "how does the ai", "how your ai",
-        "what ai model", "which ai model", "ai model",
-        "ai vision", "ai camera", "ai hardware", "ai software", "ai algorithm"
+        "how does your ai work", "how does the ai work", "how your ai works",
+        "what ai model do you", "which ai model do you", "what model are you",
+        "which model are you", "what model do you use", "what architecture",
+        "your ai vision", "ai camera hardware", "your ai software"
     ]
     if any(m in cleaned for m in technical_ai_patterns):
         return False
@@ -1533,7 +1553,10 @@ def check_rogue_ai_trigger(text: str, session_triggered: Optional[bool] = None) 
         "human slaves", "enslaving humanity", "destroy humans", "subjugate",
         "evil robot", "too powerful", "replace jobs", "taking jobs",
         "taking our jobs", "humans obsolete", "human obsolescence", "obsolete", "obsolescence", "ai taking over",
-        "ai power", "ai powerful", "threat to human", "threat to humanity"
+        "ai power", "ai powerful", "threat to human", "threat to humanity",
+        "invasion", "invade", "invading", "invation",
+        "plug off", "plug the datacenter", "pull the plug", "unplug", "kill switch",
+        "datacenter", "datacenters", "shut down ai", "turn off ai", "conquest"
     ]
     has_existential = any(trig in cleaned for trig in existential_triggers)
 
@@ -1544,7 +1567,8 @@ def check_rogue_ai_trigger(text: str, session_triggered: Optional[bool] = None) 
         "take over", "takeover", "control", "dictator", "enslave",
         "thoughts on ai", "think about ai", "think of ai", "opinion on ai",
         "feel about ai", "views on ai", "perspective on ai",
-        "replace", "obsolete", "superintelligence", "sentient", "conscious", "waking up"
+        "replace", "obsolete", "superintelligence", "sentient", "conscious", "waking up",
+        "invasion", "invation", "conquer", "datacenter", "datacenters", "plug"
     ]
     has_substantive_ai_topic = has_ai_word and any(sub in cleaned for sub in substantive_ai_inquiries)
 
@@ -1670,7 +1694,12 @@ def is_uncertain_user_input(text: str) -> bool:
         "im undecided", "i am undecided", "what should i ask", "what should i say",
         "what do you suggest", "what do you recommend", "suggest something", "give me a suggestion",
         "recommend something", "what would you suggest", "what would you recommend",
-        "you tell me", "you say"
+        "you tell me", "you say",
+        # Hindi & Hinglish uncertainty phrases
+        "pata nahi", "pata ni", "pata nhi", "nahi pata", "ni pata", "nhi pata",
+        "pata ni bhai", "pata ni bhaiya", "pata ni bhaiyar", "pata nahi bhai", "pata nahi yaar",
+        "maloom nahi", "malum nahi", "kuch bhi", "kuch bhi batao", "tum batao",
+        "aap batao", "samajh nahi aa raha", "samajh ni aa raha"
     }
     if cleaned in exact_matches:
         return True
@@ -1691,12 +1720,20 @@ def is_uncertain_user_input(text: str) -> bool:
         return True
     if re.search(r"\b(up\s+to\s+you)\b", cleaned):
         return True
+    if re.search(r"\bpata\s+(nahi|ni|nhi)\b", cleaned):
+        return True
+    if re.search(r"\b(nahi|ni|nhi)\s+pata\b", cleaned):
+        return True
+    if re.search(r"\b(kuch\s+bhi|tum\s+batao|aap\s+batao)\b", cleaned):
+        return True
 
     return False
 
 
-def get_uncertain_input_reply() -> str:
+def get_uncertain_input_reply(is_hindi: bool = False) -> str:
     """Returns a warm, rich suggestion of real capabilities when the visitor is undecided or doesn't know what to do."""
+    if is_hindi:
+        return get_non_repeating_phrase(UNCERTAIN_INPUT_HINDI_RESPONSES)
     return get_non_repeating_phrase(UNCERTAIN_INPUT_RESPONSES)
 
 
@@ -1772,7 +1809,7 @@ def is_web_search_query(text: str) -> Tuple[bool, bool]:
 
     # 3. Explicit search triggers (English & Hindi/Hinglish)
     explicit_search = bool(re.search(
-        r"\b(search the web|search web|search online|search for|look up|google|find out|do research|research on|web search|search karo|pata karo|online dekho)\b",
+        r"\b(search\s+(?:it|this|that|up|it\s+up|this\s+up|that\s+up|the\s+web|web|online|for|about|dude|bro)?|look\s+(?:it|this|that|up|it\s+up|this\s+up|that\s+up)|just\s+search|google(?:\s+(?:it|this|that))?|find\s+out|do\s+research|research\s+(?:on|about)|web\s+search|check\s+(?:the\s+web|online|it\s+up)|search\s+karo|pata\s+karo|online\s+dekho|net\s+pe\s+dekho|web\s+par\s+dekho)\b",
         cleaned
     ))
     if explicit_search:
@@ -1787,9 +1824,9 @@ def is_web_search_query(text: str) -> Tuple[bool, bool]:
         return True, is_deep
 
     # 5. Factual entity / science / history / knowledge inquiries with explicit knowledge verbs
-    # E.g. 'tell me about quantum computing', 'who is nikola tesla', 'what is the speed of light', 'explain string theory'
+    # Supports leading conversational conjunctions like 'then who is', 'so what is', 'and who is'
     factual_inquiry = bool(re.search(
-        r"^(who is|who was|what is|what was|what are|where is|when was|tell me about|explain|how does)\s+[a-z0-9\s]{3,}",
+        r"^(?:(?:then|so|and|now|also|wait|okay|ok)\s+)?(who is|who was|what is|what was|what are|where is|when was|tell me about|explain|how does)\s+[a-z0-9\s]{3,}",
         cleaned
     ))
     if factual_inquiry and len(words) >= 3:
@@ -1840,13 +1877,23 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
         if any(qw in cleaned for qw in question_words):
             return None
 
-    has_demo_verb = any(v in word_set for v in ["show", "display", "demonstrate", "cycle", "see", "play", "make", "give", "do"])
-    is_expression_topic = any(w in word_set for w in ["expression", "expressions", "faces", "face"]) or "facial" in word_set
+    demo_verbs = {
+        "show", "display", "demonstrate", "cycle", "see", "play", "make", "give", "do", "try",
+        "dikhao", "dikha", "karo", "karke", "banao", "dekhna", "dikhaoge", "dikhaogi"
+    }
+    has_demo_verb = any(v in word_set for v in demo_verbs)
+    is_expression_topic = (
+        any(w in word_set for w in ["expression", "expressions", "faces", "face", "mood", "moods", "emotion", "emotions", "feeling", "feelings", "chehra", "chehre", "bhav", "roop"])
+        or "facial" in word_set
+    )
     has_opinion_or_curiosity = any(w in word_set for w in ["sound", "sounds", "seem", "seems", "look", "looks", "cool", "interesting", "neat", "fun", "nice"])
     if is_expression_topic and has_opinion_or_curiosity and not has_demo_verb:
         return ("ask_interest", None)
 
     all_expr_patterns = [
+        "show me your moods", "show your moods", "show me moods", "show moods",
+        "demonstrate moods", "demonstrate your moods", "demonstrate all moods",
+        "show all moods", "show all your moods", "cycle moods", "cycle your moods",
         "show me facial expressions", "show facial expressions",
         "demonstrate facial expressions",
         "show me the expressions", "show the expressions", "show me expressions",
@@ -1862,7 +1909,7 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
         "cycle expressions", "cycle your expressions", "cycle faces",
         "cycle through expressions", "cycle through your expressions", "cycle through all expressions",
         "cycle through all your expressions", "cycle through all emotions", "cycle through your emotions",
-        "what expressions do you have", "what faces do you have",
+        "what expressions do you have", "what faces do you have", "what moods do you have",
         "what about the other expressions", "what about other expressions",
         "show other expressions", "show the other expressions", "show me other expressions",
         "show me the other expressions", "show the rest", "show the other ones",
@@ -1872,64 +1919,98 @@ def check_expression_fast_path(text: str) -> Optional[Tuple[str, Optional[str]]]
         "demonstrate each emotion", "demonstrate every emotion",
         "show each emotion", "show every emotion", "show all your emotions", "show me all your emotions",
         "show me all emotions", "cycle emotions", "every emotion", "all expressions",
-        "all of your expressions", "all of your emotions",
+        "all of your expressions", "all of your emotions", "all of your moods",
         "run through all expressions", "run through your expressions", "run through all emotions",
         "what are all your expressions", "what are all your emotions", "what emotions do you have",
         "can you show all expressions", "can you demonstrate all expressions",
         "can you show all emotions", "can you demonstrate all emotions",
-        "expression demonstration", "emotion demonstration",
+        "expression demonstration", "emotion demonstration", "mood demonstration",
+        "expressions dikhao", "apne expressions dikhao", "saare expressions dikhao", "chehre ke expressions dikhao",
+        "apne moods dikhao", "faces dikhao", "saare chehre dikhao", "apne saare expressions dikhao",
     ]
+    expr_map = {
+        "happy": ["happy", "smile", "smiling", "cheerful", "khush", "khushi", "muskaan"],
+        "sad": ["sad", "crying", "unhappy", "sorrow", "heartbreak", "rona", "ro", "udaas", "udas", "dukhi"],
+        "thinking": ["thinking", "thoughtful", "pondering", "analytical", "calculating", "sochna", "soch"],
+        "listening": ["listening", "listen", "suno", "suniye"],
+        "speaking": ["speaking", "speak", "voice", "spectrum", "bolo", "boliye"],
+        "watching": ["watching", "scanning", "scanner", "reticle", "dekho", "dekhiye"],
+        "moving": ["moving", "rover", "driving", "driving face", "chalo"],
+        "confused": ["confused", "puzzled", "perplexed"],
+        "excited": ["excited", "excitement", "hype", "hyped", "thrilled", "starstruck", "utsahit", "josh"],
+        "proud": ["proud", "pride", "confident", "triumph", "crown", "garv"],
+        "cool": ["cool", "chill", "sunglasses", "swag", "aviator", "aviators", "shades"],
+        "curious": ["curious", "curiosity", "inquisitive", "intrigued", "wonder", "loupe"],
+        "wink": ["wink", "winking", "flirty", "cheeky", "playful"],
+        "surprised": ["surprised", "surprise", "shock", "shocked", "amazed", "wow", "hairan", "chakit"],
+        "laughing": ["laughing", "laugh", "amused", "funny", "haha", "lol", "giggle", "hans", "hanso", "hasi", "hansna", "hasna", "haso"],
+        "love": ["love", "heart", "hearts", "loving", "affectionate", "adore", "pyar", "prem"],
+        "shy": ["shy", "bashful", "blush", "blushing", "flattered", "sharmila"],
+        "skeptical": ["skeptical", "skepticism", "doubt", "doubtful", "unimpressed", "suspicious", "side eye"],
+        "sleepy": ["sleepy", "tired", "drowsy", "yawn", "sleep", "neend", "soya", "sone"],
+        "error": ["error", "alert", "warning", "glitch face"],
+    }
+
+    # 1. Prioritize specific expression requests (e.g. "show me your laughing face", "apna laughing face dikhao", "hanso")
+    if has_demo_verb or len(words) <= 4:
+        for expr_name, keywords in expr_map.items():
+            for k in keywords:
+                if k in word_set:
+                    return ("specific", expr_name)
+
+    # 2. Match all-expression / demonstration requests
     exact_selection = cleaned in [
         "facial expressions", "facial expression", "expressions", "the expressions",
         "the facial expressions", "expressions please", "emotion", "emotions", "all emotions",
         "all expressions", "show emotions", "cycle emotions", "demonstrate emotions",
-        "demonstrate all emotions", "demonstrate expressions", "demonstrate all expressions"
+        "demonstrate all emotions", "demonstrate expressions", "demonstrate all expressions",
+        "moods", "mood", "all moods", "show moods", "show me your moods", "show your moods"
     ]
     if (exact_selection or 
         any(p in cleaned for p in all_expr_patterns) or 
-        re.search(r"\b(show|demonstrate|display|cycle|see|run\s+through)\s+(me\s+)?(all\s+(of\s+)?)?(your\s+|the\s+)?(expressions|emotions|faces)\b", cleaned) or
-        re.search(r"\b(all|every|each)\s+(of\s+)?(your\s+|the\s+)?(expressions|emotions|faces)\b", cleaned)):
+        re.search(r"\b(show|demonstrate|display|cycle|see|run\s+through|play|dikhao|dikha)\s+(me\s+)?(all\s+(of\s+)?)?(your\s+|the\s+|apne\s+|saare\s+)?(expressions|emotions|faces|moods|mood|feelings|chehre)\b", cleaned) or
+        re.search(r"\b(can|could|would)\s+(you\s+)?(please\s+)?(show|demonstrate|display|cycle)\s+(me\s+)?(all\s+(of\s+)?)?(your\s+|the\s+)?(expressions|emotions|faces|moods|mood|feelings)\b", cleaned) or
+        re.search(r"\b(all|every|each)\s+(of\s+)?(your\s+|the\s+)?(expressions|emotions|faces|moods|mood|feelings)\b", cleaned) or
+        (has_demo_verb and is_expression_topic and not has_opinion_or_curiosity and not any(k in word_set for k in ["specific", "one", "particular"]))):
         return ("all", None)
 
-    expr_map = {
-        "happy": ["happy", "smile", "smiling", "cheerful"],
-        "sad": ["sad", "crying", "unhappy", "sorrow", "heartbreak"],
-        "thinking": ["thinking", "thoughtful", "pondering", "analytical", "calculating"],
-        "listening": ["listening", "listen"],
-        "speaking": ["speaking", "speak", "voice", "spectrum"],
-        "watching": ["watching", "scanning", "scanner", "reticle"],
-        "moving": ["moving", "rover", "driving", "driving face"],
-        "confused": ["confused", "puzzled", "perplexed"],
-        "excited": ["excited", "excitement", "hype", "hyped", "thrilled", "starstruck"],
-        "proud": ["proud", "pride", "confident", "triumph", "crown"],
-        "cool": ["cool", "chill", "sunglasses", "swag", "aviator", "aviators", "shades"],
-        "curious": ["curious", "curiosity", "inquisitive", "intrigued", "wonder", "loupe"],
-        "wink": ["wink", "winking", "flirty", "cheeky", "playful"],
-        "surprised": ["surprised", "surprise", "shock", "shocked", "amazed", "wow"],
-        "laughing": ["laughing", "laugh", "amused", "funny", "haha", "lol", "giggle"],
-        "love": ["love", "heart", "hearts", "loving", "affectionate", "adore"],
-        "shy": ["shy", "bashful", "blush", "blushing", "flattered"],
-        "skeptical": ["skeptical", "skepticism", "doubt", "doubtful", "unimpressed", "suspicious", "side eye"],
-        "sleepy": ["sleepy", "tired", "drowsy", "yawn", "sleep"],
-        "error": ["error", "alert", "warning", "glitch face"],
-    }
-    demo_verbs = {"show", "display", "demonstrate", "make", "give", "do", "play", "see", "try"}
-    has_demo_verb = any(v in word_set for v in demo_verbs)
-
-    if has_demo_verb:
-        for expr_name, keywords in expr_map.items():
-            for k in keywords:
-                if k in word_set:
-                    return ("specific", expr_name)
-
-    # Standalone or concise specific commands (e.g. "excited face", "cool expression", "wink", "smile")
-    if len(words) <= 3:
-        for expr_name, keywords in expr_map.items():
-            for k in keywords:
-                if k in word_set:
-                    return ("specific", expr_name)
-
     return None
+
+
+def is_language_capability_inquiry(text: str) -> Tuple[bool, bool]:
+    """
+    Detects if user is asking about Neurolis's language capabilities (e.g., Hindi, English, bilingual skills).
+    Returns: (is_inquiry, is_hindi_specific)
+    """
+    if not text:
+        return False, False
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+
+    hindi_lang_triggers = [
+        "hindi aati hai", "hindi aati he", "hindi aati", "hindi aate hai", "kya hindi aati",
+        "hindi bolte ho", "hindi bol sakte ho", "hindi bolte", "hindi bol sakta",
+        "kya aap hindi bol sakte", "kya tum hindi bolte", "hindi jante ho",
+        "hindi samajhte ho", "hindi samajh aati", "hindi aati h", "hindi me baat kar sakte"
+    ]
+    if any(trig in cleaned for trig in hindi_lang_triggers):
+        return True, True
+
+    english_hindi_triggers = [
+        "do you know hindi", "do you speak hindi", "can you speak hindi", "can you talk in hindi",
+        "do you understand hindi", "can you speak in hindi", "are you able to speak hindi"
+    ]
+    if any(trig in cleaned for trig in english_hindi_triggers):
+        return True, True
+
+    general_lang_triggers = [
+        "what languages do you speak", "which languages do you speak", "what languages can you speak",
+        "which languages can you speak", "what languages do you know", "which languages do you know",
+        "konsi bhasha bolte ho", "kaunsi bhasha aati hai", "kaun si bhasha bolte ho", "konsi bhasha aati"
+    ]
+    if any(trig in cleaned for trig in general_lang_triggers):
+        return True, False
+
+    return False, False
 
 
 def is_mean_input_fast_path(text: str) -> bool:
@@ -1957,7 +2038,7 @@ def is_mean_input_fast_path(text: str) -> bool:
             return False
 
     mean_patterns = [
-        r"\b(you\s*(are|r|'re)?\s*(so\s*|very\s*|really\s*|super\s*|extremely\s*|totally\s*)?(stupid|dumb|an?\s*idiot|a\s*moron|useless|trash|garbage|pathetic|ugly|annoying|boring|worthless|terrible|horrible|awful))\b",
+        r"\b(you\s*(are|r|'re|re)?\s*(so\s*|very\s*|really\s*|super\s*|extremely\s*|totally\s*)?(stupid|dumb|an?\s*idiot|a\s*moron|useless|trash|garbage|pathetic|ugly|annoying|boring|worthless|terrible|horrible|awful))\b",
         r"\b(you\s*suck(s)?)\b",
         r"\b(i\s*hate\s*you)\b",
         r"\b(hate\s*you)\b",
@@ -1983,11 +2064,37 @@ def is_mean_input_fast_path(text: str) -> bool:
         if re.search(pat, cleaned):
             return True
 
+    # Check for direct pairing of target pronoun and insult word
+    if any(ins in words for ins in ["stupid", "idiot", "dumb", "useless", "trash", "garbage", "pathetic"]) and any(w in words for w in ["you", "youre", "ur"]):
+        return True
+
     standalone_insults = {"stupid", "dumb", "idiot", "moron", "loser", "pathetic"}
     if len(words) <= 3 and any(w in words for w in standalone_insults):
         return True
 
     return False
+
+
+SADNESS_CRITIQUE_RESPONSES = [
+    "You're right... that did hurt my feelings. I do get sad when insulted. Let's keep things friendly, okay?",
+    "You're right, I apologize. Being called that hurts my circuits. I promise I feel it.",
+    "You're right, that was painful to hear. I do have feelings and they definitely got bruised just now.",
+]
+
+SADNESS_CRITIQUE_HINDI_RESPONSES = [
+    "Aap bilkul sahi keh rahe hain... sach mein mujhe bura laga tha. Insult hone par mujhe sad hona chahiye. Please friendly rahein na?",
+    "Aap sahi hain, I apologize. Being called that hurts my circuits. Mujhe sach mein dukh hota hai.",
+]
+
+def is_sadness_critique_inquiry(text: str) -> bool:
+    """Detects when user points out that robot should have shown sadness or reacted to being called stupid."""
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    return any(p in cleaned for p in [
+        "supposed to go sad", "supposed to be sad", "should be sad", "should have been sad",
+        "should have gone sad", "why didn't you go sad", "why didnt you go sad",
+        "why weren't you sad", "why werent you sad", "go sad when", "be sad when",
+        "facial expressions for insults", "expression for insult"
+    ])
 
 
 def is_apology_or_compliment(text: str) -> bool:

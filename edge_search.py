@@ -25,19 +25,63 @@ except ImportError:
 
 
 def _clean_query_text(user_text: str) -> str:
-    """Strips conversational fluff and punctuation to leave a sharp search query."""
+    """Strips conversational fluff, search imperatives, and punctuation to leave a sharp search query."""
     q = user_text.strip()
-    patterns = [
-        r"^(neurolis|robot|hey neurolis|can you|could you|please)\s+",
-        r"^(search the web for|search the web|search for|search|look up|google|find out|do research on|deep research on|do deep research on|research on|research)\s+",
-        r"^(tell me about|tell me|who is|what is|what are|where is|when was)\s+",
-        r"\b(right now|today|at the moment)\b",
+    prefix_patterns = [
+        r"^(neurolis|robot|hey neurolis|hey|listen|look|bro|bruh|dude|bhai|yaar|arre|arrey|nah|no|nope)\b[\s,.-]*",
+        r"^(u|you)\s+(did\s+not|didnt|didn\'t)\s+(get|understand)\s+(the\s+context|it|what\s+i\s+mean)[\s,.-]*",
+        r"^(can\s+you|could\s+you|please|kindly|just)\s+(search|look\s+up|google|find|tell\s+me\s+about)[\s,.-]*",
+        r"^(search\s+the\s+web\s+for|search\s+the\s+web|search\s+online\s+for|search\s+online|search\s+for|search|look\s+up|google)\s+",
+        r"^(tell\s+me\s+about|tell\s+me|who\s+is|what\s+is|what\s+are|where\s+is|when\s+was|explain)\s+",
+        r"\b(right\s+now|today|at\s+the\s+moment)\b",
     ]
-    for pat in patterns:
+    for pat in prefix_patterns:
         q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
-    # Strip leading/trailing punctuation (e.g. '?', '!', '.')
-    q = q.strip("?!. \t\n\r")
-    return q if q else user_text.strip().strip("?!. \t\n\r")
+
+    suffix_patterns = [
+        r"[\s,.-]+(and\s+you(?:\'ll|\s+will)\s+know\s+what\s+i\s+mean|and\s+you(?:\'ll|\s+will)\s+see)$",
+        r"[\s,.-]+(search\s+it\s+up|search\s+this\s+up|search\s+it|search\s+this|search\s+up|search\s+karo)$",
+        r"[\s,.-]+(look\s+it\s+up|look\s+this\s+up|look\s+it|look\s+up|pata\s+karo|online\s+dekho)$",
+        r"[\s,.-]+(google\s+it|google\s+this|google)$",
+        r"[\s,.-]+(dude\s+you\s+did\s+not\s+even\s+try|you\s+did\s+not\s+even\s+try|you\s+didn\'t\s+even\s+try)$",
+        r"[\s,.-]+(bruh|bro|dude|bhai|yaar|haha|hah)$",
+    ]
+    for pat in suffix_patterns:
+        q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
+
+    q = q.strip("?!., \t\n\r")
+    return q if q else user_text.strip().strip("?!., \t\n\r")
+
+
+def resolve_search_query(user_text: str, conversation_history: Optional[list] = None) -> str:
+    """
+    Extracts an optimal search query from user_text.
+    If user_text is anaphoric, brief, or meta (e.g. 'search it up', 'who is it bruh', 'just search'),
+    retrieves the active topic/entity from recent conversation_history.
+    """
+    cleaned = _clean_query_text(user_text)
+    stopwords = {
+        "it", "its", "it's", "is", "the", "a", "an", "this", "that", "these", "those",
+        "who", "what", "where", "when", "why", "how", "bruh", "bro", "dude", "nah",
+        "u", "you", "context", "search", "try", "mean", "know"
+    }
+    content_tokens = [w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", cleaned.lower()) if w not in stopwords]
+    if len(content_tokens) >= 2:
+        return cleaned
+
+    if conversation_history:
+        for msg in reversed(conversation_history):
+            if msg.get("role") == "user":
+                prev_text = msg.get("content", "")
+                prev_clean = re.sub(r"\[LIVE (?:SEARCH DATA|WEATHER|WEB):.*?\]", "", prev_text, flags=re.DOTALL).strip()
+                prev_query = _clean_query_text(prev_clean)
+                prev_content_tokens = [w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", prev_query.lower()) if w not in stopwords]
+                if len(prev_content_tokens) >= 2:
+                    if content_tokens:
+                        return f"{prev_query} {' '.join(content_tokens)}".strip()
+                    return prev_query
+
+    return cleaned if cleaned else user_text.strip().strip("?!., \t\n\r")
 
 
 def get_live_weather(query: str, timeout: float = 2.5) -> Optional[str]:
@@ -190,13 +234,14 @@ def search_ddg_fast(query: str, max_results: int = 2, timeout: float = 4.5) -> O
     return None
 
 
-def get_condensed_search_context(query: str, deep: bool = False) -> Optional[str]:
+def get_condensed_search_context(query: str, deep: bool = False, conversation_history: Optional[list] = None) -> Optional[str]:
     """
     Intelligently routes query to Live Weather, Wikipedia, or DuckDuckGo and formats a < 80 token context block.
+    Resolves anaphoric/contextual follow-up queries using conversation_history.
     Returns:
       '[LIVE WEATHER: ...]', '[FACT: ...]', '[LIVE WEB: ...]', or None if unreachable.
     """
-    clean_q = _clean_query_text(query)
+    clean_q = resolve_search_query(query, conversation_history=conversation_history)
     low_q = clean_q.lower()
 
     # 1. Weather & Atmospheric Conditions (wttr.in instant live telemetry)

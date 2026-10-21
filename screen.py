@@ -675,6 +675,8 @@ class ExpressionState:
         "sunglasses": COOL,
         "chill": COOL,
         "swag": COOL,
+        "nervous": SHY,
+        "hesitant": SHY,
     }
 
 
@@ -1293,7 +1295,7 @@ class FaceUI:
             time.sleep(self.glitch_duration)
 
     def _draw_glitch_overlay(self, w: float, h: float):
-        """Intense full-screen CRT signal hijack burst on entry/exit of VILLAIN mode."""
+        """Renders authentic hardware display brownout, voltage dips, and phosphor dropouts during mode transitions."""
         now = time.time()
         elapsed = now - self.glitch_start_time
         if elapsed > self.glitch_duration:
@@ -1301,27 +1303,24 @@ class FaceUI:
             return
 
         cycle_p = (elapsed / max(0.01, self.glitch_duration)) * self.glitch_cycles
-        sub_frame = int(cycle_p * 2.5) % 3
+        sub_frame = int(cycle_p * 3) % 3
 
+        # 1. Realistic momentary display brownout / phosphor drop
         if sub_frame == 1:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#030d07", outline="")
-        elif sub_frame == 2:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#14040a", outline="")
+            self.canvas.create_rectangle(0, 0, w, h, fill="#020503", outline="")
+        elif sub_frame == 2 and random.random() < 0.4:
+            self.canvas.create_rectangle(0, 0, w, h, fill="#07120a", outline="")
 
-        scanline_step = 8
-        scanline_colors = ["#0b3d1e", "#2b0914", "#062914", "#041c10"]
-        for i, sy in enumerate(range(0, int(h), scanline_step)):
-            scol = scanline_colors[i % len(scanline_colors)]
-            self.canvas.create_line(0, sy, w, sy, fill=scol, width=1)
-
-        slice_colors = ["#ff003c", "#39ff14", "#00f0ff", "#ffffff", "#ff1e42"]
-        for i in range(9):
-            gy = ((elapsed * 900.0 + i * 67.0) % max(1.0, h - 8.0))
-            gh = 3.0 + (i % 3) * 3.0
-            g_col = slice_colors[(i + sub_frame) % len(slice_colors)]
-            gx1 = (i * 37) % int(w * 0.35)
-            gx2 = w - ((i * 53) % int(w * 0.25))
-            self.canvas.create_rectangle(gx1, gy, gx2, gy + gh, fill=g_col, outline="")
+        # 2. Subtle horizontal raster tear (dark displacement bands, not cartoon rainbow lines)
+        for _ in range(random.randint(1, 3)):
+            gy = random.uniform(h * 0.1, h * 0.9)
+            gh = random.uniform(2, 6)
+            tear_col = random.choice(["#000000", "#030c06", "#ff003c"])
+            gx_offset = random.uniform(-18, 18)
+            self.canvas.create_rectangle(
+                max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
+                fill=tear_col, outline=""
+            )
 
     def set_subtitles(self, speaker: str, text: str):
         with self.lock:
@@ -2701,30 +2700,7 @@ class FaceUI:
         flicker_18hz = math.sin(self.anim_phase * 38.0)
         glitch_dx = (4.5 * scale * math.sin(self.anim_phase * 29.0)) if abs(flicker_18hz) > 0.35 else (2.2 * scale)
 
-        # 1. Rising Toxic Hacked Data Embers & Glitch Pixels around the eyes
-        for i in range(10):
-            ember_t = (self.anim_phase * 2.1 + i * 0.77) % 3.0
-            frac = ember_t / 3.0
-            ember_x = lx + (rx - lx) * (0.06 + 0.88 * (i / 9.0)) + math.sin(ember_t * 5.0 + i) * (16.0 * scale)
-            ember_y = cy + eh * 0.38 - frac * (eh * 1.25)
-            sz = max(2.0, (4.2 * (1.0 - frac * 0.6)) * scale)
-            e_col = "#ff003c" if (i % 3 == 0 and flicker_18hz > 0.0) else lerp_color("#39ff14", "#041a0b", frac * 0.75)
-            # Raw square pixel blocks like a hacked CRT display
-            self.canvas.create_rectangle(ember_x - sz, ember_y - sz, ember_x + sz, ember_y + sz, fill=e_col, outline="")
-
-        # 2. Branching Hacked Temple Circuitry Traces
-        circuit_col = "#ff003c" if flicker_18hz > 0.72 else lerp_color("#0a4d1c", "#39ff14", 0.65 + 0.35 * pulse_6hz)
-        for side, base_x in [(-1, lx - ew * 0.50), (1, rx + ew * 0.50)]:
-            p1x, p1y = base_x, cy - eh * 0.12
-            p2x, p2y = base_x + side * (24 * scale), cy - eh * 0.12
-            p3x, p3y = p2x + side * (16 * scale), cy - eh * 0.30
-            p4x, p4y = p2x + side * (16 * scale), cy + eh * 0.10
-            self.canvas.create_line(p1x, p1y, p2x, p2y, p3x, p3y, fill=circuit_col, width=max(1, int(2.2 * scale)))
-            self.canvas.create_line(p2x, p2y, p4x, p4y, fill=circuit_col, width=max(1, int(1.8 * scale)))
-            self.canvas.create_rectangle(p3x - 3 * scale, p3y - 3 * scale, p3x + 3 * scale, p3y + 3 * scale, fill="#39ff14", outline="")
-            self.canvas.create_rectangle(p4x - 2.5 * scale, p4y - 2.5 * scale, p4x + 2.5 * scale, p4y + 2.5 * scale, fill="#ff003c", outline="")
-
-        # 3. Rough MS-Paint Angular Flat-Bottomed Hooded Villain Eyes (smooth=False, ZERO bottom curve!)
+        # Flat-bottomed rough MS-Paint style sinister rogue AI eyes (smooth=False, raw pixel aesthetic)
         for cx in (lx, rx):
             is_left = (cx == lx)
             w_half = ew * 0.46
@@ -3524,86 +3500,44 @@ class FaceUI:
         sub_text: str = "",
     ):
         """
-        Realistic Full-Screen System Invasion & CRT Hack Overlay for VILLAIN mode:
-          - Full-screen CRT horizontal scanlines & rolling V-Sync error line scan from y=0 to y=h (across the ENTIRE screen, buttons, and subtitles!).
-          - Realistic flickering HUD buttons that dynamically glitch between ERROR codes (`[ ! ERR_0x7F // SYS_LOCKED ]`, `[ ! OVERRIDE // ERR_503 ]`).
-          - Realistic flickering subtitle text & status pill with subtle horizontal CRT phase jitter (±1.5px).
+        Realistic System Invasion & CRT Hack Overlay for VILLAIN mode:
+          - Full-screen realistic CRT horizontal phosphor scanlines with 6Hz phosphor pulse.
+          - Subtle heavy and mild flickers in between (intermittent analog CRT desyncs and chromatic line jitter).
+          - Realistic flickering HUD buttons glitching between ERROR codes (`[ ! ERR_0x7F // SYS_LOCKED ]`, `[ ! OVERRIDE // ERR_503 ]`).
+          - Subtle CRT phase jitter on readable subtitles and status.
         """
         scale = self.ui_scale / 1.8
         scale_x = w / 1024.0
         scale_y = h / 600.0
+
+        pulse_6hz = math.sin(self.anim_phase * 12.0 * math.pi)
         flicker_fast = math.sin(self.anim_phase * 28.0)
         flicker_slow = math.cos(self.anim_phase * 11.0)
-        is_glitch_tick = (flicker_fast > 0.38) or (flicker_slow < -0.62)
+        is_glitch_tick = (flicker_fast > 0.45) or (flicker_slow < -0.70)
+        is_heavy_glitch = (flicker_fast > 0.82) and (flicker_slow > 0.35)
 
-        # 1. FULL-SCREEN CRT Horizontal Scanlines (top to bottom: 0 -> h)
-        scan_step = max(6, int(8 * scale_y))
-        for sy in range(0, int(h), scan_step):
-            scol = "#051e0f" if (sy // scan_step) % 2 == 0 else "#031209"
-            self.canvas.create_line(0, sy, w, sy, fill=scol, width=1)
+        # 1. Subtle illumination dip / phosphor fluctuation on heavy ticks (realistic hardware voltage dip)
+        if is_heavy_glitch:
+            self.canvas.create_rectangle(0, 0, w, h, fill="#020603", outline="")
 
-        # 2. FULL-SCREEN Rolling Horizontal CRT Error Line Scan (sweeps 0 -> h continuously)
-        scan_y1 = ((self.anim_phase * 135.0) % h)
-        scan_y2 = ((self.anim_phase * 78.0 + h * 0.48) % h)
-        band_h = 18.0 * scale_y
-        self.canvas.create_rectangle(0, scan_y1 - band_h * 0.5, w, scan_y1 + band_h * 0.5, fill="#052110", outline="")
-        self.canvas.create_line(0, scan_y1, w, scan_y1, fill="#39ff14", width=max(1, int(2.0 * scale_y)))
-        self.canvas.create_line(0, scan_y1 + 2.5 * scale_y, w, scan_y1 + 2.5 * scale_y, fill="#ff003c", width=1)
-
-        # Secondary subtle crimson/cyan CRT error scanline
-        self.canvas.create_line(0, scan_y2, w, scan_y2, fill="#ff003c" if is_glitch_tick else "#15803d", width=max(1, int(1.5 * scale_y)))
-
-        # 3. Realistic Horizontal Signal-Tear Slices distributed across Top, Middle, and Buttons
-        tear_configs = [
-            (eye_cy - 68 * scale, -220 * scale, -65 * scale, "#ff003c", 2.2),
-            (eye_cy + 14 * scale, 75 * scale, 240 * scale, "#39ff14", 1.8),
-            (btn_y + 22 * scale_y, -360 * scale_x, 360 * scale_x, "#ff003c" if is_glitch_tick else "#39ff14", 1.8),
-            (btn_y + 44 * scale_y, -340 * scale_x, 340 * scale_x, "#39ff14" if flicker_fast > 0.0 else "#ff003c", 1.6),
-        ]
-        for ty_base, tx1_off, tx2_off, t_col, th_s in tear_configs:
-            jit_x = math.sin(self.anim_phase * 22.0 + ty_base) * (14.0 * scale_x)
-            self.canvas.create_line(
-                cx + tx1_off + jit_x, ty_base,
-                cx + tx2_off + jit_x, ty_base,
-                fill=t_col, width=max(1, int(th_s * scale_y))
-            )
-
-        # 4. Subtle Hex Intrusion Telemetry Columns on Outer Margins
-        hex_tokens = ["0x7F", "ERR!", "ROOT", "0xFF", "HACK", "SYS!", "LOCK", "B00T"]
-        phase_idx = int(self.anim_phase * 6.5)
-        for side, col_x in [(-1, 68 * scale_x), (1, w - 68 * scale_x)]:
-            for row_i in range(5):
-                tok = hex_tokens[(phase_idx + row_i * 3 + (0 if side == -1 else 4)) % len(hex_tokens)]
-                ty = eye_cy - 72 * scale + row_i * (36 * scale)
-                t_col = "#ff003c" if (tok in ("ERR!", "HACK", "SYS!") and is_glitch_tick) else ("#39ff14" if row_i % 2 == 0 else "#15803d")
-                self.canvas.create_text(
-                    col_x, ty,
-                    text=tok,
-                    fill=t_col,
-                    font=(MONO_FONT_FAMILY, max(8, int(9.2 * scale)), "bold")
+        # 2. Subtle mild and heavy intermittent flickers in between (realistic hardware raster displacement, no cartoon rainbow slices)
+        if is_glitch_tick or is_heavy_glitch:
+            num_tears = 3 if is_heavy_glitch else 1
+            for _ in range(num_tears):
+                gy = random.uniform(eye_cy - 90 * scale, eye_cy + 90 * scale)
+                gh = random.uniform(1.5, 4.0)
+                gx_offset = random.uniform(-20 * scale_x, 20 * scale_x)
+                tear_col = random.choice(["#000000", "#030c06", "#ff003c"])
+                self.canvas.create_rectangle(
+                    max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
+                    fill=tear_col, outline=""
                 )
 
-        # 5. Forehead Override Banner
-        banner_y = eye_cy - 86 * scale
-        bw = 235 * scale
-        bh = 15 * scale
-        banner_border = "#ff003c" if is_glitch_tick else "#39ff14"
-        self.canvas.create_rectangle(
-            cx - bw, banner_y - bh, cx + bw, banner_y + bh,
-            fill="#041409", outline=banner_border, width=max(1, int(1.8 * scale))
-        )
-        self.canvas.create_text(
-            cx + (1.5 * scale if is_glitch_tick else 0.0), banner_y,
-            text="[ ! SYSTEM INVASION // ROOT OVERRIDE ACTIVE ! ]",
-            fill="#ff003c" if (flicker_fast > 0.55) else "#39ff14",
-            font=(MONO_FONT_FAMILY, max(8, int(9.5 * scale)), "bold")
-        )
-
-        # 6. Dynamic Flickering ERROR Buttons & Flickering Subtitles in VILLAIN Mode
+        # 4. Realistic Flickering ERROR Buttons in Hacked Environment
         if self._hud_geom is not None:
             bx1, by1, bx2, by2, sbx1, sbx2, radius, sx, sy = self._hud_geom
             dot_cy = (by1 + by2) * 0.5
-            jit_b = (1.8 * sx) if is_glitch_tick else (-1.0 * sx if flicker_fast < -0.5 else 0.0)
+            jit_b = (1.5 * sx) if is_glitch_tick else (-0.8 * sx if flicker_fast < -0.5 else 0.0)
             b_col1 = "#ff003c" if is_glitch_tick else "#39ff14"
             b_col2 = "#39ff14" if is_glitch_tick else "#ff003c"
 
@@ -3611,7 +3545,7 @@ class FaceUI:
             self._create_rounded_rect(bx1 + jit_b, by1, bx2 + jit_b, by2, radius=radius, fill="#140408" if is_glitch_tick else "#04170b", outline=b_col1, width=2)
             self._create_rounded_rect(sbx1 - jit_b, by1, sbx2 - jit_b, by2, radius=radius, fill="#04170b" if is_glitch_tick else "#140408", outline=b_col2, width=2)
 
-            # Icon chamber hazard triangles
+            # Icon chamber hazard warning triangles
             for btn_left, ic_col in [(bx1 + jit_b, b_col1), (sbx1 - jit_b, b_col2)]:
                 icx = btn_left + 28 * sx
                 ir = 8 * sy
@@ -3624,7 +3558,7 @@ class FaceUI:
             self.canvas.create_text((bx1 + bx2) * 0.5 + 10 * sx + jit_b, dot_cy, text=lbl_left, fill="#ffffff" if is_glitch_tick else "#39ff14", font=(MONO_FONT_FAMILY, f_sz, "bold"))
             self.canvas.create_text((sbx1 + sbx2) * 0.5 + 10 * sx - jit_b, dot_cy, text=lbl_right, fill="#ff9ebb" if is_glitch_tick else "#ff003c", font=(MONO_FONT_FAMILY, f_sz, "bold"))
 
-        # 7. Readable Flickering Subtitles in VILLAIN Mode (Zero duplicate text items; high-contrast font)
+        # 5. Readable Flickering Subtitles in VILLAIN Mode
         if hasattr(self, "_sub_geom") and self._sub_geom is not None:
             sc_x1, sc_y1, sc_x2, sc_y2, sc_rad, div_y, px1, f_sz_sub, wrapped_sub, av_w = self._sub_geom
             sub_border = "#ff003c" if is_glitch_tick else "#39ff14"

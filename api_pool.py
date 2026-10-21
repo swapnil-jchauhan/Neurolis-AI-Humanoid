@@ -23,6 +23,16 @@ except ImportError:
     HAS_GROQ = False
     Groq = None
 
+try:
+    import cartesia
+    from cartesia import Cartesia
+    HAS_CARTESIA = True
+except ImportError:
+    HAS_CARTESIA = False
+    cartesia = None
+    Cartesia = None
+
+
 # ---------------- ENVIRONMENT & KEY LOADING ----------------
 BASE_DIR = Path(__file__).resolve().parent
 CWD = Path.cwd()
@@ -65,7 +75,7 @@ for target_dir in [CWD, BASE_DIR]:
                             v = v.strip().strip("\"'")
                             if "#" in v:
                                 v = v.split("#", 1)[0].strip().strip("\"'")
-                            if k.startswith("GROQ_") and v:
+                            if (k.startswith("GROQ_") or k.startswith("CARTESIA_")) and v:
                                 os.environ[k] = v
             except Exception:
                 pass
@@ -80,9 +90,24 @@ for _var in _candidates:
         if len(GROQ_API_KEYS) >= 14:
             break
 
+# 5. Collect up to 14 unique Cartesia API keys (workable from 8 to 14, or 1 to 14)
+CARTESIA_API_KEYS: List[str] = []
+_cart_candidates = (
+    [f"CARTESIA_API_KEY_{_i}" for _i in range(1, 15)]
+    + [f"CARTESIA_KEY_{_i}" for _i in range(1, 15)]
+    + ["CARTESIA_API_KEY", "CARTESIA_BACKUP_KEY"]
+)
+for _var in _cart_candidates:
+    _val = os.environ.get(_var, "").strip().strip("\"'")
+    if _val and not _val.startswith("PASTE_YOUR_") and not _val.startswith("YOUR_") and _val not in CARTESIA_API_KEYS:
+        CARTESIA_API_KEYS.append(_val)
+        if len(CARTESIA_API_KEYS) >= 14:
+            break
+
 # ---------------- CLIENT POOL INITIALIZATION ----------------
 GROQ_PER_CALL_TIMEOUT = 4.0
 GROQ_AUDIO_TIMEOUT = 7.0
+CARTESIA_PER_CALL_TIMEOUT = 5.0
 
 groq_clients: List[any] = []
 if HAS_GROQ:
@@ -95,6 +120,41 @@ if HAS_GROQ:
 _active_client_idx = 0
 client = groq_clients[0] if groq_clients else None
 resting_keys: Set[int] = set()
+
+cartesia_clients: List[any] = []
+if HAS_CARTESIA:
+    for _idx, _k in enumerate(CARTESIA_API_KEYS):
+        try:
+            cartesia_clients.append(Cartesia(api_key=_k, timeout=CARTESIA_PER_CALL_TIMEOUT, max_retries=0))
+        except Exception as e:
+            print(f"[Brain] Cartesia client #{_idx + 1} init notice: {e}")
+
+_active_cartesia_idx = 0
+cartesia_client = cartesia_clients[0] if cartesia_clients else None
+resting_cartesia_keys: Set[int] = set()
+
+
+def init_cartesia_pool():
+    """Re-reads environment variables and re-initializes the Cartesia client pool."""
+    global CARTESIA_API_KEYS, cartesia_clients, cartesia_client, _active_cartesia_idx, resting_cartesia_keys
+    CARTESIA_API_KEYS.clear()
+    for _var in _cart_candidates:
+        _val = os.environ.get(_var, "").strip().strip("\"'")
+        if _val and not _val.startswith("PASTE_YOUR_") and not _val.startswith("YOUR_") and _val not in CARTESIA_API_KEYS:
+            CARTESIA_API_KEYS.append(_val)
+            if len(CARTESIA_API_KEYS) >= 14:
+                break
+    cartesia_clients.clear()
+    if HAS_CARTESIA:
+        for _idx, _k in enumerate(CARTESIA_API_KEYS):
+            try:
+                cartesia_clients.append(Cartesia(api_key=_k, timeout=CARTESIA_PER_CALL_TIMEOUT, max_retries=0))
+            except Exception as e:
+                print(f"[Brain] Cartesia client #{_idx + 1} init notice: {e}")
+    _active_cartesia_idx = 0
+    cartesia_client = cartesia_clients[0] if cartesia_clients else None
+    resting_cartesia_keys.clear()
+
 
 RATE_LIMIT_ERROR_PHRASE = "My backend services ran into an error, could you say that again?"
 
@@ -146,6 +206,42 @@ def rotate_groq_key(reason: str = None, is_quota_exhausted: bool = False) -> int
     else:
         print(f"\n[Brain] Key #{prev_idx + 1} failover rotated to Key #{_active_client_idx + 1} of {len(groq_clients)}.")
     return _active_client_idx
+
+
+def rotate_cartesia_key(reason: Optional[str] = None, is_quota_exhausted: bool = False) -> int:
+    """Rotates to the next Cartesia API key in the pool (1 -> 2 -> ... -> N -> 1)."""
+    global cartesia_client, _active_cartesia_idx, resting_cartesia_keys
+    if not cartesia_clients:
+        return 0
+    prev_idx = _active_cartesia_idx
+    if is_quota_exhausted:
+        resting_cartesia_keys.add(prev_idx)
+    _active_cartesia_idx = (_active_cartesia_idx + 1) % len(cartesia_clients)
+    cartesia_client = cartesia_clients[_active_cartesia_idx]
+    for mod_name in ["listen", "__main__"]:
+        if mod_name in sys.modules:
+            try:
+                mod = sys.modules[mod_name]
+                if hasattr(mod, "cartesia_clients"):
+                    mod.cartesia_client = cartesia_client
+                    mod._active_cartesia_idx = _active_cartesia_idx
+            except Exception:
+                pass
+    if reason:
+        print(f"\n[Brain] Cartesia Key #{prev_idx + 1} ({reason}). Rotated to Cartesia Key #{_active_cartesia_idx + 1} of {len(cartesia_clients)}.")
+    elif is_quota_exhausted:
+        print(f"\n[Brain] Cartesia quota reached on Key #{prev_idx + 1}. Rotated to Cartesia Key #{_active_cartesia_idx + 1} of {len(cartesia_clients)}.")
+    else:
+        print(f"\n[Brain] Cartesia Key #{prev_idx + 1} failover rotated to Key #{_active_cartesia_idx + 1} of {len(cartesia_clients)}.")
+    return _active_cartesia_idx
+
+
+def get_active_cartesia_client():
+    """Returns the currently active Cartesia client instance."""
+    global cartesia_client, _active_cartesia_idx
+    if cartesia_clients:
+        return cartesia_clients[_active_cartesia_idx]
+    return None
 
 
 def _format_keys_list(nums: list) -> str:
@@ -219,9 +315,67 @@ def get_groq_fleet_status() -> Tuple[str, str]:
     return spoken, console_text
 
 
+def get_cartesia_fleet_status() -> Tuple[str, str]:
+    """
+    Returns (spoken_reply, console_text) describing the exact state of all 14 Cartesia key slots:
+    - Active key
+    - Standby keys
+    - Resting keys (recovering credit/quota)
+    - Unconfigured slots
+    """
+    global _active_cartesia_idx, cartesia_clients, resting_cartesia_keys
+    total_slots = 14
+    configured_count = len(cartesia_clients)
+    if configured_count == 0:
+        return (
+            "No Cartesia API keys are currently configured in the environment.",
+            "[Cartesia Fleet Monitor] No keys configured (Slots 1 through 14 are empty)."
+        )
+
+    active_num = _active_cartesia_idx + 1
+    resting_nums = sorted([idx + 1 for idx in resting_cartesia_keys if idx != _active_cartesia_idx and idx < configured_count])
+    standby_nums = sorted([idx + 1 for idx in range(configured_count) if idx != _active_cartesia_idx and idx not in resting_cartesia_keys])
+    unconfigured_nums = list(range(configured_count + 1, total_slots + 1))
+
+    speech_parts = [f"Cartesia TTS is running on Key {active_num}."]
+    if resting_nums:
+        verb = "is" if len(resting_nums) == 1 else "are"
+        speech_parts.append(f"{_format_keys_list(resting_nums)} {verb} currently resting.")
+    if standby_nums:
+        verb = "is" if len(standby_nums) == 1 else "are"
+        speech_parts.append(f"{_format_keys_list(standby_nums)} {verb} on standby.")
+
+    if unconfigured_nums:
+        speech_parts.append(f"{_format_keys_list(unconfigured_nums)} have not been configured.")
+    else:
+        speech_parts.append("All fourteen Cartesia keys are fully configured.")
+
+    spoken = " ".join(speech_parts)
+
+    console_lines = ["\n===================== CARTESIA TTS FLEET STATUS ====================="]
+    for slot in range(1, total_slots + 1):
+        if slot == active_num:
+            status = "ACTIVE (Handling TTS requests)"
+        elif (slot - 1) in resting_cartesia_keys and slot <= configured_count:
+            status = "RESTING (Exhausted credits/quota, recovering)"
+        elif slot <= configured_count:
+            status = "STANDBY (Ready in reserve)"
+        else:
+            status = "NOT CONFIGURED"
+        console_lines.append(f"  Cartesia Key {slot}: {status}")
+    console_lines.append("=====================================================================\n")
+    console_text = "\n".join(console_lines)
+
+    return spoken, console_text
+
+
 def handle_key_status_request() -> str:
     spoken, console_text = get_groq_fleet_status()
     print(console_text)
+    if cartesia_clients:
+        spoken_c, console_c = get_cartesia_fleet_status()
+        print(console_c)
+        return f"{spoken} For speech synthesis, {spoken_c}"
     return spoken
 
 
@@ -248,6 +402,7 @@ def is_key_status_inquiry(text: str) -> bool:
         r"\bkey\s+(status|stratus)\b",
         r"\btoken\s+(status|stratus|quota)\b",
         r"\b(how\s+many\s+)?(keys|tokens)\s+(left|remaining|active|standby)\b",
+        r"\b(cartesia|tts|voice)\s+(keys?|status|pool)\b",
     ]
     if any(re.search(pat, cleaned) for pat in key_regexes):
         return True
@@ -261,12 +416,13 @@ def is_key_status_inquiry(text: str) -> bool:
         "active key", "active keys", "standby keys", "token status", "tokens status",
         "how many tokens left", "how many tokens are left", "tokens left",
         "system status", "fleet status", "groq status", "status of keys", "status of api",
-        "key stratus", "keys stratus", "api stratus",
+        "cartesia status", "cartesia keys", "tts status", "voice status",
         "tell me key status", "tell me the key status", "tell me api status", "tell me the api key status",
         "show key status", "show api status", "first tell me the key status",
         "what key are you running on", "which key are you running on",
         "know what key what token status"
     ]
+
     if any(t in cleaned for t in exact_triggers):
         return True
 
@@ -336,3 +492,70 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
 
     if last_exception:
         raise last_exception
+
+
+def cartesia_call_with_retry(api_call_fn, *args, **kwargs):
+    """
+    Executes a Cartesia API call with automatic round-robin retry and failover across the key pool.
+    - Quota exhaustion (HTTP 429, 402 out of credits, rate limits): Rotates through the pool.
+    - Network timeout / drop: Fast failover.
+    - Standby kill switch: Aborts immediately.
+    """
+    global cartesia_client, _active_cartesia_idx, resting_cartesia_keys
+    if not cartesia_clients:
+        raise RuntimeError("Cartesia API client is not initialized. Please configure CARTESIA_API_KEY_1..14 in your .env file.")
+
+    max_key_attempts = max(len(cartesia_clients), 2)
+    last_exception = None
+    network_error_streak = 0
+
+    for attempt in range(max_key_attempts):
+        if _standby_kill_event is not None and _standby_kill_event.is_set():
+            raise InterruptedError("Standby kill switch triggered.")
+        active_c = cartesia_clients[_active_cartesia_idx]
+
+        try:
+            res = api_call_fn(active_c, *args, **kwargs)
+            if _active_cartesia_idx in resting_cartesia_keys:
+                resting_cartesia_keys.discard(_active_cartesia_idx)
+            return res
+        except Exception as e:
+            last_exception = e
+            err_str = str(e).lower()
+            status_code = getattr(e, "status_code", None)
+
+            is_quota = (
+                status_code in (429, 402)
+                or any(k in err_str for k in ["429", "402", "rate limit", "quota", "credits", "too_many_requests", "resource_exhausted", "payment_required"])
+                or (HAS_CARTESIA and hasattr(cartesia, "RateLimitError") and isinstance(e, cartesia.RateLimitError))
+            )
+
+            is_auth = (
+                status_code == 401
+                or any(k in err_str for k in ["401", "unauthorized", "invalid api key", "forbidden"])
+                or (HAS_CARTESIA and hasattr(cartesia, "AuthenticationError") and isinstance(e, cartesia.AuthenticationError))
+            )
+
+            is_network = (
+                any(k in err_str for k in ["timeout", "timed out", "connection", "network"])
+                or (HAS_CARTESIA and hasattr(cartesia, "APIConnectionError") and isinstance(e, cartesia.APIConnectionError))
+            )
+
+            if is_quota:
+                network_error_streak = 0
+                rotate_cartesia_key(reason="Cartesia quota/rate limit exhausted (HTTP 429/402)", is_quota_exhausted=True)
+            elif is_auth:
+                network_error_streak = 0
+                rotate_cartesia_key(reason=f"Cartesia auth failed on Key #{_active_cartesia_idx + 1} (invalid key)", is_quota_exhausted=True)
+            elif is_network:
+                network_error_streak += 1
+                rotate_cartesia_key(reason="Cartesia network timeout / connection issue")
+                if network_error_streak >= 2:
+                    break
+            else:
+                rotate_cartesia_key(reason=f"Cartesia API error: {e}")
+
+    if last_exception:
+        raise last_exception
+
+

@@ -4,13 +4,13 @@
   "speaker_ratio": 0.32,
   "onset_snr_db": 6.0,
   "continue_snr_db": 3.0,
-  "min_onset_rms": 30.0,
+  "min_onset_rms": 100.0,
   "min_continue_rms": 20.0,
-  "min_speech_rms": 30.0,
+  "min_speech_rms": 100.0,
   "speech_multiplier": 1.45,
   "continue_ratio": 0.7,
   "start_frames": 3,
-  "end_silence_sec": 0.80,
+  "end_silence_sec": 0.8,
   "min_voiced_frames": 6,
   "tail_pad_frames": 7,
   "pre_emphasis": 0.0,
@@ -24,6 +24,6 @@
   "click_rejection_ratio": 0.35,
   "proximity_crest_min": 1.5,
   "ambient_p90_rms": 17.9,
-  "calibrated_start_rms": 36.0,
-  "calibrated_continue_rms": 25.0
+  "calibrated_start_rms": 150.0,
+  "calibrated_continue_rms": 90.0
 }
