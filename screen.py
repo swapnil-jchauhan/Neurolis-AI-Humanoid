@@ -973,11 +973,22 @@ class FaceUI:
         self.next_blink_interval = random.uniform(2.6, 5.2)
         self._pending_double_blink = False
 
-        # Real wall-clock delta-time & continuous oscillation phases
+        # Real wall-clock delta-time, continuous oscillation phases & Real-Time Audio RMS Lip-Sync (QoL #4)
         self._last_frame_time = time.time()
         self.anim_phase = 0.0
         self.thinking_angle = 0.0
         self.speaking_intensity = 0.65
+        self._target_speaking_intensity = 0.65
+        self.is_voice_playing = False
+        self._last_lip_sync_time = 0.0
+        self.lip_sync_bands: List[float] = []
+
+        # Live Exhibition Telemetry Pill State (QoL #7: Groq Fleet, Cartesia/Edge TTS, Mic Floor RMS)
+        self.telemetry_header_text: str = ""
+        self.telemetry_footer_text: str = ""
+        self.telemetry_alert_level: str = "ok"
+        self.telemetry_provider = None
+        self._last_telemetry_poll: float = 0.0
 
         # Subtitles
         self.subtitle_speaker = "NEUROLIS MARK II"
@@ -1339,9 +1350,108 @@ class FaceUI:
             self.target_look_x = max(-1.0, min(1.0, x))
             self.target_look_y = max(-1.0, min(1.0, y))
 
-    def set_speaking_intensity(self, intensity: float):
+    def set_speaking_intensity(
+        self,
+        intensity: float,
+        bands: Optional[List[float]] = None,
+        active: bool = True,
+    ):
+        """Thread-safe real-time audio RMS envelope & 19-band spectrum lip-sync setter (QoL #4)."""
+        clamped = max(0.06, min(1.0, float(intensity)))
+        now = time.time()
         with self.lock:
-            self.speaking_intensity = max(0.1, min(1.0, intensity))
+            self._target_speaking_intensity = clamped
+            self.speaking_intensity = clamped
+            self.is_voice_playing = bool(active)
+            self._last_lip_sync_time = now
+            if bands is not None:
+                self.lip_sync_bands = [max(0.05, min(1.0, float(b))) for b in bands]
+
+    def reset_lip_sync(self):
+        """Cleanly resets real-time lip-sync state after speech playback completes or is interrupted."""
+        with self.lock:
+            self.is_voice_playing = False
+            self._target_speaking_intensity = 0.65
+            self.speaking_intensity = 0.65
+            self.lip_sync_bands = []
+
+    def _lip_sync_mod(self, min_scale: float = 0.68, max_scale: float = 1.38) -> float:
+        """
+        Returns 1.0 when no live TTS audio is playing (preserving 100% exact static/preview design),
+        or a smooth real-time audio RMS syllable multiplier in [min_scale, max_scale] during speech.
+        """
+        if not getattr(self, "is_voice_playing", False):
+            return 1.0
+        norm = max(0.0, min(1.0, (self.speaking_intensity - 0.08) / 0.92))
+        return min_scale + (max_scale - min_scale) * norm
+
+    def set_telemetry_provider(self, provider_fn):
+        """Registers a live callback returning exhibition telemetry dict (polled every 0.5s)."""
+        with self.lock:
+            self.telemetry_provider = provider_fn
+
+    def set_telemetry(
+        self,
+        groq_active: int = 1,
+        groq_total: int = 0,
+        groq_resting: int = 0,
+        tts_engine: str = "cartesia",
+        cartesia_active: int = 1,
+        cartesia_total: int = 0,
+        cartesia_resting: int = 0,
+        mic_floor_rms: float = 0.0,
+        speech_gate_rms: float = 0.0,
+        audio_enabled: bool = True,
+    ):
+        """
+        Thread-safe live exhibition telemetry updater for the top-right header pill and
+        bottom-right subtitle deck footer (QoL #7). Quantizes RMS to 5-RMS steps so static UI
+        cache remains 60 FPS rock-solid.
+        """
+        groq_total = max(0, int(groq_total))
+        groq_resting = max(0, min(groq_total, int(groq_resting)))
+        groq_avail = max(0, groq_total - groq_resting)
+        groq_active = max(1, int(groq_active))
+
+        cartesia_total = max(0, int(cartesia_total))
+        cartesia_resting = max(0, min(cartesia_total, int(cartesia_resting)))
+        cartesia_avail = max(0, cartesia_total - cartesia_resting)
+        cartesia_active = max(1, int(cartesia_active))
+
+        q_floor = int(round(max(0.0, float(mic_floor_rms)) / 5.0) * 5)
+        q_gate = int(round(max(0.0, float(speech_gate_rms)) / 5.0) * 5)
+
+        if groq_total > 0:
+            groq_seg = f"GROQ K{groq_active}/{groq_avail}"
+        else:
+            groq_seg = "GROQ OFFLINE"
+
+        tts_norm = str(tts_engine or "cartesia").strip().lower()
+        if tts_norm != "edge" and cartesia_total > 0:
+            tts_seg = f"CARTESIA K{cartesia_active}/{cartesia_avail}"
+        else:
+            tts_seg = "EDGE TTS"
+
+        if audio_enabled:
+            mic_seg = f"MIC {q_floor} RMS"
+            footer_str = f"MARK II TELEMETRY  •  FLOOR: {q_floor} RMS  •  GATE: {q_gate} RMS  •  LIP-SYNC: 60FPS"
+        else:
+            mic_seg = "TEXT MODE"
+            footer_str = f"MARK II TELEMETRY  •  {groq_seg}  •  {tts_seg}  •  TEXT MODE"
+
+        header_str = f"{groq_seg}  •  {tts_seg}  •  {mic_seg}"
+
+        if groq_total == 0 or (groq_total > 0 and groq_avail == 0):
+            alert = "error"
+        elif groq_resting > 0 or cartesia_resting > 0 or (audio_enabled and q_floor >= 550):
+            alert = "warn"
+        else:
+            alert = "ok"
+
+        with self.lock:
+            self.telemetry_header_text = header_str
+            self.telemetry_footer_text = footer_str
+            self.telemetry_alert_level = alert
 
     def stop(self):
         if hasattr(self, "boot_audio_player"):
@@ -1417,6 +1527,53 @@ class FaceUI:
                     self._pending_double_blink = False
                 else:
                     self.next_blink_interval = random.uniform(2.8, 5.4)
+
+        # 5. Real-Time Audio Lip-Sync Envelope Smoothing & Watchdog (QoL #4)
+        with self.lock:
+            if self.is_voice_playing:
+                if (now - self._last_lip_sync_time) > 0.35:
+                    self.is_voice_playing = False
+                    self._target_speaking_intensity = 0.65
+                    self.speaking_intensity = 0.65
+                    self.lip_sync_bands = []
+                else:
+                    diff_i = self._target_speaking_intensity - self.speaking_intensity
+                    rate_i = 34.0 if diff_i > 0.0 else 18.0
+                    self.speaking_intensity += diff_i * min(1.0, dt * rate_i)
+
+        # 6. Throttled Live Exhibition Telemetry Poll (every 0.5s, QoL #7)
+        if (now - self._last_telemetry_poll) >= 0.50:
+            self._last_telemetry_poll = now
+            provider = getattr(self, "telemetry_provider", None)
+            if provider is not None:
+                try:
+                    t_data = provider()
+                    if isinstance(t_data, dict):
+                        self.set_telemetry(**t_data)
+                except Exception:
+                    pass
+            elif "api_pool" in sys.modules:
+                try:
+                    ap = sys.modules["api_pool"]
+                    ls = sys.modules.get("listen")
+                    floor_val = getattr(ls, "CURRENT_AMBIENT_RMS", 50.0) if ls else 50.0
+                    gate_val = getattr(ls, "CURRENT_SPEECH_THRESHOLD", 250.0) if ls else 250.0
+                    aud_en = getattr(ls, "AUDIO_ENABLED", True) if ls else True
+                    tts_eng = getattr(ls, "TTS_ENGINE", os.environ.get("TTS_ENGINE", "cartesia")) if ls else os.environ.get("TTS_ENGINE", "cartesia")
+                    self.set_telemetry(
+                        groq_active=getattr(ap, "_active_client_idx", 0) + 1,
+                        groq_total=len(getattr(ap, "groq_clients", [])),
+                        groq_resting=len(getattr(ap, "resting_keys", set())),
+                        tts_engine=tts_eng,
+                        cartesia_active=getattr(ap, "_active_cartesia_idx", 0) + 1,
+                        cartesia_total=len(getattr(ap, "cartesia_clients", [])),
+                        cartesia_resting=len(getattr(ap, "resting_cartesia_keys", set())),
+                        mic_floor_rms=floor_val,
+                        speech_gate_rms=gate_val,
+                        audio_enabled=aud_en,
+                    )
+                except Exception:
+                    pass
 
         self.anim_phase += dt * 3.2
         self.thinking_angle += dt * 4.5
@@ -1862,7 +2019,11 @@ class FaceUI:
 
         talk_pressed = (now - self._last_talk_press_time) < 0.25
         standby_pressed = (now - self._last_standby_press_time) < 0.25
-        static_key = (w, h, cur_state, sub_speaker, sub_text, status_str, talk_pressed, standby_pressed)
+        static_key = (
+            w, h, cur_state, sub_speaker, sub_text, status_str,
+            talk_pressed, standby_pressed,
+            self.telemetry_header_text, self.telemetry_footer_text, self.telemetry_alert_level,
+        )
 
         mouth_cy = center_y + self.eye_h * 0.65
         btn_y = mouth_cy + int(self.eye_h * 0.21)
@@ -1922,11 +2083,16 @@ class FaceUI:
             h_scale = max(0.08, 1.0 - blink_factor * 0.92)
             w_scale = 1.0 + blink_factor * 0.08
         elif cur_state == ExpressionState.SPEAKING:
-            spk_factor = math.sin(self.anim_phase * 8.0) * 0.06 * self.speaking_intensity
+            if self.is_voice_playing:
+                spk_factor = (self.speaking_intensity - 0.15) * 0.085
+            else:
+                spk_factor = math.sin(self.anim_phase * 8.0) * 0.06 * self.speaking_intensity
             h_scale = 1.0 + spk_factor
             w_scale = 1.0 - spk_factor * 0.25
         else:
             breathe = math.sin(self.anim_phase * 1.8) * 0.022
+            if self.is_voice_playing and cur_state not in non_blinking_states:
+                breathe += (self.speaking_intensity - 0.18) * 0.038
             h_scale = 1.0 + breathe
             w_scale = 1.0 - breathe * 0.3
 
@@ -3248,7 +3414,7 @@ class FaceUI:
         bounce = math.sin(self.anim_phase * 6.0) * (2.8 * scale)
         mouth_cy = cy + bounce - int(6 * scale)
         mw = int(112 * scale)
-        mh = int(20 * scale)
+        mh = int(20 * scale * self._lip_sync_mod(0.74, 1.38))
 
         pts = []
         num_pts = 17
@@ -3268,7 +3434,7 @@ class FaceUI:
         tremble = math.sin(self.anim_phase * 10.0) * (1.8 * scale)
         m_y = cy - 4 * scale + tremble
         mw = int(84 * scale)
-        mh = int(20 * scale)
+        mh = int(20 * scale * self._lip_sync_mod(0.78, 1.32))
         pts = [
             cx - mw / 2.0, m_y + mh,
             cx - mw * 0.28, m_y + mh * 0.30,
@@ -3285,7 +3451,7 @@ class FaceUI:
         breathe = math.sin(self.anim_phase * 1.8) * (1.5 * scale)
         m_y = cy + breathe - int(4 * scale)
         w = int(98 * scale)
-        h = int(12 * scale)
+        h = int(12 * scale * self._lip_sync_mod(0.75, 1.48))
 
         pts = []
         num_pts = 15
@@ -3327,10 +3493,16 @@ class FaceUI:
         pin_spacing = int(9.8 * scale)
         start_x = cx - ((num_pins - 1) * pin_spacing) / 2.0
 
+        live_bands = self.lip_sync_bands if (self.is_voice_playing and len(self.lip_sync_bands) == num_pins) else None
         for i in range(num_pins):
             dist_center = 1.0 - (abs(i - mid_idx) / float(mid_idx)) * 0.55
             pin_phase = i * 0.58
-            h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 23.0 * dist_center * self.speaking_intensity * scale
+            if live_bands is not None:
+                band_lvl = live_bands[i]
+                shimmer = 0.78 + 0.22 * abs(math.sin(self.anim_phase * 9.0 + pin_phase))
+                h_val = band_lvl * shimmer * 25.0 * dist_center * scale
+            else:
+                h_val = abs(math.sin(self.anim_phase * 7.5 + pin_phase)) * 23.0 * dist_center * self.speaking_intensity * scale
             pin_h = max(3.5 * scale, h_val + 3.5 * scale)
             px = start_x + i * pin_spacing
             pin_col = "#00f0ff" if i % 2 == 0 else "#00ffcc"
@@ -3602,8 +3774,12 @@ class FaceUI:
         num_bars = 13
         bar_spacing = 13 * scale
         start_x = cx - ((num_bars - 1) * bar_spacing) / 2.0
+        live_bands = self.lip_sync_bands if (self.is_voice_playing and len(self.lip_sync_bands) >= num_bars) else None
         for i in range(num_bars):
-            h_var = math.sin(self.anim_phase * 5.2 + i * 0.65) * (15.0 * scale) * self.speaking_intensity
+            if live_bands is not None:
+                h_var = live_bands[i] * (0.80 + 0.20 * abs(math.sin(self.anim_phase * 8.0 + i * 0.65))) * (17.0 * scale)
+            else:
+                h_var = math.sin(self.anim_phase * 5.2 + i * 0.65) * (15.0 * scale) * self.speaking_intensity
             bar_h = max(3.5 * scale, abs(h_var) + 4.0 * scale)
             bx = start_x + i * bar_spacing
             bar_col = "#00ffcc" if i % 2 == 0 else "#38bdf8"
@@ -3703,6 +3879,7 @@ class FaceUI:
     # 11 NEW CONVERSATIONAL MOUTHS
     # =========================================================================
     def _draw_open_smile_bowl(self, cx: float, my: float, mw: float, mh: float, main_col: str, tongue_col: str, scale: float):
+        mh = mh * self._lip_sync_mod(0.68, 1.32)
         pts = [cx - mw / 2.0, my - mh * 0.30]
         pts.extend([cx, my - mh * 0.16, cx + mw / 2.0, my - mh * 0.30])
         for i in range(1, 16):
@@ -3737,7 +3914,7 @@ class FaceUI:
         scale = self.ui_scale / 1.8
         my = cy - 4 * scale
         w = 38 * scale
-        h = 13 * scale
+        h = 13 * scale * self._lip_sync_mod(0.76, 1.36)
         pts_l = [cx - w, my - 2 * scale, cx - w * 0.5, my + h, cx, my - 2 * scale]
         pts_r = [cx, my - 2 * scale, cx + w * 0.5, my + h, cx + w, my - 2 * scale]
         for pts in (pts_l, pts_r):
@@ -3769,8 +3946,8 @@ class FaceUI:
 
     def _draw_surprised_mouth(self, cx: float, cy: float, col: str):
         scale = self.ui_scale / 1.8
-        rx_m = 16 * scale
-        ry_m = 20 * scale
+        rx_m = 16 * scale * self._lip_sync_mod(0.86, 1.15)
+        ry_m = 20 * scale * self._lip_sync_mod(0.66, 1.34)
         my = cy - 4 * scale
         self.canvas.create_oval(cx - rx_m - 4 * scale, my - ry_m - 4 * scale, cx + rx_m + 4 * scale, my + ry_m + 4 * scale, fill="#082f49", outline="")
         self.canvas.create_oval(cx - rx_m, my - ry_m, cx + rx_m, my + ry_m, fill="#040b16", outline=col, width=int(5.5 * scale))
@@ -3792,7 +3969,7 @@ class FaceUI:
         scale = self.ui_scale / 1.8
         my = cy - 4 * scale
         w = 30 * scale
-        h = 10 * scale
+        h = 10 * scale * self._lip_sync_mod(0.76, 1.36)
         pts_l = [cx - w, my, cx - w * 0.5, my + h, cx, my + 1 * scale]
         pts_r = [cx, my + 1 * scale, cx + w * 0.5, my + h, cx + w, my]
         for pts in (pts_l, pts_r):
@@ -3829,8 +4006,8 @@ class FaceUI:
         Fascinated, glowing oval 'O' mouth in emerald-aqua!
         """
         scale = self.ui_scale / 1.8
-        rx_m = 15 * scale
-        ry_m = 18 * scale
+        rx_m = 15 * scale * self._lip_sync_mod(0.86, 1.15)
+        ry_m = 18 * scale * self._lip_sync_mod(0.66, 1.34)
         my = cy - 3 * scale
         self.canvas.create_oval(cx - rx_m - 4 * scale, my - ry_m - 4 * scale, cx + rx_m + 4 * scale, my + ry_m + 4 * scale, fill="#043828", outline="")
         self.canvas.create_oval(cx - rx_m, my - ry_m, cx + rx_m, my + ry_m, fill="#040d14", outline=col, width=int(5.5 * scale))
@@ -3978,10 +4155,25 @@ class FaceUI:
             anchor="center"
         )
 
+        if is_villain:
+            hdr_right_txt = "ERR_OVERRIDE // FIREWALL: BREACHED"
+            hdr_right_col = "#ff003c"
+        elif self.telemetry_header_text:
+            hdr_right_txt = self.telemetry_header_text
+            if self.telemetry_alert_level == "error":
+                hdr_right_col = "#ff2a55"
+            elif self.telemetry_alert_level == "warn":
+                hdr_right_col = "#fbbf24"
+            else:
+                hdr_right_col = "#38bdf8"
+        else:
+            hdr_right_txt = "RPi5 60FPS // OPTIC CORE ONLINE"
+            hdr_right_col = "#475569"
+
         self.canvas.create_text(
             w - int(34 * scale_x), dot_cy,
-            text="RPi5 60FPS // OPTIC CORE ONLINE" if not is_villain else "ERR_OVERRIDE // FIREWALL: BREACHED",
-            fill="#475569" if not is_villain else "#ff003c",
+            text=hdr_right_txt,
+            fill=hdr_right_col,
             font=(MONO_FONT_FAMILY, tag_font_size, "bold"),
             anchor="e"
         )
@@ -4322,11 +4514,16 @@ class FaceUI:
             px1 + int(2 * scale_x), bar_bot,
             fill=br_col, width=max(2, int(3.0 * scale_x)), capstyle=tk.ROUND
         )
-        footer_txt = "SYS_INTEGRITY: COMPROMISED // 0x7F" if is_villain else "MARK II TELEMETRY  •  AUDIO SYNC: LOCKED"
+        if is_villain:
+            footer_txt = "SYS_INTEGRITY: COMPROMISED // 0x7F"
+            footer_col = "#15803d"
+        else:
+            footer_txt = self.telemetry_footer_text if self.telemetry_footer_text else "MARK II TELEMETRY  •  AUDIO SYNC: LOCKED"
+            footer_col = "#fbbf24" if self.telemetry_alert_level == "warn" else "#475569"
         self.canvas.create_text(
             card_x2 - int(18 * scale_x), card_y2 - int(10 * scale_y),
             text=footer_txt,
-            fill="#15803d" if is_villain else "#334155",
+            fill=footer_col,
             font=(MONO_FONT_FAMILY, max(7, int(7.8 * scale_y)), "bold"),
             anchor="e"
         )

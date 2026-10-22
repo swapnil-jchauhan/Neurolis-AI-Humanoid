@@ -130,8 +130,8 @@ _is_demonstrating_expressions = False
 def set_face_state(state: str, msg: str = None):
     if _is_demonstrating_expressions and state == "listening":
         # Allow the demonstration catalog to show the 'listening' emotion!
-        # Suppress only background mic listening events ("LISTENING...", "VOICE LOCKED...")
-        if msg is None or "LISTENING..." in msg or "RECORDING..." in msg:
+        # Suppress all background mic listening / restore events during demonstration
+        if msg is None or not str(msg).upper().startswith("EXPRESSION:"):
             return
     if face_ui is not None:
         face_ui.set_state(state, msg)
@@ -175,6 +175,38 @@ from api_pool import (
 )
 GROQ_API_KEY = GROQ_API_KEYS[0] if GROQ_API_KEYS else os.getenv("GROQ_API_KEY", "")
 set_standby_kill_event(standby_kill_event)
+
+
+def get_live_telemetry_dict() -> dict:
+    """Returns live exhibition telemetry dictionary for the FaceUI top-right header pill & subtitle deck (QoL #7)."""
+    ep = globals().get("_endpointer")
+    floor_rms = float(ep.live_floor) if ep is not None else float(globals().get("CURRENT_AMBIENT_RMS", 50.0))
+    gate_rms = float(ep.live_onset_thr) if ep is not None else float(globals().get("CURRENT_SPEECH_THRESHOLD", 250.0))
+    return {
+        "groq_active": int(getattr(api_pool, "_active_client_idx", 0)) + 1,
+        "groq_total": len(getattr(api_pool, "groq_clients", [])),
+        "groq_resting": len(getattr(api_pool, "resting_keys", set())),
+        "tts_engine": str(globals().get("TTS_ENGINE", "cartesia")),
+        "cartesia_active": int(getattr(api_pool, "_active_cartesia_idx", 0)) + 1,
+        "cartesia_total": len(getattr(api_pool, "cartesia_clients", [])),
+        "cartesia_resting": len(getattr(api_pool, "resting_cartesia_keys", set())),
+        "mic_floor_rms": floor_rms,
+        "speech_gate_rms": gate_rms,
+        "audio_enabled": bool(globals().get("AUDIO_ENABLED", True)),
+    }
+
+
+def sync_ui_telemetry():
+    """Pushes immediate live telemetry state to FaceUI header pill & subtitle footer."""
+    if face_ui is not None and hasattr(face_ui, "set_telemetry"):
+        try:
+            face_ui.set_telemetry(**get_live_telemetry_dict())
+        except Exception:
+            pass
+
+
+if face_ui is not None and hasattr(face_ui, "set_telemetry_provider"):
+    face_ui.set_telemetry_provider(get_live_telemetry_dict)
 
 import intent_rules
 from intent_rules import (
@@ -970,6 +1002,7 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
     except Exception:
         pass
 
+    sync_ui_telemetry()
     print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS (Ceiling: {amb_ceiling:.1f} RMS) | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
     return start_thresh
 
@@ -1587,7 +1620,9 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
     for pattern, replacement in bracket_emotion_replacements:
         cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
 
-    valid_nonverbals = {"laughter", "yawn", "crying", "sob", "sigh", "gasp", "snicker"}
+    # Cartesia Sonic-3 officially supports [laughter] as its sole nonverbal bracket tag.
+    # Other acoustic expressions (yawn, sob) are handled via XML emotion modulation & dedicated SFX.
+    valid_nonverbals = {"laughter"}
     valid_emotions = {
         "neutral", "happy", "excited", "enthusiastic", "elated", "euphoric",
         "triumphant", "amazed", "surprised", "flirtatious", "curious", "content",
@@ -2305,6 +2340,11 @@ def stop_all_audio():
     except Exception:
         pass
 
+    if face_ui is not None and hasattr(face_ui, "reset_lip_sync"):
+        try:
+            face_ui.reset_lip_sync()
+        except Exception:
+            pass
     clear_audio_queue()
     is_speaking = False
 
@@ -2328,6 +2368,80 @@ def prime_audio_sink():
         last_audio_played_at = time.monotonic()
     except Exception:
         pass
+
+def _start_lip_sync_stream(
+    padded_data: np.ndarray,
+    samplerate: int,
+    gen_id: int,
+    ignore_kill: bool = False,
+) -> threading.Event:
+    """
+    Spawns a lightweight 60 Hz real-time audio RMS & 19-band formant lip-sync telemetry worker (QoL #4).
+    Slices the exact waveform window currently playing at the speaker and drives FaceUI mouth & equalizer pins.
+    """
+    stop_evt = threading.Event()
+    if face_ui is None or not hasattr(face_ui, "set_speaking_intensity") or padded_data is None or len(padded_data) == 0:
+        stop_evt.set()
+        return stop_evt
+
+    mono = padded_data[:, 0] if padded_data.ndim > 1 else padded_data
+    n_samples = len(mono)
+    sr = max(8000, int(samplerate))
+    win_len = max(64, int(sr * 0.035))  # 35ms perceptual phoneme window
+    utt_peak = max(0.06, float(np.percentile(np.abs(mono), 98)))
+    window_fn = np.hanning(win_len).astype(np.float32)
+
+    def _worker():
+        t0 = time.monotonic()
+        while not stop_evt.is_set():
+            if not ignore_kill and (standby_kill_event.is_set() or gen_id != _audio_generation_id):
+                break
+            elapsed = time.monotonic() - t0
+            idx = int(elapsed * sr)
+            if idx >= n_samples:
+                break
+            seg = mono[idx : min(n_samples, idx + win_len)]
+            if len(seg) < 16:
+                break
+            rms = float(np.sqrt(np.mean(seg * seg)))
+            if rms < 0.004:
+                intensity = 0.08
+                bands = [0.08] * 19
+            else:
+                norm_rms = min(1.0, (rms / (utt_peak * 0.38)) ** 0.72)
+                intensity = float(0.10 + 0.90 * norm_rms)
+                if len(seg) == win_len:
+                    w_seg = seg * window_fn
+                else:
+                    w_seg = seg * np.hanning(len(seg)).astype(np.float32)
+                spec = np.abs(np.fft.rfft(w_seg))
+                freqs = np.fft.rfftfreq(len(w_seg), d=1.0 / sr)
+                vocal_mask = (freqs >= 120.0) & (freqs <= 4200.0)
+                vocal_spec = spec[vocal_mask]
+                if len(vocal_spec) >= 10:
+                    x_src = np.linspace(0.0, 1.0, len(vocal_spec))
+                    x_dst = np.linspace(0.0, 1.0, 10)
+                    half_bands = np.interp(x_dst, x_src, vocal_spec)
+                    b_max = max(1e-4, float(np.max(half_bands)))
+                    half_norm = np.clip((half_bands / b_max) ** 0.65, 0.10, 1.0) * intensity
+                    # Mirror 10 radial bands from center pin (index 9) outward to 19 pins
+                    full_19 = np.zeros(19, dtype=np.float32)
+                    full_19[9] = half_norm[0]
+                    for k in range(1, 10):
+                        full_19[9 - k] = half_norm[k]
+                        full_19[9 + k] = half_norm[k] * 0.96
+                    bands = [float(x) for x in full_19]
+                else:
+                    bands = [intensity] * 19
+            try:
+                face_ui.set_speaking_intensity(intensity, bands=bands, active=True)
+            except Exception:
+                break
+            time.sleep(0.016)
+
+    threading.Thread(target=_worker, daemon=True, name="LipSyncWorker").start()
+    return stop_evt
+
 
 def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: bool = False, ignore_kill: bool = False) -> bool:
     """
@@ -2371,76 +2485,85 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
     padded_data = np.concatenate(silence_parts)
 
     current_gen = _audio_generation_id
+    lip_stop_evt = _start_lip_sync_stream(padded_data, samplerate, current_gen, ignore_kill=ignore_kill)
 
-    # Priority 0: Native Linux PipeWire streaming (routes directly to active Bluetooth/USB/HDMI sink)
-    if sys.platform.startswith("linux") and shutil.which("pw-play"):
-        try:
-            buf = io.BytesIO()
-            sf.write(buf, padded_data, samplerate, format="WAV", subtype="PCM_16")
-            wav_bytes = buf.getvalue()
-
-            with _active_audio_proc_lock:
-                if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
-                    return False
-                proc = subprocess.Popen(
-                    ["pw-play", "-"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                _active_audio_proc = proc
-
-            proc.communicate(input=wav_bytes)
-            time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
-
-            with _active_audio_proc_lock:
-                if _active_audio_proc is proc:
-                    _active_audio_proc = None
-
-            last_audio_played_at = time.monotonic()
-            return proc.returncode == 0
-        except Exception:
-            with _active_audio_proc_lock:
-                if _active_audio_proc is not None:
-                    _active_audio_proc = None
-
-    if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
-        return False
-
-    devices_to_try = ["default", "sysdefault", None]
-
-    # Priority 1: Direct playback at native rate via sounddevice
-    for dev in devices_to_try:
-        try:
-            with suppress_c_stderr():
-                sd.play(padded_data, samplerate=samplerate, device=dev)
-                sd.wait()
-                time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
-            last_audio_played_at = time.monotonic()
-            return True
-        except Exception:
-            continue
-
-    # Priority 2: Resample to 44.1kHz (standard rate supported by all ALSA/HDMI/USB DACs)
     try:
-        target_len = int(len(padded_data) * 44100 / samplerate)
-        x_old = np.linspace(0, 1, len(padded_data))
-        x_new = np.linspace(0, 1, target_len)
-        resampled = np.interp(x_new, x_old, padded_data).astype(np.float32)
+        # Priority 0: Native Linux PipeWire streaming (routes directly to active Bluetooth/USB/HDMI sink)
+        if sys.platform.startswith("linux") and shutil.which("pw-play"):
+            try:
+                buf = io.BytesIO()
+                sf.write(buf, padded_data, samplerate, format="WAV", subtype="PCM_16")
+                wav_bytes = buf.getvalue()
+
+                with _active_audio_proc_lock:
+                    if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
+                        return False
+                    proc = subprocess.Popen(
+                        ["pw-play", "-"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    _active_audio_proc = proc
+
+                proc.communicate(input=wav_bytes)
+                time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
+
+                with _active_audio_proc_lock:
+                    if _active_audio_proc is proc:
+                        _active_audio_proc = None
+
+                last_audio_played_at = time.monotonic()
+                return proc.returncode == 0
+            except Exception:
+                with _active_audio_proc_lock:
+                    if _active_audio_proc is not None:
+                        _active_audio_proc = None
+
+        if not ignore_kill and (standby_kill_event.is_set() or current_gen != _audio_generation_id):
+            return False
+
+        devices_to_try = ["default", "sysdefault", None]
+
+        # Priority 1: Direct playback at native rate via sounddevice
         for dev in devices_to_try:
             try:
                 with suppress_c_stderr():
-                    sd.play(resampled, samplerate=44100, device=dev)
+                    sd.play(padded_data, samplerate=samplerate, device=dev)
                     sd.wait()
                     time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
                 last_audio_played_at = time.monotonic()
                 return True
             except Exception:
                 continue
-    except Exception:
-        pass
 
-    return False
+        # Priority 2: Resample to 44.1kHz (standard rate supported by all ALSA/HDMI/USB DACs)
+        try:
+            target_len = int(len(padded_data) * 44100 / samplerate)
+            x_old = np.linspace(0, 1, len(padded_data))
+            x_new = np.linspace(0, 1, target_len)
+            resampled = np.interp(x_new, x_old, padded_data).astype(np.float32)
+            for dev in devices_to_try:
+                try:
+                    with suppress_c_stderr():
+                        sd.play(resampled, samplerate=44100, device=dev)
+                        sd.wait()
+                        time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
+                    last_audio_played_at = time.monotonic()
+                    return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return False
+    finally:
+        lip_stop_evt.set()
+        if face_ui is not None and hasattr(face_ui, "set_speaking_intensity"):
+            try:
+                face_ui.set_speaking_intensity(0.08, bands=[0.08] * 19, active=True)
+            except Exception:
+                pass
 
 # plays speech audio directly through sounddevice and soundfile with millisecond precision
 def play_audio_file(audio_path: Path, timeout: float = 15.0):
@@ -2466,6 +2589,34 @@ async def save_edge_tts(text: str, audio_path: Path):
 
 _speak_lock = threading.Lock()
 _active_user_text: str = ""
+_STANDBY_YAWN_WAV_CACHE: Optional[Tuple[np.ndarray, int]] = None
+
+def _get_standby_yawn_audio(target_sr: int) -> Optional[np.ndarray]:
+    """
+    Returns authentic natural yawn audio from assets/sounds/standby_yawn.wav resampled to target_sr.
+    Guarantees audible, lifelike biological yawning at the beginning of every standby transition across all TTS engines.
+    """
+    global _STANDBY_YAWN_WAV_CACHE
+    yawn_path = Path(__file__).resolve().parent / "assets" / "sounds" / "standby_yawn.wav"
+    if not yawn_path.exists():
+        return None
+    try:
+        if _STANDBY_YAWN_WAV_CACHE is None:
+            raw_data, orig_sr = sf.read(str(yawn_path), dtype="float32")
+            mono = raw_data[:, 0] if raw_data.ndim > 1 else raw_data
+            _STANDBY_YAWN_WAV_CACHE = (mono, orig_sr)
+
+        mono, orig_sr = _STANDBY_YAWN_WAV_CACHE
+        if orig_sr == target_sr:
+            return mono.copy()
+
+        target_len = int(len(mono) * target_sr / orig_sr)
+        x_old = np.linspace(0, 1, len(mono))
+        x_new = np.linspace(0, 1, target_len)
+        resampled = np.interp(x_new, x_old, mono).astype(np.float32)
+        return resampled
+    except Exception:
+        return None
 
 # downloads edge-tts speech in RAM and plays it continuously with instant subtitles and zero mid-sentence delays
 def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0, allow_during_standby: bool = False, voice_override: str = None, user_text: str = None):
@@ -2500,6 +2651,14 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         clean_subtitles = re.sub(r'\[[^\]]+\]', ' ', clean_subtitles)
         clean_subtitles = re.sub(r'\s+', ' ', clean_subtitles).strip()
 
+        # Detect if entering standby so biological yawn is smoothly prepended to leading audio
+        is_standby_utterance = (
+            active_state in ("sleepy", "tired")
+            or is_standby
+            or (custom_state and str(custom_state).strip().lower() in ("sleepy", "tired"))
+            or ("standby" in text.lower() and any(k in text.lower() for k in ["enter", "going", "return", "power", "slip", "switch", "rest", "head"]))
+        )
+
         # Cache key tuple prevents accent and engine cross-contamination
         cache_key = (modulated_text, voice_to_use, active_state, TTS_ENGINE)
 
@@ -2510,6 +2669,11 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 if face_ui is not None:
                     face_ui.set_subtitles("NEUROLIS", clean_subtitles)
                 set_face_state(active_state, active_status)
+                if is_standby_utterance:
+                    yawn_audio = _get_standby_yawn_audio(sr)
+                    if yawn_audio is not None and len(yawn_audio) > 0:
+                        pause_gap = np.zeros(int(sr * 0.12), dtype=np.float32)
+                        data = np.concatenate([yawn_audio, pause_gap, data])
                 play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
                 return
 
@@ -2547,7 +2711,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 _tts_loop
             )
 
-            tts_wait_sec = 6.0 if (cartesia_clients and TTS_ENGINE != "edge") else 4.0
+            tts_wait_sec = 8.5 if (cartesia_clients and TTS_ENGINE != "edge") else 4.5
             wait_start = time.monotonic()
             while not fut_current.done():
                 if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
@@ -2564,6 +2728,13 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 return
 
             if data_curr is not None:
+                # Prepend authentic biological yawn audio to Chunk 0 if entering standby / sleepy state
+                if is_standby_utterance:
+                    yawn_audio = _get_standby_yawn_audio(sr_curr)
+                    if yawn_audio is not None and len(yawn_audio) > 0:
+                        pause_gap = np.zeros(int(sr_curr * 0.12), dtype=np.float32)
+                        data_curr = np.concatenate([yawn_audio, pause_gap, data_curr])
+
                 played_segments = []
                 # Multi-chunk sequential pipelining: Chunk N+1 synthesized concurrently while Chunk N plays
                 for idx in range(len(chunks)):
@@ -2627,6 +2798,11 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                     )
                     fb_data, fb_sr = fallback_fut.result(timeout=4.0)
                     if fb_data is not None and (allow_during_standby or not standby_kill_event.is_set()):
+                        if is_standby_utterance:
+                            yawn_audio = _get_standby_yawn_audio(fb_sr)
+                            if yawn_audio is not None and len(yawn_audio) > 0:
+                                pause_gap = np.zeros(int(fb_sr * 0.12), dtype=np.float32)
+                                fb_data = np.concatenate([yawn_audio, pause_gap, fb_data])
                         play_sounddevice_audio(fb_data, fb_sr, is_continuation=False, ignore_kill=allow_during_standby)
                         return
                 except Exception:
@@ -2640,6 +2816,12 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 set_face_state(active_state, active_status)
                 _speak_system_fallback(text)
         finally:
+            if face_ui is not None and hasattr(face_ui, "reset_lip_sync"):
+                try:
+                    face_ui.reset_lip_sync()
+                except Exception:
+                    pass
+            sync_ui_telemetry()
             time.sleep(0.28)
             clear_audio_queue()
             is_speaking = False
@@ -4745,6 +4927,7 @@ def run_preflight_diagnostics():
     else:
         print("[-] Vision Gesture Sentry: OFFLINE")
 
+    sync_ui_telemetry()
     print("=" * 65 + "\n")
 
 
@@ -4907,5 +5090,3 @@ if __name__ == "__main__":
         stop_camera_worker()
         if face_ui is not None:
             face_ui.stop()
-
-

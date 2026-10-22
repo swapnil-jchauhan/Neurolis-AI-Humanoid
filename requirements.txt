@@ -1,5 +1,5 @@
 # ==============================================================================
-# PROJECT NEUROLIS - COMPREHENSIVE DEPENDENCY MANIFEST
+# PROJECT NEUROLIS MARK II - COMPREHENSIVE DEPENDENCY MANIFEST
 # Tested on: Windows 10/11 & Raspberry Pi 5 (Raspberry Pi OS 64-bit Bookworm)
 # ==============================================================================
 #
@@ -9,8 +9,8 @@
 # 1. Update package list:
 #    sudo apt update && sudo apt upgrade -y
 #
-# 2. Install required system audio, GUI, and vision libraries:
-#    sudo apt install -y python3-pip python3-venv python3-tk portaudio19-dev libportaudio2 libasound2-dev libgl1-mesa-glx libglib2.0-0 alsa-utils
+# 2. Install required system audio, GUI, Tk PIL image bridge, TTS, and vision libs:
+#    sudo apt install -y python3-pip python3-venv python3-tk python3-pil.imagetk portaudio19-dev libportaudio2 libasound2-dev libgl1-mesa-glx libglib2.0-0 alsa-utils espeak-ng ffmpeg
 #
 # 3. Create and activate a clean virtual environment (Recommended by Raspberry Pi OS):
 #    python3 -m venv venv
@@ -23,22 +23,32 @@
 #    pip install -r requirements.txt --break-system-packages
 # ------------------------------------------------------------------------------
 
-# --- Core AI & Voice ---
-groq>=0.11.0             # Groq Cloud API for Whisper STT and Qwen Vision/LLM
+# --- Core AI, Cloud Voice & Async Networking ---
+groq>=0.11.0             # Groq Cloud API for Whisper STT and Qwen Vision/LLM (14-Key Fleet)
 cartesia>=1.0.0          # Cartesia Sonic-3 Ultra-Fast Emotional Speech Synthesis (14-Key Fleet)
-edge-tts>=7.3.1         # Microsoft Edge Neural Speech Synthesizer (Sec-MS-GEC v1.143 handshake)
-duckduckgo_search>=8.0.0 # Free, zero-API-key live web search engine
-python-dotenv>=1.0.0    # Automatic .env environment variable loader
+edge-tts>=7.3.1          # Microsoft Edge Neural Speech Synthesizer (Fallback Neural TTS)
+aiohttp>=3.9.0           # Persistent async TCP connection pool (_ReusableTCPConnector) for Edge-TTS
+python-dotenv>=1.0.0     # Automatic .env environment variable loader
 
-# --- Audio Processing & VAD ---
-sounddevice>=0.4.6      # Low-latency portaudio microphone capture & audio output
-soundfile>=0.12.1       # Fast audio file I/O for Edge-TTS playback
-numpy>=1.26.0           # Audio RMS amplitude calculations and math operations
+# --- Live Web Search & Knowledge Engine (edge_search.py) ---
+ddgs>=8.0.0              # Primary DuckDuckGo search engine (`from ddgs import DDGS`)
+duckduckgo_search>=8.0.0 # Legacy DuckDuckGo search fallback compatibility
+
+# --- Offline Neural & System TTS Fallbacks (listen.py) ---
+piper-tts>=1.2.0         # Offline low-latency Neural TTS on Raspberry Pi 5 (`import piper`)
+pyttsx3>=2.90            # Cross-platform offline system SAPI5 / espeak-ng speech fallback
+
+# --- Audio Processing, DSP & Voice Activity Detection ---
+sounddevice>=0.4.6       # Low-latency PortAudio microphone capture & audio output
+soundfile>=0.12.1        # Fast in-memory WAV/MP3 audio I/O for Cartesia, Edge-TTS, and boot loop
+numpy>=1.26.0            # Audio RMS amplitude, FFT bandpass DSP, lip-sync spectrum & 60 FPS LUTs
 webrtcvad>=2.0.10; sys_platform != 'win32'         # Google WebRTC Voice Activity Detector for Linux/Raspberry Pi
 webrtcvad-wheels>=2.0.10; sys_platform == 'win32'  # Precompiled WebRTC VAD wheels for Windows 10/11
 
-# --- Vision & Face Tracking ---
-opencv-python>=4.8.0    # OpenCV library for webcam capture, HUD rendering, and YuNet AI face detector
+# --- Computer Vision, 60 FPS Anti-Aliased Face UI & Gesture Sentry ---
+opencv-python>=4.8.0     # OpenCV for webcam capture, CLAHE preprocessing, and HyperSmoothCanvas LINE_AA
+mediapipe>=0.10.9        # Google MediaPipe Tasks for 3.0s Open Palm / Closed Fist Gesture Sentry
+Pillow>=10.0.0           # PIL Image, ImageDraw, ImageFont, and ImageTk for 60 FPS HyperSmoothCanvas
 
 # --- Hardware Communication ---
-pyserial>=3.5           # High-speed USB serial bridge (115200 baud) to Arduino Mega 2560
+pyserial>=3.5            # High-speed USB serial bridge (115200 baud) to Arduino Mega 2560
