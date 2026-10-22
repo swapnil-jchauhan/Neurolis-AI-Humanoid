@@ -130,8 +130,8 @@ _is_demonstrating_expressions = False
 def set_face_state(state: str, msg: str = None):
     if _is_demonstrating_expressions and state == "listening":
         # Allow the demonstration catalog to show the 'listening' emotion!
-        # Suppress all background mic listening / restore events during demonstration
-        if msg is None or not str(msg).upper().startswith("EXPRESSION:"):
+        # Suppress only background mic listening events ("LISTENING...", "VOICE LOCKED...")
+        if msg is None or "LISTENING..." in msg or "RECORDING..." in msg:
             return
     if face_ui is not None:
         face_ui.set_state(state, msg)
@@ -1620,9 +1620,7 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
     for pattern, replacement in bracket_emotion_replacements:
         cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
 
-    # Cartesia Sonic-3 officially supports [laughter] as its sole nonverbal bracket tag.
-    # Other acoustic expressions (yawn, sob) are handled via XML emotion modulation & dedicated SFX.
-    valid_nonverbals = {"laughter"}
+    valid_nonverbals = {"laughter", "yawn", "crying", "sob", "sigh", "gasp", "snicker"}
     valid_emotions = {
         "neutral", "happy", "excited", "enthusiastic", "elated", "euphoric",
         "triumphant", "amazed", "surprised", "flirtatious", "curious", "content",
@@ -2589,34 +2587,6 @@ async def save_edge_tts(text: str, audio_path: Path):
 
 _speak_lock = threading.Lock()
 _active_user_text: str = ""
-_STANDBY_YAWN_WAV_CACHE: Optional[Tuple[np.ndarray, int]] = None
-
-def _get_standby_yawn_audio(target_sr: int) -> Optional[np.ndarray]:
-    """
-    Returns authentic natural yawn audio from assets/sounds/standby_yawn.wav resampled to target_sr.
-    Guarantees audible, lifelike biological yawning at the beginning of every standby transition across all TTS engines.
-    """
-    global _STANDBY_YAWN_WAV_CACHE
-    yawn_path = Path(__file__).resolve().parent / "assets" / "sounds" / "standby_yawn.wav"
-    if not yawn_path.exists():
-        return None
-    try:
-        if _STANDBY_YAWN_WAV_CACHE is None:
-            raw_data, orig_sr = sf.read(str(yawn_path), dtype="float32")
-            mono = raw_data[:, 0] if raw_data.ndim > 1 else raw_data
-            _STANDBY_YAWN_WAV_CACHE = (mono, orig_sr)
-
-        mono, orig_sr = _STANDBY_YAWN_WAV_CACHE
-        if orig_sr == target_sr:
-            return mono.copy()
-
-        target_len = int(len(mono) * target_sr / orig_sr)
-        x_old = np.linspace(0, 1, len(mono))
-        x_new = np.linspace(0, 1, target_len)
-        resampled = np.interp(x_new, x_old, mono).astype(np.float32)
-        return resampled
-    except Exception:
-        return None
 
 # downloads edge-tts speech in RAM and plays it continuously with instant subtitles and zero mid-sentence delays
 def speak(text: str, custom_state: str = None, custom_status: str = None, hold_state_seconds: float = 0.0, allow_during_standby: bool = False, voice_override: str = None, user_text: str = None):
@@ -2651,14 +2621,6 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         clean_subtitles = re.sub(r'\[[^\]]+\]', ' ', clean_subtitles)
         clean_subtitles = re.sub(r'\s+', ' ', clean_subtitles).strip()
 
-        # Detect if entering standby so biological yawn is smoothly prepended to leading audio
-        is_standby_utterance = (
-            active_state in ("sleepy", "tired")
-            or is_standby
-            or (custom_state and str(custom_state).strip().lower() in ("sleepy", "tired"))
-            or ("standby" in text.lower() and any(k in text.lower() for k in ["enter", "going", "return", "power", "slip", "switch", "rest", "head"]))
-        )
-
         # Cache key tuple prevents accent and engine cross-contamination
         cache_key = (modulated_text, voice_to_use, active_state, TTS_ENGINE)
 
@@ -2669,11 +2631,6 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 if face_ui is not None:
                     face_ui.set_subtitles("NEUROLIS", clean_subtitles)
                 set_face_state(active_state, active_status)
-                if is_standby_utterance:
-                    yawn_audio = _get_standby_yawn_audio(sr)
-                    if yawn_audio is not None and len(yawn_audio) > 0:
-                        pause_gap = np.zeros(int(sr * 0.12), dtype=np.float32)
-                        data = np.concatenate([yawn_audio, pause_gap, data])
                 play_sounddevice_audio(data, sr, is_continuation=False, ignore_kill=allow_during_standby)
                 return
 
@@ -2711,7 +2668,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 _tts_loop
             )
 
-            tts_wait_sec = 8.5 if (cartesia_clients and TTS_ENGINE != "edge") else 4.5
+            tts_wait_sec = 6.0 if (cartesia_clients and TTS_ENGINE != "edge") else 4.0
             wait_start = time.monotonic()
             while not fut_current.done():
                 if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
@@ -2728,13 +2685,6 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                 return
 
             if data_curr is not None:
-                # Prepend authentic biological yawn audio to Chunk 0 if entering standby / sleepy state
-                if is_standby_utterance:
-                    yawn_audio = _get_standby_yawn_audio(sr_curr)
-                    if yawn_audio is not None and len(yawn_audio) > 0:
-                        pause_gap = np.zeros(int(sr_curr * 0.12), dtype=np.float32)
-                        data_curr = np.concatenate([yawn_audio, pause_gap, data_curr])
-
                 played_segments = []
                 # Multi-chunk sequential pipelining: Chunk N+1 synthesized concurrently while Chunk N plays
                 for idx in range(len(chunks)):
@@ -2798,11 +2748,6 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                     )
                     fb_data, fb_sr = fallback_fut.result(timeout=4.0)
                     if fb_data is not None and (allow_during_standby or not standby_kill_event.is_set()):
-                        if is_standby_utterance:
-                            yawn_audio = _get_standby_yawn_audio(fb_sr)
-                            if yawn_audio is not None and len(yawn_audio) > 0:
-                                pause_gap = np.zeros(int(fb_sr * 0.12), dtype=np.float32)
-                                fb_data = np.concatenate([yawn_audio, pause_gap, fb_data])
                         play_sounddevice_audio(fb_data, fb_sr, is_continuation=False, ignore_kill=allow_during_standby)
                         return
                 except Exception:
