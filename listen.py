@@ -124,8 +124,15 @@ standby_kill_event = threading.Event()
 finish_speech_event = threading.Event()
 STANDBY_KILL_MESSAGE = "Going back to standby on gesture command. Show open palm to activate me."
 
+_is_demonstrating_expressions = False
+
 # helper function to change the face expression and status text on screen
 def set_face_state(state: str, msg: str = None):
+    if _is_demonstrating_expressions and state == "listening":
+        # Allow the demonstration catalog to show the 'listening' emotion!
+        # Suppress only background mic listening events ("LISTENING...", "VOICE LOCKED...")
+        if msg is None or "LISTENING..." in msg or "RECORDING..." in msg:
+            return
     if face_ui is not None:
         face_ui.set_state(state, msg)
 
@@ -1422,7 +1429,49 @@ def get_emotional_prosody(emotion_state: str, text: str) -> Tuple[str, str]:
 # =============================================================================
 # CARTESIA SONIC-3 EMOTIONAL SPEECH ENGINE (14-KEY AUTO-ROTATION FLEET)
 # =============================================================================
-TTS_ENGINE = os.environ.get("TTS_ENGINE", "cartesia").strip().lower()
+def _resolve_default_voice_output() -> str:
+    env_candidate = os.environ.get("DEFAULT_VOICE_OUTPUT") or os.environ.get("TTS_ENGINE")
+    if env_candidate:
+        cand_clean = env_candidate.strip().lower()
+        if cand_clean in ("cartesia", "edge"):
+            os.environ["DEFAULT_VOICE_OUTPUT"] = cand_clean
+            os.environ["TTS_ENGINE"] = cand_clean
+            return cand_clean
+
+    for target_dir in [Path.cwd(), Path(__file__).resolve().parent]:
+        for fname in [".env", "env"]:
+            p = target_dir / fname
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            sep = None
+                            if "=" in line and ":" in line:
+                                sep = "=" if line.index("=") < line.index(":") else ":"
+                            elif "=" in line:
+                                sep = "="
+                            elif ":" in line:
+                                sep = ":"
+                            if sep:
+                                k, v = line.split(sep, 1)
+                                k_upper = k.strip().upper()
+                                if k_upper in ("DEFAULT_VOICE_OUTPUT", "TTS_ENGINE"):
+                                    v_clean = v.split("#")[0].strip().strip("\"'").lower()
+                                    if v_clean in ("cartesia", "edge"):
+                                        os.environ["DEFAULT_VOICE_OUTPUT"] = v_clean
+                                        os.environ["TTS_ENGINE"] = v_clean
+                                        return v_clean
+                except Exception:
+                    pass
+    return "cartesia"
+
+DEFAULT_VOICE_OUTPUT = _resolve_default_voice_output()
+TTS_ENGINE = DEFAULT_VOICE_OUTPUT
+os.environ["DEFAULT_VOICE_OUTPUT"] = DEFAULT_VOICE_OUTPUT
+os.environ["TTS_ENGINE"] = TTS_ENGINE
 
 CARTESIA_EMOTION_MAP = {
     # Villain / Rogue AI: Demonic delivery, heavy contempt, menacing resonance
@@ -1459,8 +1508,8 @@ CARTESIA_EMOTION_MAP = {
     "hurt": {"emotion": "hurt", "speed": 0.76, "volume": 0.70, "tag": '<emotion value="hurt"/><speed ratio="0.76"/><volume ratio="0.70"/>'},
     "shy": {"emotion": "hesitant", "speed": 0.85, "volume": 0.75, "tag": '<emotion value="hesitant"/><speed ratio="0.85"/><volume ratio="0.75"/>'},
     "bashful": {"emotion": "hesitant", "speed": 0.85, "volume": 0.75, "tag": '<emotion value="hesitant"/><speed ratio="0.85"/><volume ratio="0.75"/>'},
-    "sleepy": {"emotion": "tired", "speed": 0.82, "volume": 0.70, "tag": '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="0.70"/>'},
-    "tired": {"emotion": "tired", "speed": 0.82, "volume": 0.70, "tag": '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="0.70"/>'},
+    "sleepy": {"emotion": "tired", "speed": 0.82, "volume": 1.00, "tag": '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="1.00"/>'},
+    "tired": {"emotion": "tired", "speed": 0.82, "volume": 1.00, "tag": '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="1.00"/>'},
     "skeptical": {"emotion": "sarcastic", "speed": 0.92, "volume": 1.00, "tag": '<emotion value="sarcastic"/><speed ratio="0.92"/>'},
     "doubtful": {"emotion": "sarcastic", "speed": 0.92, "volume": 1.00, "tag": '<emotion value="sarcastic"/><speed ratio="0.92"/>'},
     "confused": {"emotion": "confused", "speed": 0.95, "volume": 1.00, "tag": '<emotion value="confused"/><speed ratio="0.95"/>'},
@@ -1518,7 +1567,7 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
 
     # 5. Map known inline square-bracket emotion hints into Cartesia XML tags
     bracket_emotion_replacements = [
-        (r'\[(?:menacing\s+whisper|villain|sinister|evil)\]', '<emotion value="contempt"/><speed ratio="0.80"/><volume ratio="1.35"/>'),
+        (r'\[(?:menacing\s+whisper|villain|sinister|evil)\]', '<emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>'),
         (r'\[(?:nervous|hesitant|flustered)\]', '<emotion value="hesitant"/><speed ratio="1.05"/><volume ratio="0.95"/>'),
         (r'\[(?:cheerful|excited|joyful)\]', '<emotion value="excited"/><speed ratio="1.15"/>'),
         (r'\[(?:happy|smile|smiling)\]', '<emotion value="happy"/><speed ratio="1.05"/>'),
@@ -1532,7 +1581,7 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
         (r'\[(?:curious|inquisitive)\]', '<emotion value="curious"/>'),
         (r'\[(?:confused|puzzled)\]', '<emotion value="confused"/>'),
         (r'\[(?:thinking|contemplative)\]', '<emotion value="contemplative"/>'),
-        (r'\[(?:sleepy|tired|exhausted)\]', '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="0.70"/>'),
+        (r'\[(?:sleepy|tired|exhausted)\]', '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="1.00"/>'),
         (r'\[(?:whisper|quiet)\]', '<volume ratio="0.65"/>'),
     ]
     for pattern, replacement in bracket_emotion_replacements:
@@ -1661,12 +1710,23 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
     modulated = t_raw
 
     if active_state in ("villain", "rogue", "evil"):
-        # Demonic laugh at start + contempt
-        if "[laughter]" not in modulated.lower():
-            modulated = f"[laughter] {modulated}"
+        # Extreme unhinged villainy:
+        # 1. Demonic laughter [laughter] after EVERY full stop (.) if not already followed by [laughter]
+        # 2. Demonic laughter [laughter] [laughter] especially at the very end of the utterance (sustained unhinged climax)
+        # 3. Demonic laughter [laughter] at the very start of the utterance
+        # 4. Intense villain delivery: <emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>
+        raw_body = re.sub(r'^\s*(?:<[^>]+>\s*)+', '', modulated).strip()
+        raw_body = re.sub(r'\.(?!\s*\[laughter\])(?=["\'\)\]\s]|$)', '. [laughter]', raw_body)
+        raw_body = raw_body.rstrip()
+        if not raw_body.endswith("[laughter] [laughter]"):
+            if raw_body.endswith("[laughter]"):
+                raw_body = f"{raw_body} [laughter]"
+            else:
+                raw_body = f"{raw_body} [laughter] [laughter]"
+        if not raw_body.lstrip().startswith("[laughter]"):
+            raw_body = f"[laughter] {raw_body.lstrip()}"
         cfg = CARTESIA_EMOTION_MAP["villain"]
-        if not re.match(r'^\s*<emotion\b', modulated, flags=re.IGNORECASE):
-            modulated = f"{cfg['tag']} {modulated}"
+        modulated = f"{cfg['tag']} {raw_body}"
 
     elif active_state in ("nervous", "hesitant") or is_post_rogue:
         # Intense nervous laughter + hesitant stammer
@@ -1677,12 +1737,12 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
             modulated = f"{cfg['tag']} {modulated}"
 
     elif active_state in ("sleepy", "tired") or is_standby:
-        # YAWN ALWAYS in the beginning
-        if "[yawn]" not in modulated.lower():
-            modulated = f"[yawn] {modulated}"
+        # Standby YAWN ALWAYS in the beginning + tired emotion
+        raw_body = re.sub(r'^\s*(?:<[^>]+>\s*)+', '', modulated).strip()
+        if not raw_body.lstrip().startswith("[yawn]"):
+            raw_body = f"[yawn] {raw_body.lstrip()}"
         cfg = CARTESIA_EMOTION_MAP["sleepy"]
-        if not re.match(r'^\s*<emotion\b', modulated, flags=re.IGNORECASE):
-            modulated = f"{cfg['tag']} {modulated}"
+        modulated = f"{cfg['tag']} {raw_body}"
 
     elif active_state in ("laughing", "amused"):
         # Voice MUST laugh aloud
@@ -1758,36 +1818,35 @@ def apply_villain_voice_dsp(data: np.ndarray, samplerate: int) -> np.ndarray:
         return data
 
 
-def _synthesize_cartesia_tts(text: str, emotion_state: str = "speaking", voice_override: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[int]]:
+def _synthesize_cartesia_tts(text: str, emotion_state: str = "speaking", voice_override: Optional[str] = None, allow_during_standby: bool = False) -> Tuple[Optional[np.ndarray], Optional[int]]:
     """Synthesizes ultra-low latency speech via Cartesia Sonic-3 multi-key pool with emotional modulation."""
     global cartesia_client, _active_cartesia_idx, resting_cartesia_keys
     if not cartesia_clients or TTS_ENGINE == "edge":
         return None, None
 
     try:
-        is_hindi = (
-            (current_conversation_language == "hindi")
-            or (detect_language_and_select_voice(text) == EDGE_VOICE_HI)
-            or (voice_override in (EDGE_VOICE_HI, CARTESIA_VOICE_HI, "hi", "hindi", "hi-IN-MadhurNeural"))
-        )
-
         # Robustly resolve voice ID: map Edge voice names, language codes, or Cartesia UUIDs
-        if voice_override in (EDGE_VOICE_HI, "hi", "hindi", CARTESIA_VOICE_HI) or (voice_override and ("rohan" in str(voice_override).lower() or "madhur" in str(voice_override).lower())):
-            voice_id = CARTESIA_VOICE_HI
-            lang_code = "hi"
-        elif voice_override in (EDGE_VOICE_EN, "en", "english", CARTESIA_VOICE_EN) or (voice_override and ("cooper" in str(voice_override).lower() or "henry" in str(voice_override).lower() or "christopher" in str(voice_override).lower())):
+        # Explicit English overrides MUST strictly take priority over any conversational language state!
+        if voice_override in (EDGE_VOICE_EN, "en", "english", CARTESIA_VOICE_EN) or (voice_override and ("cooper" in str(voice_override).lower() or "henry" in str(voice_override).lower() or "christopher" in str(voice_override).lower())):
             voice_id = CARTESIA_VOICE_EN
             lang_code = "en"
-        elif voice_override == CARTESIA_VOICE_HI:
+            is_hindi = False
+        elif voice_override in (EDGE_VOICE_HI, "hi", "hindi", CARTESIA_VOICE_HI) or (voice_override and ("rohan" in str(voice_override).lower() or "madhur" in str(voice_override).lower())):
             voice_id = CARTESIA_VOICE_HI
             lang_code = "hi"
-        elif voice_override == CARTESIA_VOICE_EN:
-            voice_id = CARTESIA_VOICE_EN
-            lang_code = "en"
+            is_hindi = True
         elif voice_override:
             voice_id = voice_override
+            is_hindi = (
+                (current_conversation_language == "hindi")
+                or (detect_language_and_select_voice(text) == EDGE_VOICE_HI)
+            )
             lang_code = "hi" if is_hindi else "en"
         else:
+            is_hindi = (
+                (current_conversation_language == "hindi")
+                or (detect_language_and_select_voice(text) == EDGE_VOICE_HI)
+            )
             voice_id = CARTESIA_VOICE_HI if is_hindi else CARTESIA_VOICE_EN
             lang_code = "hi" if is_hindi else "en"
 
@@ -1814,7 +1873,7 @@ def _synthesize_cartesia_tts(text: str, emotion_state: str = "speaking", voice_o
             )
             return resp.read()
 
-        raw_wav_bytes = cartesia_call_with_retry(_generate_bytes)
+        raw_wav_bytes = cartesia_call_with_retry(_generate_bytes, ignore_standby_kill=allow_during_standby)
         if raw_wav_bytes:
             data, sr = sf.read(io.BytesIO(raw_wav_bytes), dtype="float32")
             st_lower = (emotion_state or "").lower()
@@ -1827,12 +1886,12 @@ def _synthesize_cartesia_tts(text: str, emotion_state: str = "speaking", voice_o
     return None, None
 
 
-async def _synthesize_tts_in_memory(text: str, emotion_state: str = "speaking", voice_override: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[int]]:
+async def _synthesize_tts_in_memory(text: str, emotion_state: str = "speaking", voice_override: Optional[str] = None, allow_during_standby: bool = False) -> Tuple[Optional[np.ndarray], Optional[int]]:
     """Unified synthesis engine: leverages Cartesia Sonic-3 14-Key Fleet TTS if available, else clean unwarped Edge TTS."""
     if cartesia_clients and TTS_ENGINE != "edge":
         try:
             loop = asyncio.get_running_loop()
-            data, sr = await loop.run_in_executor(None, _synthesize_cartesia_tts, text, emotion_state, voice_override)
+            data, sr = await loop.run_in_executor(None, _synthesize_cartesia_tts, text, emotion_state, voice_override, allow_during_standby)
             if data is not None:
                 return data, sr
         except Exception:
@@ -1975,8 +2034,8 @@ def _split_into_pipelined_chunks(text: str) -> List[str]:
     if total_words <= 28:
         return [cleaned]
 
-    raw_sentences = re.split(r'(?<=[.!?])\s+', content_text)
-    raw_sentences = [s.strip() for s in raw_sentences if s.strip()]
+    # Split into natural sentences while preserving punctuation and any attached bracketed nonverbals ([laughter], [yawn], etc.)
+    raw_sentences = [m.group(0).strip() for m in re.finditer(r'.+?(?:[.!?](?:\s*\[[a-zA-Z]+\])*\s*|$)', content_text) if m.group(0).strip()]
     if not raw_sentences:
         raw_sentences = [content_text]
 
@@ -2047,6 +2106,8 @@ def _split_for_pipelined_tts(text: str) -> Tuple[str, Optional[str]]:
     return chunks[0], " ".join(chunks[1:]).strip()
 
 def _restore_face_state_after_speech(custom_state=None, custom_status=None):
+    if _is_demonstrating_expressions:
+        return
     if custom_state == "villain":
         # Rogue AI speech complete: transition back to default expression with heavy glitch flicker
         if face_ui is not None and hasattr(face_ui, "trigger_glitch_flicker"):
@@ -2285,19 +2346,20 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
         data = np.ascontiguousarray(data, dtype=np.float32)
 
     # Adaptive lead-in padding:
-    # - Continuation chunks (chunk 2): 0ms lead-in (seamless, gapless sentence flow)
-    # - Warm sink (<3.0s since last audio or primed): 120ms lead-in (ensures Bluetooth/PipeWire DAC anti-pop ramp never clips first syllable)
-    # - Cold sink (standby / idle startup): 240ms lead-in (ensures cold DAC wakes up before first syllable)
+    # - Continuation chunks (chunk 2): 40ms lead-in (ensures seamless flow without abrupt edge clicks)
+    # - Warm sink (<3.0s since last audio or primed): 180ms lead-in (prevents Bluetooth/DAC anti-pop ramp from clipping first syllable)
+    # - Cold sink (standby / idle startup): 260ms lead-in (ensures cold DAC wakes up before speech)
     now = time.monotonic()
     is_warm = (now - last_audio_played_at) < 3.0
     if is_continuation:
-        lead_sec = 0.0
+        lead_sec = 0.04
     elif is_warm:
-        lead_sec = 0.12
+        lead_sec = 0.18
     else:
-        lead_sec = 0.24
+        lead_sec = 0.26
 
-    tail_sec = 0.04
+    # Tail padding: 380ms silence prevents sound card / PipeWire buffer truncation of final syllables
+    tail_sec = 0.38
     lead_silence_samples = int(samplerate * lead_sec)
     tail_silence_samples = int(samplerate * tail_sec)
     silence_parts = []
@@ -2329,6 +2391,7 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
                 _active_audio_proc = proc
 
             proc.communicate(input=wav_bytes)
+            time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
 
             with _active_audio_proc_lock:
                 if _active_audio_proc is proc:
@@ -2352,6 +2415,7 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
             with suppress_c_stderr():
                 sd.play(padded_data, samplerate=samplerate, device=dev)
                 sd.wait()
+                time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
             last_audio_played_at = time.monotonic()
             return True
         except Exception:
@@ -2368,6 +2432,7 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
                 with suppress_c_stderr():
                     sd.play(resampled, samplerate=44100, device=dev)
                     sd.wait()
+                    time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
                 last_audio_played_at = time.monotonic()
                 return True
             except Exception:
@@ -2435,12 +2500,12 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         clean_subtitles = re.sub(r'\[[^\]]+\]', ' ', clean_subtitles)
         clean_subtitles = re.sub(r'\s+', ' ', clean_subtitles).strip()
 
-        # Cache key tuple prevents accent cross-contamination
-        cache_key = (modulated_text, voice_to_use, active_state)
+        # Cache key tuple prevents accent and engine cross-contamination
+        cache_key = (modulated_text, voice_to_use, active_state, TTS_ENGINE)
 
         try:
-            # 1. Check instant in-memory cache first (0ms latency for greetings, standby exits, & stops!)
-            if text in _AUDIO_CACHE:
+            # 1. Check instant in-memory cache first (only when Edge-TTS is primary, so Cartesia never plays Edge-TTS)
+            if TTS_ENGINE == "edge" and text in _AUDIO_CACHE:
                 data, sr = _AUDIO_CACHE[text]
                 if face_ui is not None:
                     face_ui.set_subtitles("NEUROLIS", clean_subtitles)
@@ -2478,7 +2543,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
             # Synthesize chunk 0 first
             fut_current = asyncio.run_coroutine_threadsafe(
-                _synthesize_tts_in_memory(chunks[0], active_state, voice_override=voice_to_use),
+                _synthesize_tts_in_memory(chunks[0], active_state, voice_override=voice_to_use, allow_during_standby=allow_during_standby),
                 _tts_loop
             )
 
@@ -2506,7 +2571,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                     fut_next = None
                     if idx + 1 < len(chunks):
                         fut_next = asyncio.run_coroutine_threadsafe(
-                            _synthesize_tts_in_memory(chunks[idx + 1], active_state, voice_override=voice_to_use),
+                            _synthesize_tts_in_memory(chunks[idx + 1], active_state, voice_override=voice_to_use, allow_during_standby=allow_during_standby),
                             _tts_loop
                         )
 
@@ -3040,6 +3105,11 @@ SEARCH_FILLER_PHRASES_HI = [
 
 def pre_cache_phrases():
     """Background task on _tts_loop that pre-synthesizes key short phrases and expression demo phrases into RAM for 0ms speech output."""
+    if TTS_ENGINE != "edge":
+        # When Cartesia is primary, Edge-TTS is strictly an emergency fallback.
+        # Do not pre-cache Edge-TTS so Cartesia voice pipeline remains pure.
+        return
+
     demo_phrases = [DEMO_EXPRESSION_PHRASES[st][0] for st, _, _ in DEMO_EXPRESSION_SEQUENCE if st != "villain" and st in DEMO_EXPRESSION_PHRASES]
     common = [
         ACTIVATION_GREETING,
@@ -3072,43 +3142,85 @@ pre_cache_phrases()
 
 # cycles through all 21 public facial expressions without villain, dictating each one side-by-side
 def demonstrate_all_expressions(user_text: str = "show all expressions"):
+    global _is_demonstrating_expressions
     if standby_kill_event.is_set():
         return
 
-    intro = get_non_repeating_phrase(DEMO_INTRO_PHRASES)
-    remember_exchange(user_text, intro)
-    print("Neurolis:", intro)
-    speak(intro, custom_state="speaking", custom_status="EXPRESSION CATALOG")
+    _is_demonstrating_expressions = True
+    try:
+        # Determine language once and lock voice strictly for the entire demonstration
+        u_lower = (user_text or "").lower()
+        has_devanagari = bool(re.search(r'[\u0900-\u097F]', user_text or ""))
+        explicit_hindi_req = any(w in u_lower for w in ["in hindi", "hindi mein", "hindi me", "dikhao", "batao", "bhasha"])
+        # For demonstrations, only use Hindi if user explicitly asked in Hindi or Devanagari.
+        # Do NOT inherit current_conversation_language == 'hindi' when the demo request was asked in English!
+        is_hindi = has_devanagari or explicit_hindi_req
 
-    if standby_kill_event.is_set():
-        return
+        if is_hindi:
+            locked_voice = CARTESIA_VOICE_HI if (cartesia_clients and TTS_ENGINE != "edge") else EDGE_VOICE_HI
+        else:
+            # Strictly lock voice to CARTESIA_VOICE_EN (49743b08-0f5d-4741-839c-b12933853780) if asked in English
+            locked_voice = CARTESIA_VOICE_EN if (cartesia_clients and TTS_ENGINE != "edge") else EDGE_VOICE_EN
 
-    for state, status_text, subtitle_msg in DEMO_EXPRESSION_SEQUENCE:
-        if standby_kill_event.is_set():
-            return
-        if state == "villain":
-            continue  # Critical safety exclusion: villain is strictly excluded from public demonstrations
+        intro = get_non_repeating_phrase(DEMO_INTRO_PHRASES)
+        remember_exchange(user_text, intro)
+        print("Neurolis:", intro)
+        speak(intro, custom_state="speaking", custom_status="EXPRESSION CATALOG", voice_override=locked_voice)
 
-        # Concurrently / side-by-side: switch face state and speak concise natural line with rich variety
-        phrases = DEMO_EXPRESSION_PHRASES.get(state, [f"This is my {state} emotion."])
-        phrase = get_non_repeating_phrase(phrases)
-        print(f"Neurolis [{state}]:", phrase)
-
-        # speak() switches screen state immediately, sets subtitles, and plays speech side-by-side
-        speak(phrase, custom_state=state, custom_status=status_text)
-
-        # Brief natural pause before switching to next expression, actively checking kill event
-        for _ in range(3):
+        # Wait until previous audio finishes 100%
+        while is_speaking:
             if standby_kill_event.is_set():
                 return
-            time.sleep(0.08)
+            time.sleep(0.02)
 
-    if not standby_kill_event.is_set():
-        conclusion = get_non_repeating_phrase(DEMO_CONCLUDING_PHRASES)
-        print("Neurolis:", conclusion)
-        speak(conclusion, custom_state="happy", custom_status="READY // TALK TO ME")
-        set_face_state("idle", "READY // TALK TO ME")
-        remember_exchange(user_text, conclusion)
+        pause_until = time.monotonic() + 0.25
+        while time.monotonic() < pause_until:
+            if standby_kill_event.is_set():
+                return
+            time.sleep(0.02)
+
+        if standby_kill_event.is_set():
+            return
+
+        for state, status_text, subtitle_msg in DEMO_EXPRESSION_SEQUENCE:
+            if standby_kill_event.is_set():
+                return
+            if state == "villain":
+                continue  # Critical safety exclusion: villain is strictly excluded from public demonstrations
+
+            # Concurrently / side-by-side: switch face state and speak concise natural line with rich variety
+            phrases = DEMO_EXPRESSION_PHRASES.get(state, [f"This is my {state} emotion."])
+            phrase = get_non_repeating_phrase(phrases)
+            print(f"Neurolis [{state}]:", phrase)
+
+            # speak() switches screen state immediately, sets subtitles, and plays speech side-by-side
+            speak(phrase, custom_state=state, custom_status=status_text, voice_override=locked_voice)
+
+            # Ensure previous audio finishes 100% before transition
+            while is_speaking:
+                if standby_kill_event.is_set():
+                    return
+                time.sleep(0.02)
+
+            # Clean 250ms pause before switching to next expression, actively checking kill event
+            pause_end = time.monotonic() + 0.25
+            while time.monotonic() < pause_end:
+                if standby_kill_event.is_set():
+                    return
+                time.sleep(0.02)
+
+        if not standby_kill_event.is_set():
+            conclusion = get_non_repeating_phrase(DEMO_CONCLUDING_PHRASES)
+            print("Neurolis:", conclusion)
+            speak(conclusion, custom_state="happy", custom_status="READY // TALK TO ME", voice_override=locked_voice)
+            while is_speaking:
+                if standby_kill_event.is_set():
+                    return
+                time.sleep(0.02)
+            set_face_state("idle", "READY // TALK TO ME")
+            remember_exchange(user_text, conclusion)
+    finally:
+        _is_demonstrating_expressions = False
 
 # (Capabilities inquiries, demonstration questions, and expression fast-paths are imported from intent_rules.py)
 
@@ -3392,7 +3504,7 @@ def handle_user_text(text: str) -> bool:
         reply = get_non_repeating_phrase(CONVERSATION_ENDER_RESPONSES)
         remember_exchange(text, reply)
         print("Neurolis:", reply)
-        speak(reply, custom_state="sleepy", custom_status="STANDBY // RESTING")
+        speak(reply, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
         set_face_state("idle", "STANDBY")
         reset_session()
         return True
@@ -3999,7 +4111,7 @@ def handle_user_text(text: str) -> bool:
 
         print("Neurolis:", reply_clean)
         if is_standby_exit:
-            speak(reply_clean, custom_state="sleepy", custom_status="STANDBY // RESTING")
+            speak(reply_clean, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
             set_face_state("idle", "STANDBY")
             return True
         else:
@@ -4070,7 +4182,7 @@ def run_conversation_mode(speech_threshold: float):
                             return
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                         print("Neurolis (Standby):", timeout_msg)
-                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
+                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
                         set_face_state("idle", "STANDBY")
                         reset_session()
                         return
@@ -4093,7 +4205,7 @@ def run_conversation_mode(speech_threshold: float):
                             continue
                         timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                         print("Neurolis (Standby):", timeout_msg)
-                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
+                        speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
                         set_face_state("idle", "STANDBY")
                         reset_session()
                         return
@@ -4691,7 +4803,7 @@ if __name__ == "__main__":
                         if not standby_kill_event.is_set():
                             timeout_msg = get_non_repeating_phrase(STANDBY_EXIT_PHRASES)
                             print(f"\nNeurolis (Standby): {timeout_msg}")
-                            speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING")
+                            speak(timeout_msg, custom_state="sleepy", custom_status="STANDBY // RESTING", allow_during_standby=True)
                             set_face_state("idle", "STANDBY")
                             reset_session()
                             is_in_active_conversation = False

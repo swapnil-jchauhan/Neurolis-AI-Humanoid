@@ -58,7 +58,7 @@ try:
 except ImportError:
     pass
 
-# 3. Direct manual file parsing fallback to guarantee all 14 keys are loaded
+# 3. Direct manual file parsing fallback to guarantee all 14 keys and config are loaded
 for target_dir in [CWD, BASE_DIR]:
     for fname in [".env", "env"]:
         p = target_dir / fname
@@ -69,13 +69,25 @@ for target_dir in [CWD, BASE_DIR]:
                         line = line.strip()
                         if not line or line.startswith("#"):
                             continue
-                        if "=" in line:
-                            k, v = line.split("=", 1)
+                        sep = None
+                        if "=" in line and ":" in line:
+                            sep = "=" if line.index("=") < line.index(":") else ":"
+                        elif "=" in line:
+                            sep = "="
+                        elif ":" in line:
+                            sep = ":"
+                        if sep:
+                            k, v = line.split(sep, 1)
                             k = k.strip()
                             v = v.strip().strip("\"'")
                             if "#" in v:
                                 v = v.split("#", 1)[0].strip().strip("\"'")
-                            if (k.startswith("GROQ_") or k.startswith("CARTESIA_")) and v:
+                            k_upper = k.upper()
+                            if k_upper in ("DEFAULT_VOICE_OUTPUT", "TTS_ENGINE") and v:
+                                v_clean = v.lower().strip()
+                                os.environ["DEFAULT_VOICE_OUTPUT"] = v_clean
+                                os.environ["TTS_ENGINE"] = v_clean
+                            elif (k_upper.startswith("GROQ_") or k_upper.startswith("CARTESIA_")) and v:
                                 os.environ[k] = v
             except Exception:
                 pass
@@ -494,12 +506,12 @@ def groq_call_with_retry(api_call_fn, *args, **kwargs):
         raise last_exception
 
 
-def cartesia_call_with_retry(api_call_fn, *args, **kwargs):
+def cartesia_call_with_retry(api_call_fn, *args, ignore_standby_kill: bool = False, **kwargs):
     """
     Executes a Cartesia API call with automatic round-robin retry and failover across the key pool.
     - Quota exhaustion (HTTP 429, 402 out of credits, rate limits): Rotates through the pool.
     - Network timeout / drop: Fast failover.
-    - Standby kill switch: Aborts immediately.
+    - Standby kill switch: Aborts immediately unless ignore_standby_kill is True.
     """
     global cartesia_client, _active_cartesia_idx, resting_cartesia_keys
     if not cartesia_clients:
@@ -510,7 +522,7 @@ def cartesia_call_with_retry(api_call_fn, *args, **kwargs):
     network_error_streak = 0
 
     for attempt in range(max_key_attempts):
-        if _standby_kill_event is not None and _standby_kill_event.is_set():
+        if not ignore_standby_kill and _standby_kill_event is not None and _standby_kill_event.is_set():
             raise InterruptedError("Standby kill switch triggered.")
         active_c = cartesia_clients[_active_cartesia_idx]
 
