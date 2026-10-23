@@ -50,5 +50,5 @@ opencv-python>=4.8.0     # OpenCV for webcam capture, CLAHE preprocessing, and H
 mediapipe>=0.10.9        # Google MediaPipe Tasks for 3.0s Open Palm / Closed Fist Gesture Sentry
 Pillow>=10.0.0           # PIL Image, ImageDraw, ImageFont, and ImageTk for 60 FPS HyperSmoothCanvas
 
-# --- Hardware Communication ---
-pyserial>=3.5            # High-speed USB serial bridge (115200 baud) to Arduino Mega 2560
+# --- Hardware Detection ---
+pyserial>=3.5            # Serial-port enumeration used by probe_robot_hardware() to detect a connected controller

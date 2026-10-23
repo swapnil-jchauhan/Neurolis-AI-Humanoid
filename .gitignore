@@ -1,5 +1,8 @@
 # API
 .env
+env
+venv/
+.venv/
 
 # Python Cache Folders
 __pycache__/
@@ -13,17 +16,13 @@ models.json
 # Scratch & Temporary Testing
 scratch/
 tests/
+captures/
+verify_expressions.py
+test_deep_verification.py
 
 # Temporary Output Captures
 _neurolis_vision.jpg
 *.wav
 *.mp3
 !assets/sounds/*.wav
-!assets/sounds/*.mp3env 
-.env 
-env
-.env
-
-captures/
-verify_expressions.py
-test_deep_verification.py
+!assets/sounds/*.mp3

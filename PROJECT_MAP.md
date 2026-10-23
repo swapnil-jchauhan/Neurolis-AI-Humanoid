@@ -180,7 +180,7 @@ Neurolis-AI-Humanoid/
    - **Mark II Cockpit Branding**: Ambient header with pulsing status dot (`PROJECT NEUROLIS MARK II // [STATE] // 60 FPS OLED ENGINE`), dedicated subtitle card pill (`● NEUROLIS MARK II`), and boot sequence diagnostics ("NEUROLIS MARK II" with "Booting...").
 4. **On-Demand Camera Vision**: Groq Vision integration answering "What am I holding?" or "Look at this" via single-frame capture.
 5. **Acoustic Noise Resilience**: Dynamic rolling noise floor tracking rejecting background hall chatter without requiring users to shout.
-6. **Dual Speech Synthesis**: Online Edge-TTS with instant offline Piper neural fallback.
+6. **Tiered Speech Synthesis**: Cartesia Sonic-3 (14-key pool) as primary, falling back to Edge-TTS, then offline Piper, then system SAPI5/espeak (pyttsx3).
 7. **Clean Software Phase & Mid-2027 Locomotion Roadmap**: The active codebase has been purged of all motor commands, movement exclusions, and Arduino code. Project Neurolis Mark II runs as a pure software stack on Windows 11 (tested on Pi 5). Low-level motor drivers, BTS7960 H-bridges, 12V Johnson motors, and 2D LiDAR SLAM indoor locomotion will be engineered in mid-2027.
 8. **Mark II Bilingual & Voice Modulation Overhaul (ChatGPT Advanced Voice Style)**:
    - **Bilingual Groq Whisper STT**: Removed hardcoded `language="en"` constraint, enabling automatic Language Identification (`language=None`) in <10ms. Implemented bilingual prefix priming (`prompt="Neurolis AI humanoid robot. Auckland House School. Namaste, aap kaise hain? Hello, how are you? Kya haal hai? All systems operational."`) and an Indic hallucination scrubber, completely eliminating phonetic misinterpretations of Hindi speech.

@@ -7,6 +7,7 @@ This file tracks the hardware and physical inventory for Project Neurolis.
 Project Context:
 - Developed by Swapnil Jai Chauhan (Sole Architect & Developer, Neurolis Mark II; Mark 1 prototype chassis contributed by Shivam Verma) at Auckland House School for Boys.
 - Build Version: Neurolis Mark II Software Development Phase (Windows 11 Workstation & Raspberry Pi 5 Verification).
+- NOTE: Sections 1 (Arduino Mega) and 3 (drive and power system) list PLANNED mid-2027 hardware; none of it is connected or driven by the current software.
 - The codebase is currently in a 100% software-first architecture. Physical motor drivers, BTS7960 H-bridges, 12V Johnson DC motors, and 2D LiDAR SLAM locomotion will be developed in mid-2027.
 
 ======================================================================
@@ -17,7 +18,7 @@ Project Context:
    Quantity: 1
    Role:
    - Master high-level brain.
-   - Runs Python 3.13, MediaPipe gesture sentry, audio endpointer v2, Groq LLM brain, Edge-TTS/Piper voice engine, and 60 FPS Face UI.
+   - Runs Python 3.13, MediaPipe gesture sentry, audio endpointer v2, Groq LLM brain, Cartesia Sonic-3 voice engine (Edge-TTS/Piper/pyttsx3 fallbacks), and 60 FPS Face UI.
    Notes:
    - Uses active cooling fan/heatsink to ensure continuous operation across exhibition hours.
    - Powered via high-current 5V 5A step-down buck converter.
@@ -71,7 +72,7 @@ Project Context:
 4. Powered Speaker (USB / Bluetooth A2DP / 3.5mm Powered)
    Quantity: 1
    Role:
-   - Clean audio output for Edge-TTS neural speech and Piper offline voice synthesis.
+   - Clean audio output for Cartesia Sonic-3 neural speech (with Edge-TTS and Piper offline fallbacks).
 
 ======================================================================
 3. DRIVE AND POWER SYSTEM
