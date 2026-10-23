@@ -164,6 +164,12 @@ class GestureSentry:
         self._last_palm_seen: float = 0.0
         self._last_fist_seen: float = 0.0
 
+        # Raise-hand-to-talk (loud rooms): while ACTIVE, when was an open palm last seen / last NOT seen.
+        # These never start a hold or trigger anything on their own; listen.py reads them to gate recording.
+        self._palm_raised_seen: float = 0.0
+        self._palm_lowered_seen: float = 0.0
+        self._last_eval_time: float = 0.0
+
     def _init_recognizer(self):
         """Initializes the MediaPipe Tasks GestureRecognizer engine."""
         if not MEDIAPIPE_AVAILABLE:
@@ -213,6 +219,25 @@ class GestureSentry:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
+
+    def is_alive(self, max_age: float = 2.0) -> bool:
+        """True while the recognizer is loaded, the worker thread is running and frames were analysed recently.
+        Raise-hand-to-talk only relies on the camera when this is True."""
+        return bool(
+            self.running
+            and self.recognizer is not None
+            and (time.monotonic() - self._last_eval_time) <= max_age
+        )
+
+    def is_palm_raised(self, grace: float = 0.35) -> bool:
+        """True if an open palm was seen within the last `grace` seconds (bridges motion-blur / dropped frames)."""
+        with self.lock:
+            return (time.monotonic() - self._palm_raised_seen) <= grace
+
+    def palm_lowered_since(self, t: float) -> bool:
+        """True if the hand was seen NOT showing an open palm at any moment after monotonic time `t`."""
+        with self.lock:
+            return self._palm_lowered_seen > t
 
     def get_feedback(self) -> Tuple[Optional[str], float]:
         """
@@ -307,6 +332,12 @@ class GestureSentry:
         # 3. Continuous 3.0s Hold Logic with Strict State Isolation
         with self.lock:
             self._last_detected_gesture = detected
+            self._last_eval_time = now
+            if not is_standby:
+                if detected == "OPEN_PALM":
+                    self._palm_raised_seen = now
+                else:
+                    self._palm_lowered_seen = now
 
             if is_standby:
                 # STANDBY MODE: Open Palm wakes, Closed Fist ignored

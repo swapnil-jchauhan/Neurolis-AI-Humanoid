@@ -25,7 +25,7 @@
 
 # --- Core AI, Cloud Voice & Async Networking ---
 groq>=0.11.0             # Groq Cloud API for Whisper STT and Qwen Vision/LLM (14-Key Fleet)
-cartesia>=1.0.0          # Cartesia Sonic-3 Ultra-Fast Emotional Speech Synthesis (14-Key Fleet)
+cartesia>=4.2.0          # Cartesia Sonic-3 Ultra-Fast Emotional Speech Synthesis (14-Key Fleet)
 edge-tts>=7.3.1          # Microsoft Edge Neural Speech Synthesizer (Fallback Neural TTS)
 aiohttp>=3.9.0           # Persistent async TCP connection pool (_ReusableTCPConnector) for Edge-TTS
 python-dotenv>=1.0.0     # Automatic .env environment variable loader

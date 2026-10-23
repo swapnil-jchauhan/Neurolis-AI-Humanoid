@@ -28,6 +28,9 @@ from tkinter import ttk, messagebox
 
 from audio_frontend import (
     Endpointer,
+    ChannelMixer,
+    Resampler,
+    find_input_device,
     load_mic_config,
     save_mic_config,
     bandpass_frame,
@@ -213,8 +216,8 @@ class MicTunerApp:
         self.endpointer_state = Endpointer.STATE_WAITING
         self.live_silence_sec = 0.0
         self.live_floor = 50.0
-        self.live_onset_thr = float(self.cfg.get("min_onset_rms", 220.0))
-        self.live_cont_thr = float(self.cfg.get("min_continue_rms", 150.0))
+        self.live_onset_thr = float(self.cfg.get("min_onset_rms", 40.0))
+        self.live_cont_thr = float(self.cfg.get("min_continue_rms", 20.0))
         self.onset_candidates = 0
         self.onset_required = int(self.cfg.get("onset_required", 4))
         self.voiced_count = 0
@@ -236,15 +239,16 @@ class MicTunerApp:
             self.target_dev = None
         else:
             self.hw_sr = 44100
-            self.target_dev = None
+            self.target_dev = find_input_device(self.cfg)  # input_device_name / input_host_api from mic_config.json
             try:
                 devices = sd.query_devices()
-                for idx, dev in enumerate(devices):
-                    if dev.get("max_input_channels", 0) > 0:
-                        name = dev.get("name", "").lower()
-                        if "iris" in name or "webca" in name or "sonar" in name or "microphone" in name:
-                            self.target_dev = idx
-                            break
+                if self.target_dev is None:
+                    for idx, dev in enumerate(devices):
+                        if dev.get("max_input_channels", 0) > 0:
+                            name = dev.get("name", "").lower()
+                            if "iris" in name or "webca" in name or "sonar" in name or "microphone" in name:
+                                self.target_dev = idx
+                                break
                 if self.target_dev is not None:
                     self.hw_sr = int(sd.query_devices(self.target_dev).get("default_samplerate", 44100))
             except Exception:
@@ -253,9 +257,17 @@ class MicTunerApp:
         self.hw_frame_samples = int(self.hw_sr * self.frame_sec)
         self.target_frame_samples = int(self.target_sr * self.frame_sec)
 
-        # Pre-calculated resample coordinate grids (zero overhead per frame)
-        self.orig_x = np.linspace(0, 1, self.hw_frame_samples, endpoint=False)
-        self.target_x = np.linspace(0, 1, self.target_frame_samples, endpoint=False)
+        # Same input path as listen.py: channel mixing, then an anti-aliased streaming resampler to 16 kHz
+        self.input_channels = 1
+        try:
+            if not (sys.platform.startswith("linux") and shutil.which("pw-record")):
+                dev_info = sd.query_devices(self.target_dev, "input") if self.target_dev is not None else sd.query_devices(kind="input")
+                self.input_channels = max(1, min(int(self.cfg.get("input_channels", 1)), int(dev_info.get("max_input_channels", 1))))
+        except Exception:
+            self.input_channels = 1
+        self.mixer = ChannelMixer(mode=str(self.cfg.get("channel_mode", "mono")), index=int(self.cfg.get("channel_index", 0)), channels=self.input_channels)
+        self.resampler = Resampler(self.hw_sr, self.target_sr)
+        self._resample_carry = np.zeros(0, dtype=np.int16)
 
         self._build_ui()
         self._start_audio_stream()
@@ -391,10 +403,22 @@ class MicTunerApp:
         )
 
         # Min Speech RMS Baseline (Absolute Floor)
-        self.min_onset_var = tk.DoubleVar(value=float(self.cfg.get("min_onset_rms", 220.0)))
+        self.min_onset_var = tk.DoubleVar(value=float(self.cfg.get("min_onset_rms", 40.0)))
         self._create_slider(
-            col_left, "min_onset_rms", "Min Speech RMS Floor", self.min_onset_var, 50.0, 1000.0, 10.0,
-            "Absolute minimum vocal energy required to trigger speech onset"
+            col_left, "min_onset_rms", "Min Speech RMS Floor", self.min_onset_var, 10.0, 1000.0, 5.0,
+            "Smallest speech energy (after noise suppression) that can start a recording"
+        )
+
+        # Loud-room mode thresholds (entered automatically; see the Endpointer)
+        self.loud_enter_var = tk.DoubleVar(value=float(self.cfg.get("loud_enter_rms", 160.0)))
+        self._create_slider(
+            col_left, "loud_enter_rms", "Loud Room: Enter Level (RMS)", self.loud_enter_var, 60.0, 600.0, 10.0,
+            "Denoised room floor that switches on stricter onset + faster endpointing (crowd chatter also does)"
+        )
+        self.loud_exit_var = tk.DoubleVar(value=float(self.cfg.get("loud_exit_rms", 100.0)))
+        self._create_slider(
+            col_left, "loud_exit_rms", "Loud Room: Exit Level (RMS)", self.loud_exit_var, 30.0, 500.0, 10.0,
+            "Room must stay below this for ~5s to return to normal endpointing"
         )
 
         # Max Speech RMS Clamp
@@ -434,6 +458,13 @@ class MicTunerApp:
         self._create_slider(
             col_right, "high_cutoff_hz", "High-Cut Filter (Hz)", self.high_cut_var, 3000.0, 7500.0, 100.0,
             "Strips electrical hiss above 4.5kHz while preserving speech formants"
+        )
+
+        # Spectral denoiser strength
+        self.bg_suppress_var = tk.DoubleVar(value=float(self.cfg.get("bg_suppress_db", 12.0)))
+        self._create_slider(
+            col_right, "bg_suppress_db", "Noise Suppression (max dB)", self.bg_suppress_var, 0.0, 24.0, 1.0,
+            "Maximum attenuation of steady noise (fans, AC, hiss). 0 = off. Higher can dull quiet speech."
         )
 
         # Treble Formant Clarity Boost
@@ -598,12 +629,18 @@ class MicTunerApp:
                 return
 
             try:
-                raw = indata.reshape(-1)
-                # Resample if hardware rate does not match target 16kHz
-                if len(raw) == self.target_frame_samples:
-                    resampled = raw
+                mono = self.mixer.mix(indata)
+                if self.resampler.passthrough and len(mono) == self.target_frame_samples:
+                    resampled = mono
                 else:
-                    resampled = np.interp(self.target_x, self.orig_x, raw).astype(np.int16)
+                    out = self.resampler.process(mono)
+                    if self._resample_carry.size:
+                        out = np.concatenate([self._resample_carry, out])
+                    if len(out) < self.target_frame_samples:
+                        self._resample_carry = out
+                        return
+                    resampled = out[:self.target_frame_samples]
+                    self._resample_carry = out[self.target_frame_samples:]
 
                 # Record sample buffer if active
                 if self.is_recording_sample:
@@ -673,7 +710,7 @@ class MicTunerApp:
                         device=self.target_dev,
                         samplerate=self.hw_sr,
                         blocksize=self.hw_frame_samples,
-                        channels=1,
+                        channels=self.input_channels,
                         dtype="int16",
                         callback=_audio_callback
                     )
@@ -686,7 +723,7 @@ class MicTunerApp:
                     device=self.target_dev,
                     samplerate=self.hw_sr,
                     blocksize=self.hw_frame_samples,
-                    channels=1,
+                    channels=self.input_channels,
                     dtype="int16",
                     callback=_audio_callback
                 )
@@ -802,17 +839,15 @@ class MicTunerApp:
                 with self.data_lock:
                     self.live_floor = amb_median
                 if hasattr(self, "endpointer") and self.endpointer is not None:
-                    self.endpointer.floor_win.clear()
-                    for _ in range(20):
-                        self.endpointer.floor_win.append(amb_median)
+                    self.endpointer.reseed(amb_median)
 
                 onset_snr = float(self.audio_cfg.get("onset_snr_db", 6.0))
-                min_onset = float(self.audio_cfg.get("min_onset_rms", 220.0))
+                min_onset = float(self.audio_cfg.get("min_onset_rms", 40.0))
                 max_onset = float(self.audio_cfg.get("max_onset_rms", 1300.0))
                 new_onset = float(np.clip(amb_median * (10.0 ** (onset_snr / 20.0)), min_onset, max_onset))
 
                 cont_snr = float(self.audio_cfg.get("continue_snr_db", 3.5))
-                min_cont = float(self.audio_cfg.get("min_continue_rms", 150.0))
+                min_cont = float(self.audio_cfg.get("min_continue_rms", 20.0))
                 new_cont = max(amb_median * (10.0 ** (cont_snr / 20.0)), min_cont)
 
                 self.cfg["ambient_p90_rms"] = round(amb_p90, 1)
@@ -882,7 +917,7 @@ class MicTunerApp:
             f"• VAD Mode: {self.cfg.get('vad_mode', 2)}\n"
             f"• Onset SNR: {self.cfg.get('onset_snr_db', 6.0)} dB\n"
             f"• Continue SNR: {self.cfg.get('continue_snr_db', 3.5)} dB\n"
-            f"• Min Onset RMS: {self.cfg.get('min_onset_rms', 220.0):.1f}\n"
+            f"• Min Onset RMS: {self.cfg.get('min_onset_rms', 40.0):.1f}\n"
             f"• Max Onset RMS: {self.cfg.get('max_onset_rms', 1300.0):.1f}\n"
             f"• Dynamic Speaker Ratio: {self.cfg.get('speaker_ratio', 0.32):.2f}\n"
             f"• End Silence Cutoff: {self.cfg.get('end_silence_sec', 0.80):.2f}s\n"
@@ -912,6 +947,9 @@ class MicTunerApp:
         if hasattr(self, "low_cut_var"): self.low_cut_var.set(self.cfg["low_cutoff_hz"])
         if hasattr(self, "high_cut_var"): self.high_cut_var.set(self.cfg["high_cutoff_hz"])
         if hasattr(self, "treble_var"): self.treble_var.set(self.cfg["treble_boost"])
+        if hasattr(self, "loud_enter_var"): self.loud_enter_var.set(self.cfg["loud_enter_rms"])
+        if hasattr(self, "loud_exit_var"): self.loud_exit_var.set(self.cfg["loud_exit_rms"])
+        if hasattr(self, "bg_suppress_var"): self.bg_suppress_var.set(self.cfg["bg_suppress_db"])
         if hasattr(self, "agc_var"): self.agc_var.set(self.cfg["agc_max_scale"])
         if hasattr(self, "startup_holdoff_var"): self.startup_holdoff_var.set(self.cfg["startup_holdoff_sec"])
         if hasattr(self, "echo_holdoff_var"): self.echo_holdoff_var.set(self.cfg["echo_holdoff_sec"])

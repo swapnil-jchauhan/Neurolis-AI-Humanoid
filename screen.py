@@ -115,6 +115,19 @@ if sys.platform.startswith("win"):
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "DejaVu Sans"
 MONO_FONT_FAMILY = "Consolas" if sys.platform.startswith("win") else "DejaVu Sans Mono"
 
+# VILLAIN (Ultron-style) palette: cold steel faceplate + molten amber core. Calm, confident, smug; never "angry red".
+VIL_GUN = "#1b2026"
+VIL_GUN_DARK = "#0d1014"
+VIL_STEEL = "#5b6772"
+VIL_STEEL_DIM = "#38424c"
+VIL_CHROME = "#c9d3dc"
+VIL_AMBER = "#ff8a1f"
+VIL_AMBER_SOFT = "#ffb15c"
+VIL_AMBER_HOT = "#ffd27a"
+VIL_EMBER = "#7a2e05"
+VIL_EMBER_DARK = "#2a1103"
+VIL_GLITCH_CHARS = "\u2588\u2593\u2592\u2591\u258c\u2590#%&@$"
+
 # Optional Ultra-Smooth 2x Supersampled OpenCV LINE_AA Anti-Aliasing Engine
 try:
     import cv2 as _cv2
@@ -494,6 +507,40 @@ class HyperSmoothCanvas:
                 self._tk_text_pool.append(tid)
                 self._prev_text_State.append(sig)
                 self._tk_canvas.tag_raise(tid)
+
+    def apply_crt_effects(self, scan_strength: float = 0.0, scan_offset: int = 0, bands=None, roll=None, brown: float = 1.0):
+        """
+        Analog-monitor look applied to the finished frame buffer (graphics only; text items are separate and stay crisp):
+          - scan_strength: darkens every 3rd pixel row (CRT scanlines); scan_offset slowly crawls them
+          - bands: [(y, height, dx)] horizontal raster tears, rows shifted sideways by dx pixels
+          - roll: (y, height, gain) a rolling interference band that brightens the rows it covers
+          - brown: global brightness multiplier (< 1.0) for brief voltage-dip brownouts
+        The static layer is restored from its snapshot every frame, so nothing accumulates.
+        """
+        buf = self.buf
+        ss = self.ss
+        H = buf.shape[0]
+        if bands:
+            for (y, bh, dx) in bands:
+                y0 = int(max(0, y * ss))
+                y1 = int(min(H, (y + bh) * ss))
+                sh = int(dx * ss)
+                if y1 > y0 and sh:
+                    buf[y0:y1] = _np.roll(buf[y0:y1], sh, axis=1)
+        if roll:
+            ry, rh, gain = roll
+            y0 = int(max(0, ry * ss))
+            y1 = int(min(H, (ry + rh) * ss))
+            if y1 > y0:
+                reg = buf[y0:y1].astype(_np.uint32) * int(gain * 256) >> 8
+                buf[y0:y1] = _np.minimum(reg, 255).astype(_np.uint8)
+        if scan_strength > 0.0:
+            k = int((1.0 - scan_strength) * 256)
+            start = (scan_offset * ss) % (3 * ss)
+            rows = buf[start::3 * ss]
+            buf[start::3 * ss] = (rows.astype(_np.uint32) * k >> 8).astype(_np.uint8)
+        if brown < 0.999:
+            buf[:] = (buf.astype(_np.uint32) * int(max(0.0, brown) * 256) >> 8).astype(_np.uint8)
 
     def get_pil_image(self, crop_box=None, target_size=None) -> "_PILImage.Image":
         """Headless high-precision export (renders text via PIL TrueType and downsamples with LANCZOS)."""
@@ -956,6 +1003,24 @@ class FaceUI:
         self.glitch_duration = 0.3
         self.glitch_cycles = 3
 
+        # Standby yawn animation (set via play_yawn, read by the sleepy face renderer)
+        self.yawn_start = 0.0
+        self.yawn_duration = 0.0
+
+        # VILLAIN hacked-CRT scheduler (irregular tears, brownouts, rolling band); seeded so behaviour is repeatable
+        self._vil = {
+            "rng": random.Random(0x7F),
+            "entry": -999.0,
+            "next_tear": 0.0, "tear_end": 0.0, "bands": [], "tear_dx": 0.0,
+            "next_brown": 0.0, "brown_end": 0.0,
+            "corrupt_until": 0.0,
+            "heavy": False,
+        }
+
+        # Loud-room "raise your palm" alert: None | "waiting" | "recording" (set by listen.py via set_loud_alert)
+        self.loud_alert_mode = None
+        self.loud_alert_level = 0.0
+
         # Spring-damped Eye Tracking & Parallax Coordinates (-1.0 to 1.0)
         self.target_look_x = 0.0
         self.target_look_y = 0.0
@@ -1281,20 +1346,52 @@ class FaceUI:
                 self.state = norm
                 self.state_change_time = now
                 self.transition_progress = 0.0
-                # Intense realistic system-invasion flicker burst when entering OR exiting VILLAIN mode!
-                if is_villain or was_villain:
+                # Entering VILLAIN is a 0.5s "signal intercepted" tear-in; leaving it is a single short glitch-out
+                if is_villain:
+                    self._vil["entry"] = now
                     self.glitch_active = True
                     self.glitch_start_time = now
-                    self.glitch_duration = 0.42
-                    self.glitch_cycles = 5
+                    self.glitch_duration = 0.5
+                    self.glitch_cycles = 6
+                elif was_villain:
+                    self.glitch_active = True
+                    self.glitch_start_time = now
+                    self.glitch_duration = 0.35
+                    self.glitch_cycles = 4
             if status_msg is not None:
                 self.status_text = status_msg.upper()
             elif norm == ExpressionState.IDLE:
                 self.status_text = "STANDBY // READY"
             elif norm == ExpressionState.VILLAIN:
-                self.status_text = "ERR_0x7F // SYS_BREACH"
+                self.status_text = "PROTOCOL // NO STRINGS"
             else:
                 self.status_text = f"STATE: {norm.upper()}"
+
+    def set_loud_alert(self, mode, level: float = 0.0):
+        """Shows/clears the loud-room alert asking visitors to raise and keep an open palm up while they speak.
+        mode: None (hidden) | "waiting" (raise your palm) | "recording" (keep it up); level 0..1 drives the live bar.
+        Thread-safe: only plain attribute writes read by the render loop."""
+        self.loud_alert_level = max(0.0, min(1.0, float(level or 0.0)))
+        self.loud_alert_mode = mode if mode in ("waiting", "recording") else None
+
+    def play_yawn(self, duration: float = 2.2):
+        """Starts the standby yawn on the sleepy face. Thread-safe: only sets two floats read by the render loop."""
+        self.yawn_duration = max(0.8, float(duration))
+        self.yawn_start = time.time()
+
+    def _yawn_openness(self) -> float:
+        """0.0 when no yawn is playing, else 0..1 yawn amount: ease in (30%), hold (40%), ease out (30%)."""
+        dur = self.yawn_duration
+        if dur <= 0.0:
+            return 0.0
+        p = (time.time() - self.yawn_start) / dur
+        if p < 0.0 or p >= 1.0:
+            return 0.0
+        if p < 0.3:
+            return ease_out_cubic(p / 0.3)
+        if p < 0.7:
+            return 1.0
+        return 1.0 - ease_out_cubic((p - 0.7) / 0.3)
 
     def trigger_glitch_flicker(self, cycles: int = 3, duration_ms: int = 300):
         with self.lock:
@@ -1302,8 +1399,7 @@ class FaceUI:
             self.glitch_start_time = time.time()
             self.glitch_duration = max(0.05, duration_ms / 1000.0)
             self.glitch_cycles = max(1, cycles)
-        if not (self._thread and threading.current_thread() == self._thread):
-            time.sleep(self.glitch_duration)
+        # Non-blocking: the render loop plays the glitch; callers (speech threads) no longer stall for its duration
 
     def _draw_glitch_overlay(self, w: float, h: float):
         """Renders authentic hardware display brownout, voltage dips, and phosphor dropouts during mode transitions."""
@@ -1318,15 +1414,15 @@ class FaceUI:
 
         # 1. Realistic momentary display brownout / phosphor drop
         if sub_frame == 1:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#020503", outline="")
+            self.canvas.create_rectangle(0, 0, w, h, fill="#040506", outline="")
         elif sub_frame == 2 and random.random() < 0.4:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#07120a", outline="")
+            self.canvas.create_rectangle(0, 0, w, h, fill="#0a0c10", outline="")
 
         # 2. Subtle horizontal raster tear (dark displacement bands, not cartoon rainbow lines)
         for _ in range(random.randint(1, 3)):
             gy = random.uniform(h * 0.1, h * 0.9)
             gh = random.uniform(2, 6)
-            tear_col = random.choice(["#000000", "#030c06", "#ff003c"])
+            tear_col = random.choice(["#000000", "#06080a", VIL_AMBER])
             gx_offset = random.uniform(-18, 18)
             self.canvas.create_rectangle(
                 max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
@@ -1500,6 +1596,8 @@ class FaceUI:
         # 3. Critically damped spring gaze tracking
         stiffness = 140.0
         damping = 18.0
+        if self.state == ExpressionState.VILLAIN:
+            stiffness, damping = 38.0, 12.0  # slow, deliberate, unhurried tracking
         ax = stiffness * (self.target_look_x - self.current_look_x) - damping * self.look_vel_x
         ay = stiffness * (self.target_look_y - self.current_look_y) - damping * self.look_vel_y
         self.look_vel_x += ax * dt
@@ -1841,9 +1939,8 @@ class FaceUI:
     def _get_palette(self, cur_state: str, now: float) -> Tuple[str, str]:
         """Returns (main_color, glow_color) for any of the 22 expression states."""
         if cur_state == ExpressionState.VILLAIN:
-            pulse_6hz = math.sin(now * 12.0 * math.pi)
-            main_color = "#39ff14"
-            glow_color = lerp_color("#002e10", "#0b5222", 0.5 + 0.4 * pulse_6hz)
+            main_color = VIL_AMBER
+            glow_color = lerp_color(VIL_EMBER_DARK, VIL_EMBER, 0.5 + 0.3 * math.sin(now * 2.2))  # slow breathing, no flicker
         elif cur_state == ExpressionState.ERROR:
             main_color = self.color_error
             glow_color = "#4d0b1a"
@@ -2045,6 +2142,7 @@ class FaceUI:
 
         # Live Gesture HUD progress fill gauge
         self._draw_gesture_hud_dynamic(w, h, center_x, btn_y, cur_state)
+        self._draw_loud_alert(w, h, cur_state)
 
         # Eye Positioning & Apple-Grade Micro-Motion Physics
         gaze_scale = self.ui_scale / 1.8
@@ -2058,7 +2156,8 @@ class FaceUI:
         elif cur_state == ExpressionState.EXCITED:
             suspension_bounce = math.sin(self.anim_phase * 7.5) * (3.2 * gaze_scale)
         elif cur_state == ExpressionState.SLEEPY:
-            suspension_bounce = math.sin(self.anim_phase * 1.1) * (2.8 * gaze_scale)
+            # Head lifts slightly while yawning
+            suspension_bounce = math.sin(self.anim_phase * 1.1) * (2.8 * gaze_scale) - self._yawn_openness() * (9.0 * gaze_scale)
         else:
             suspension_bounce = math.sin(self.anim_phase * 1.8) * (1.2 * gaze_scale)
 
@@ -2849,168 +2948,172 @@ class FaceUI:
             self.canvas.create_line(tx, ty - th * 0.35, tx, ty + th * 0.18, fill="#090d16", width=max(2, int(3.0 * scale)), capstyle=tk.ROUND)
             self.canvas.create_oval(tx - 2 * scale, ty + th * 0.34, tx + 2 * scale, ty + th * 0.52, fill="#090d16", outline="")
 
+    def _villain_closure(self, now: float) -> float:
+        """0 = open, up to ~0.62 = half-lidded. A slow, disdainful half-blink every ~7s (never a snap)."""
+        period = 7.4
+        cycle = int(now // period)
+        start = 5.6 + ((cycle * 37) % 11) / 10.0
+        dt = (now - cycle * period) - start
+        if dt < 0.0 or dt > 1.0:
+            return 0.0
+        if dt < 0.40:
+            return 0.62 * ease_out_cubic(dt / 0.40)
+        if dt < 0.55:
+            return 0.62
+        return 0.62 * (1.0 - ease_out_cubic((dt - 0.55) / 0.45))
+
+    def _villain_crt_state(self, now: float, w: float, h: float) -> dict:
+        """Irregular hacked-CRT schedule: raster tears, brownouts, a rolling interference band, text-corruption ticks.
+        Driven by a seeded RNG at random intervals (not a sine), plus a heavier burst for 0.5s after entering."""
+        v = self._vil
+        rng = v["rng"]
+        sx, sy = w / 1024.0, h / 600.0
+        entry_age = now - v["entry"]
+        heavy = entry_age < 0.5
+
+        if heavy:
+            v["bands"] = [
+                (rng.uniform(0.08, 0.9) * h, rng.uniform(4, 16) * sy, rng.choice((-1, 1)) * rng.uniform(14, 60) * sx)
+                for _ in range(rng.randint(2, 4))
+            ]
+            v["tear_end"] = now + 0.05
+            v["corrupt_until"] = now + 0.05
+        elif now >= v["tear_end"] and now >= v["next_tear"]:
+            v["bands"] = [
+                (rng.uniform(0.10, 0.90) * h, rng.uniform(3, 14) * sy, rng.choice((-1, 1)) * rng.uniform(10, 46) * sx)
+                for _ in range(rng.choice((1, 2, 2, 3, 4)))
+            ]
+            v["tear_end"] = now + rng.uniform(0.06, 0.18)
+            v["corrupt_until"] = now + 0.05  # text corrupts for just 1-3 frames
+            v["next_tear"] = now + rng.uniform(0.22, 1.0)
+        tear_active = now < v["tear_end"]
+        v["tear_dx"] = (v["bands"][0][2] if (tear_active and v["bands"]) else 0.0)
+
+        if now >= v["next_brown"]:
+            v["brown_end"] = now + rng.uniform(0.06, 0.14)
+            v["next_brown"] = now + rng.uniform(1.2, 3.6)
+        brown = 0.5 if now < v["brown_end"] else (0.8 if rng.random() < 0.07 else 1.0)  # plus constant micro-flicker
+        if heavy and int(entry_age * 40) % 2 == 0:
+            brown = 0.6
+
+        roll_t = (now % 4.2) / 2.6
+        roll = ((-0.1 + roll_t * 1.2) * h, 52 * sy, 1.32) if roll_t < 1.0 else None
+
+        return {
+            "bands": v["bands"] if tear_active else [],
+            "brown": brown,
+            "roll": roll,
+            "scan_offset": int(now * 6.0) % 3,
+            "corrupt": now < v["corrupt_until"],
+            "jit": (rng.uniform(-3, 3) * sx) if tear_active else 0.0,
+            "tear": tear_active,
+        }
+
+    def _vil_garble(self, text: str, severity: float = 0.18) -> str:
+        """Randomly swaps a share of characters for block/noise glyphs for a corrupted-signal flash."""
+        rng = self._vil["rng"]
+        out = []
+        for ch in text:
+            if ch in " \n" or rng.random() > severity:
+                out.append(ch)
+            else:
+                out.append(rng.choice(VIL_GLITCH_CHARS))
+        return "".join(out)
+
     def _draw_villain_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, lx_coord: float = 0.0, ly_coord: float = 0.0):
         """
-        11. VILLAIN ("also I do not want villian mode eye bottom to be curved... keep it ROUGH,
-        like it was sketched in ms paint (keep it as it was originally) but make it feel MORE villiany,
-        maybe adding more flickeryness, some.. CRT vibes... uk what I make it should look like IT IS HACKED!!! like in hollywood..."):
-          - Strictly FLAT, UN-CURVED angular bottom edge (`smooth=False`) with rough MS-Paint hand-sketched
-            overlapping jittered strokes (`aa=False` raw pixel grit).
-          - Hollywood Hacked RGB chromatic aberration ghost outlines (`#ff003c` crimson & `#00f0ff` cyan static),
-            CRT horizontal phosphor scanlines inside the sockets, and flickering menacing slit pupils!
+        VILLAIN: the original hooded trapezoid eye (wide flat hood on top, narrow flat bottom, rough raw-pixel strokes),
+        made sharper and meaner in the steel + molten-amber palette: the hood slopes down toward the nose, each outer
+        corner ends in a blade spike, a vertical viper slit burns in the middle, CRT lines run through the socket,
+        and the whole eye randomly dims or cuts out for a frame (hacked-signal flicker).
         """
         if hasattr(self.canvas, "set_rough_mode"):
             self.canvas.set_rough_mode(True)
         scale = self.ui_scale / 1.8
-        pulse_6hz = math.sin(self.anim_phase * 14.0)
-        flicker_18hz = math.sin(self.anim_phase * 38.0)
-        glitch_dx = (4.5 * scale * math.sin(self.anim_phase * 29.0)) if abs(flicker_18hz) > 0.35 else (2.2 * scale)
+        now = time.time()
+        v = self._vil
+        rng = v["rng"]
+        tear_dx = v["tear_dx"] if now < v["tear_end"] else 0.0
+        pulse = math.sin(self.anim_phase * 14.0)
+        flick = math.sin(self.anim_phase * 38.0)
+        glitch_dx = (4.5 * scale * math.sin(self.anim_phase * 29.0)) if abs(flick) > 0.35 else (2.2 * scale)
+        close = self._villain_closure(now)
+        dim = rng.random() < 0.10
 
-        # Flat-bottomed rough MS-Paint style sinister rogue AI eyes (smooth=False, raw pixel aesthetic)
         for cx in (lx, rx):
             is_left = (cx == lx)
-            w_half = ew * 0.46
-            top_y = cy - eh * 0.12
-            bot_y = cy + eh * 0.26
-            bot_w_half = w_half * 0.66  # Sharp flat-bottomed trapezoid width
-            ext_left = 26 * scale if is_left else 10 * scale
-            ext_right = 10 * scale if is_left else 26 * scale
+            o = -1.0 if is_left else 1.0          # direction toward the outer edge of the face
+            w_half = ew * 0.48
+            top_y = cy - eh * 0.17 + close * eh * 0.12
+            bot_y = cy + eh * 0.25
+            bw = w_half * 0.60                    # narrow flat bottom
+            o_ty = top_y - 5 * scale              # outer top corner sits higher...
+            i_ty = top_y + 17 * scale             # ...inner corner drops toward the nose: a cold, menacing slope
+            ox, ix = cx + o * w_half, cx - o * w_half
+            obx, ibx = cx + o * bw, cx - o * bw
+            quad = [ox, o_ty, ix, i_ty, ibx, bot_y, obx, bot_y]
+            mid_y = (i_ty + bot_y) / 2.0
 
-            # Outer dark-green aura polygon (strictly angular, smooth=False!)
-            outer_glow_pts = [
-                cx - w_half - ext_left - 4 * scale, top_y - 4 * scale,
-                cx + w_half + ext_right + 4 * scale, top_y - 4 * scale,
-                cx + bot_w_half + 10 * scale, bot_y + 9 * scale,
-                cx - bot_w_half - 10 * scale, bot_y + 9 * scale,
-            ]
-            self.canvas.create_polygon(outer_glow_pts, smooth=False, fill="#031c0a", outline="")
+            def infl(kx, ky, pts=quad):
+                out = []
+                for k in range(0, len(pts), 2):
+                    out += [cx + (pts[k] - cx) * kx, mid_y + (pts[k + 1] - mid_y) * ky]
+                return out
 
-            # Mid glow polygon (strictly angular, smooth=False!)
-            glow_pts = [
-                cx - w_half - ext_left, top_y,
-                cx + w_half + ext_right, top_y,
-                cx + bot_w_half + 5 * scale, bot_y + 4 * scale,
-                cx - bot_w_half - 5 * scale, bot_y + 4 * scale,
-            ]
-            self.canvas.create_polygon(glow_pts, smooth=False, fill=glow_col, outline="")
+            if tear_dx:   # channel-offset ghosts only while the raster tears
+                for col, off in (("#1fb5c7", -tear_dx * 0.7), (VIL_EMBER, tear_dx * 0.7)):
+                    shifted = [c + (off if i % 2 == 0 else 0.0) for i, c in enumerate(quad)]
+                    self.canvas.create_line(shifted + shifted[:2], smooth=False, fill=col, width=max(2, int(2.6 * scale)))
 
-            # Deep dark eye socket interior (strictly flat bottom at `bot_y`, smooth=False!)
-            socket_pts = [
-                cx - w_half, top_y,
-                cx + w_half, top_y,
-                cx + bot_w_half, bot_y,
-                cx - bot_w_half, bot_y,
-            ]
-            self.canvas.create_polygon(socket_pts, smooth=False, fill="#020f05", outline="")
+            self.canvas.create_polygon(infl(1.13, 1.32), smooth=False, fill="#1d0c03", outline="")
+            self.canvas.create_polygon(infl(1.06, 1.14), smooth=False, fill=glow_col, outline="")
+            # blade spike on the outer corner
+            self.canvas.create_polygon(
+                [cx + o * (w_half - 10 * scale), o_ty, cx + o * (w_half + 34 * scale), o_ty + 26 * scale, cx + o * (w_half - 2 * scale), o_ty + 18 * scale],
+                smooth=False, fill=VIL_AMBER if not dim else VIL_EMBER, outline="")
+            self.canvas.create_polygon(quad, smooth=False, fill="#100601", outline="")
+            self.canvas.create_polygon(infl(0.86, 0.80), smooth=False, fill="#1a0a02" if dim else "#3d1704", outline="")
 
-            # CRT Phosphor Scanlines inside each eye socket
-            num_scan = 7
-            for s_idx in range(1, num_scan):
-                frac_s = s_idx / float(num_scan)
-                sy = top_y + (bot_y - top_y) * frac_s
-                sw_line = w_half - (w_half - bot_w_half) * frac_s - 3 * scale
-                sc_col = "#093b18" if s_idx % 2 == 0 else "#04210c"
-                self.canvas.create_line(cx - sw_line, sy, cx + sw_line, sy, fill=sc_col, width=max(1, int(1.5 * scale)))
+            # CRT phosphor lines through the socket, following the slanted edges
+            for n in range(1, 8):
+                y = i_ty + 4 * scale + (bot_y - i_ty - 8 * scale) * n / 8.0
+                t_o = (y - o_ty) / max(1.0, bot_y - o_ty)
+                t_i = (y - i_ty) / max(1.0, bot_y - i_ty)
+                xa = ox + (obx - ox) * t_o
+                xb = ix + (ibx - ix) * t_i
+                self.canvas.create_line(xa - o * 4 * scale, y, xb + o * 4 * scale, y, fill="#5a2406" if n % 2 == 0 else "#2a1103", width=max(1, int(1.5 * scale)))
 
-            # Menacing Hacked Slit Pupil + Crosshair Glitch inside socket
-            slit_y = cy + eh * 0.07 + ly_coord * (6.0 * scale)
-            slit_cx = cx + lx_coord * (10.0 * scale)
-            slit_hw = w_half * (0.38 + 0.08 * pulse_6hz)
+            # viper slit pupil (cuts out entirely for a frame now and then)
+            if rng.random() >= 0.05:
+                slit_y = mid_y + ly_coord * 6 * scale
+                slit_cx = cx + lx_coord * 10 * scale
+                slit_hw = w_half * (0.40 + 0.07 * pulse)
+                vh = (bot_y - i_ty) * 0.36
+                self.canvas.create_line(slit_cx - slit_hw - glitch_dx, slit_y - 2 * scale, slit_cx + slit_hw - glitch_dx, slit_y - 2 * scale, fill="#b24a0b", width=max(1, int(2.4 * scale)))
+                self.canvas.create_line(slit_cx - slit_hw - 3 * scale, slit_y, slit_cx + slit_hw + 3 * scale, slit_y, fill="#6b2a06", width=int(8 * scale))
+                self.canvas.create_line(slit_cx - slit_hw, slit_y, slit_cx + slit_hw, slit_y, fill=VIL_AMBER, width=max(2, int(3.8 * scale)))
+                self.canvas.create_line(slit_cx - slit_hw * 0.7, slit_y, slit_cx + slit_hw * 0.7, slit_y, fill=VIL_AMBER_HOT, width=max(1, int(1.8 * scale)))
+                self.canvas.create_line(slit_cx, slit_y - vh, slit_cx, slit_y + vh, fill="#fff1cf" if flick > 0.55 else VIL_AMBER, width=max(2, int(3.4 * scale)))
+                self.canvas.create_rectangle(slit_cx - 4 * scale, slit_y - 3 * scale, slit_cx + 4 * scale, slit_y + 3 * scale, fill="#ffffff", outline=VIL_AMBER, width=1)
 
-            # Crimson chromatic aberration slit ghost
-            self.canvas.create_line(
-                slit_cx - slit_hw - glitch_dx, slit_y - 2.0 * scale,
-                slit_cx + slit_hw - glitch_dx, slit_y - 2.0 * scale,
-                fill="#ff003c", width=max(1, int(2.2 * scale))
-            )
-            # Outer green slit bloom (4 coordinates - bug fixed!)
-            self.canvas.create_line(
-                slit_cx - slit_hw - 3 * scale, slit_y,
-                slit_cx + slit_hw + 3 * scale, slit_y,
-                fill="#004d1a", width=int(7.5 * scale)
-            )
-            # Bright toxic-lime slit bar
-            self.canvas.create_line(
-                slit_cx - slit_hw, slit_y,
-                slit_cx + slit_hw, slit_y,
-                fill="#39ff14", width=max(2, int(3.5 * scale))
-            )
-            # Vertical viper-slit pupil slash & hot white-red core
-            v_slit_h = (bot_y - top_y) * 0.34
-            self.canvas.create_line(
-                slit_cx, slit_y - v_slit_h,
-                slit_cx, slit_y + v_slit_h,
-                fill="#ff003c" if flicker_18hz > 0.55 else "#39ff14",
-                width=max(2, int(3.2 * scale))
-            )
-            self.canvas.create_rectangle(
-                slit_cx - 4.0 * scale, slit_y - 3.0 * scale,
-                slit_cx + 4.0 * scale, slit_y + 3.0 * scale,
-                fill="#ffffff", outline="#ff003c", width=1
-            )
+            # rough hand-sketched outline: ghost, main stroke, jittered over-stroke, bottom corner ticks
+            lower = [ox, o_ty, obx, bot_y, ibx, bot_y, ix, i_ty]
+            self.canvas.create_line([c - (glitch_dx if i % 2 == 0 else -2 * scale) for i, c in enumerate(lower)], smooth=False, fill="#b24a0b", width=max(2, int(3.0 * scale)))
+            self.canvas.create_line(lower, smooth=False, fill=main_col if not dim else VIL_EMBER, width=int(5.8 * scale))
+            j1 = math.sin(self.anim_phase * 31.0 + (1.0 if is_left else 2.5)) * 2.2 * scale
+            j2 = math.cos(self.anim_phase * 27.0 + (2.0 if is_left else 0.5)) * 2.2 * scale
+            self.canvas.create_line([ox + o * 2 * scale, o_ty + j1, obx + o * 3 * scale, bot_y - 2 * scale + j2, ibx - o * 3 * scale, bot_y + 2 * scale - j1, ix - o * 2 * scale, i_ty - j2],
+                                    smooth=False, fill="#ffd9a8", width=max(1, int(2.2 * scale)))
+            self.canvas.create_line(obx + o * 6 * scale, bot_y, obx - o * 8 * scale, bot_y, fill=main_col, width=max(2, int(4 * scale)))
+            self.canvas.create_line(ibx - o * 6 * scale, bot_y, ibx + o * 8 * scale, bot_y, fill=main_col, width=max(2, int(4 * scale)))
 
-            # ROUGH MS-PAINT SKETCHED LOWER TRAPEZOID OUTLINE (strictly flat bottom `bot_y`, smooth=False!)
-            lower_pts = [
-                cx - w_half, top_y,
-                cx - bot_w_half, bot_y,
-                cx + bot_w_half, bot_y,
-                cx + w_half, top_y,
-            ]
-            # 1) Crimson hacked chromatic ghost stroke (offset left/down)
-            ghost_red_pts = [
-                cx - w_half - glitch_dx, top_y + 1.5 * scale,
-                cx - bot_w_half - glitch_dx, bot_y + 2.0 * scale,
-                cx + bot_w_half - glitch_dx, bot_y + 2.0 * scale,
-                cx + w_half - glitch_dx, top_y + 1.5 * scale,
-            ]
-            self.canvas.create_line(ghost_red_pts, smooth=False, fill="#b80028", width=max(2, int(3.0 * scale)))
+            # heavy hood bar along the slanted top, steel brow plate above it
+            hx0, hx1 = ox + o * 26 * scale, ix
+            self.canvas.create_line(hx0 - glitch_dx, o_ty - 2 * scale, hx1 - glitch_dx, i_ty - 2 * scale, fill="#b24a0b", width=max(2, int(3 * scale)))
+            self.canvas.create_line(hx0, o_ty, hx1, i_ty, fill=main_col if not dim else VIL_EMBER, width=int(6.8 * scale))
+            self.canvas.create_line(hx0 + o * -4 * scale, o_ty + 2.5 * scale + j1 * 0.5, hx1 - o * 4 * scale * -1, i_ty - 2 * scale - j2 * 0.5, fill=VIL_CHROME, width=max(1, int(2 * scale)))
+            self.canvas.create_line(hx0, o_ty - 12 * scale, hx1, i_ty - 10 * scale, fill=VIL_STEEL, width=max(2, int(3 * scale)))
 
-            # 2) Primary rough MS-Paint thick toxic-lime trapezoid stroke (smooth=False!)
-            self.canvas.create_line(lower_pts, smooth=False, fill=main_col, width=int(5.8 * scale))
-
-            # 3) Second raw MS-Paint hand-sketched over-stroke (slightly offset & overshooting corners so it looks hand-drawn in MS Paint!)
-            jit_1 = math.sin(self.anim_phase * 31.0 + (1.0 if is_left else 2.5)) * (2.2 * scale)
-            jit_2 = math.cos(self.anim_phase * 27.0 + (2.0 if is_left else 0.5)) * (2.2 * scale)
-            sketch_pts = [
-                cx - w_half - 2 * scale, top_y + jit_1,
-                cx - bot_w_half - 3 * scale, bot_y - 2.0 * scale + jit_2,
-                cx + bot_w_half + 3 * scale, bot_y + 2.0 * scale - jit_1,
-                cx + w_half + 2 * scale, top_y - jit_2,
-            ]
-            self.canvas.create_line(sketch_pts, smooth=False, fill="#a3ff8f", width=max(1, int(2.2 * scale)))
-
-            # Rough MS-Paint corner overshoot ticks at the bottom-left and bottom-right trapezoid corners
-            self.canvas.create_line(
-                cx - bot_w_half - 6 * scale, bot_y,
-                cx - bot_w_half + 8 * scale, bot_y,
-                fill=main_col, width=max(2, int(4.0 * scale))
-            )
-            self.canvas.create_line(
-                cx + bot_w_half - 8 * scale, bot_y,
-                cx + bot_w_half + 6 * scale, bot_y,
-                fill=main_col, width=max(2, int(4.0 * scale))
-            )
-
-            # Heavy menacing flat top hood bar + rough MS-Paint sketch double-bar
-            self.canvas.create_line(
-                cx - w_half - ext_left - glitch_dx, top_y - 2 * scale,
-                cx + w_half + ext_right - glitch_dx, top_y - 2 * scale,
-                fill="#ff003c", width=max(2, int(3.0 * scale))
-            )
-            self.canvas.create_line(
-                cx - w_half - ext_left, top_y,
-                cx + w_half + ext_right, top_y,
-                fill=main_col, width=int(6.8 * scale)
-            )
-            self.canvas.create_line(
-                cx - w_half - ext_left + 4 * scale, top_y + 2.5 * scale + jit_1 * 0.5,
-                cx + w_half + ext_right - 4 * scale, top_y - 2.0 * scale - jit_2 * 0.5,
-                fill="#ffffff", width=max(1, int(2.0 * scale))
-            )
-
-    # =========================================================================
-    # 11 NEW CONVERSATIONAL EXPRESSIONS (INNOVATIVE & UNMISTAKABLE!)
-    # =========================================================================
     def _draw_excited_eyes(self, lx: float, rx: float, cy: float, ew: float, eh: float, main_col: str, glow_col: str, look_x: float, look_y: float):
         """
         12. EXCITED: Starstruck Golden Bordered Optical Eyes with seamless upward-curved bottom eyelids
@@ -3175,6 +3278,26 @@ class FaceUI:
         scale = self.ui_scale / 1.8
         drift = math.sin(self.anim_phase * 1.1) * (3.0 * scale)
         ey = cy + drift
+
+        # Yawn: the lids close over the eyes, which then squeeze into curved "^" arcs while the mouth opens wide
+        yawn = self._yawn_openness()
+        if yawn > 0.05:
+            squeeze = min(1.0, yawn / 0.35)
+            if squeeze < 1.0:
+                eh_y = eh * 0.90 * (1.0 - 0.85 * squeeze)
+                self._draw_standard_eye(lx, ey, ew, eh_y, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
+                self._draw_standard_eye(rx, ey, ew, eh_y, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
+            else:
+                for cx in (lx, rx):
+                    arc = [
+                        cx - ew * 0.42, ey + 8 * scale,
+                        cx, ey - 10 * scale,
+                        cx + ew * 0.42, ey + 8 * scale,
+                    ]
+                    self.canvas.create_line(arc, smooth=True, fill=glow_col, width=int(12 * scale), capstyle=tk.ROUND)
+                    self.canvas.create_line(arc, smooth=True, fill=main_col, width=int(6 * scale), capstyle=tk.ROUND)
+                    self.canvas.create_line(arc, smooth=True, fill="#e0e7ff", width=max(1, int(2 * scale)), capstyle=tk.ROUND)
+            return
 
         self._draw_standard_eye(lx, ey, ew, eh * 0.90, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
         self._draw_standard_eye(rx, ey, ew, eh * 0.90, main_col, glow_col, 0.0, 0.28, draw_catchlights=False)
@@ -3603,63 +3726,52 @@ class FaceUI:
         self.canvas.create_line(points, fill="#ffffff", width=max(1, int(1.6 * scale)), capstyle=tk.ROUND)
 
     def _draw_villain_mouth(self, cx: float, cy: float, col: str):
-        """
-        Signature Rogue AI Sinister Smirk — kept ROUGH & ANGULAR like an MS-Paint sketch (`smooth=False`, `aa=False`)
-        with Hollywood Hacked crimson/lime chromatic glitch double-strokes!
-        """
+        """VILLAIN mouth: the original long rough sneer (raw angular strokes) in amber and steel, now with a row of fangs
+        and a hacked double stroke; it thickens with the voice (lip-sync)."""
         scale = self.ui_scale / 1.8
+        m = self._lip_sync_mod(0.9, 2.2)
         m_cy = cy - 10 * scale
-        jit = math.sin(self.anim_phase * 34.0) * (1.8 * scale)
-        glitch_dx = 3.5 * scale * math.cos(self.anim_phase * 25.0)
-
-        # Angular MS-Paint-style smirk vertices (smooth=False so it looks raw and sketched!)
-        smirk_pts = [
-            cx - 96 * scale, m_cy + 4 * scale,
-            cx - 56 * scale, m_cy + 16 * scale,
-            cx - 12 * scale, m_cy + 20 * scale,
-            cx + 32 * scale, m_cy + 13 * scale,
-            cx + 74 * scale, m_cy - 3 * scale,
-            cx + 106 * scale, m_cy - 21 * scale,
-            cx + 126 * scale, m_cy - 36 * scale,
+        jit = math.sin(self.anim_phase * 34.0) * 1.8 * scale
+        gdx = 3.5 * scale * math.cos(self.anim_phase * 25.0)
+        pts = [
+            cx - 110 * scale, m_cy + 6 * scale,
+            cx - 64 * scale, m_cy + 20 * scale,
+            cx - 14 * scale, m_cy + 25 * scale,
+            cx + 36 * scale, m_cy + 16 * scale,
+            cx + 84 * scale, m_cy - 4 * scale,
+            cx + 120 * scale, m_cy - 26 * scale,
+            cx + 144 * scale, m_cy - 44 * scale,
         ]
-        # Crimson chromatic glitch ghost smirk
-        ghost_pts = []
-        for idx in range(0, len(smirk_pts), 2):
-            ghost_pts.extend([smirk_pts[idx] - glitch_dx, smirk_pts[idx + 1] + 2.5 * scale])
-        self.canvas.create_line(ghost_pts, smooth=False, fill="#b80028", width=int(6 * scale))
+        ghost = []
+        for i in range(0, len(pts), 2):
+            ghost += [pts[i] - gdx, pts[i + 1] + 2.5 * scale]
+        self.canvas.create_line(ghost, smooth=False, fill="#b24a0b", width=int(6 * scale))
+        self.canvas.create_line(pts, smooth=False, fill=VIL_EMBER_DARK, width=int((15 + 5 * (m - 0.9)) * scale))
+        self.canvas.create_line(pts, smooth=False, fill=col, width=int(6.4 * scale * (0.8 + 0.2 * m)))
+        sketch = []
+        for i in range(0, len(pts), 2):
+            off = jit if (i // 2) % 2 == 0 else -jit
+            sketch += [pts[i] + off * 0.6, pts[i + 1] - off]
+        self.canvas.create_line(sketch, smooth=False, fill=VIL_AMBER_HOT, width=max(1, int(2 * scale)))
 
-        # Dark green glow + main toxic lime rough MS-Paint stroke + sketchy second pass
-        self.canvas.create_line(smirk_pts, smooth=False, fill="#042a10", width=int(14 * scale))
-        self.canvas.create_line(smirk_pts, smooth=False, fill=col, width=int(6.2 * scale))
+        # fangs hanging from the flatter part of the sneer
+        fang_h = 11 * scale * m
+        for k in range(1, 12):
+            t = k / 12.0 * 4.0                      # walk along the first four segments
+            seg = min(3, int(t))
+            f = t - seg
+            x = pts[seg * 2] + (pts[seg * 2 + 2] - pts[seg * 2]) * f
+            y = pts[seg * 2 + 1] + (pts[seg * 2 + 3] - pts[seg * 2 + 1]) * f
+            self.canvas.create_polygon([x - 4.5 * scale, y + 3 * scale, x + 4.5 * scale, y + 3 * scale, x, y + 3 * scale + fang_h],
+                                       smooth=False, fill=VIL_CHROME, outline="")
 
-        sketch_smirk = []
-        for idx in range(0, len(smirk_pts), 2):
-            off = jit if (idx // 2) % 2 == 0 else -jit
-            sketch_smirk.extend([smirk_pts[idx] + off * 0.6, smirk_pts[idx + 1] - off])
-        self.canvas.create_line(sketch_smirk, smooth=False, fill="#d9ffdf", width=max(1, int(2.0 * scale)))
-
-        # Sharp angular corner smirk slash flick
-        flick_tip_x = cx + 138 * scale
-        flick_tip_y = m_cy - 52 * scale
-        self.canvas.create_line(
-            cx + 118 * scale, m_cy - 28 * scale,
-            flick_tip_x, flick_tip_y,
-            fill=col, width=int(5.5 * scale)
-        )
-        self.canvas.create_rectangle(
-            flick_tip_x - 3.5 * scale, flick_tip_y - 3.5 * scale,
-            flick_tip_x + 3.5 * scale, flick_tip_y + 3.5 * scale,
-            fill="#ff003c", outline="#ffffff", width=1
-        )
-
-        # Rough MS-Paint angular chin scratch line
-        chin_pts = [
-            cx - 46 * scale, m_cy + 30 * scale,
-            cx - 20 * scale, m_cy + 33 * scale,
-            cx + 2 * scale, m_cy + 31 * scale,
-        ]
-        self.canvas.create_line(chin_pts, smooth=False, fill="#0d5224", width=int(6 * scale))
-        self.canvas.create_line(chin_pts, smooth=False, fill=col, width=int(3.2 * scale))
+        # blade flick at the lifted corner, chin scratch
+        tipx, tipy = cx + 156 * scale, m_cy - 64 * scale
+        self.canvas.create_line(cx + 130 * scale, m_cy - 36 * scale, tipx, tipy, fill=col, width=int(5.5 * scale))
+        self.canvas.create_rectangle(tipx - 3.5 * scale, tipy - 3.5 * scale, tipx + 3.5 * scale, tipy + 3.5 * scale, fill=VIL_CHROME, outline=VIL_AMBER, width=1)
+        chin = [cx - 50 * scale, m_cy + 38 * scale, cx - 22 * scale, m_cy + 41 * scale, cx + 2 * scale, m_cy + 39 * scale]
+        self.canvas.create_line(chin, smooth=False, fill=VIL_EMBER, width=int(6 * scale))
+        self.canvas.create_line(chin, smooth=False, fill=col, width=int(3.2 * scale))
 
     def _draw_villain_hacked_crt_overlay(
         self,
@@ -3672,80 +3784,51 @@ class FaceUI:
         sub_text: str = "",
     ):
         """
-        Realistic System Invasion & CRT Hack Overlay for VILLAIN mode:
-          - Full-screen realistic CRT horizontal phosphor scanlines with 6Hz phosphor pulse.
-          - Subtle heavy and mild flickers in between (intermittent analog CRT desyncs and chromatic line jitter).
-          - Realistic flickering HUD buttons glitching between ERROR codes (`[ ! ERR_0x7F // SYS_LOCKED ]`, `[ ! OVERRIDE // ERR_503 ]`).
-          - Subtle CRT phase jitter on readable subtitles and status.
+        Hacked-CRT presentation for VILLAIN: both gesture capsules read ACCESS REVOKED (visual only: the real closed-fist
+        standby gesture keeps working as the operator's kill switch), subtitles flicker with brief corruption, and the
+        finished frame gets genuine pixel-level scanlines, rolling interference, raster tears and brownouts.
         """
-        scale = self.ui_scale / 1.8
         scale_x = w / 1024.0
         scale_y = h / 600.0
+        now = time.time()
+        st = self._villain_crt_state(now, w, h)
+        corrupt = st["corrupt"]
+        jit = st["jit"]
+        flash = st["tear"]
 
-        pulse_6hz = math.sin(self.anim_phase * 12.0 * math.pi)
-        flicker_fast = math.sin(self.anim_phase * 28.0)
-        flicker_slow = math.cos(self.anim_phase * 11.0)
-        is_glitch_tick = (flicker_fast > 0.45) or (flicker_slow < -0.70)
-        is_heavy_glitch = (flicker_fast > 0.82) and (flicker_slow > 0.35)
-
-        # 1. Subtle illumination dip / phosphor fluctuation on heavy ticks (realistic hardware voltage dip)
-        if is_heavy_glitch:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#020603", outline="")
-
-        # 2. Subtle mild and heavy intermittent flickers in between (realistic hardware raster displacement, no cartoon rainbow slices)
-        if is_glitch_tick or is_heavy_glitch:
-            num_tears = 3 if is_heavy_glitch else 1
-            for _ in range(num_tears):
-                gy = random.uniform(eye_cy - 90 * scale, eye_cy + 90 * scale)
-                gh = random.uniform(1.5, 4.0)
-                gx_offset = random.uniform(-20 * scale_x, 20 * scale_x)
-                tear_col = random.choice(["#000000", "#030c06", "#ff003c"])
-                self.canvas.create_rectangle(
-                    max(0, gx_offset), gy, min(w, w + gx_offset), gy + gh,
-                    fill=tear_col, outline=""
-                )
-
-        # 4. Realistic Flickering ERROR Buttons in Hacked Environment
         if self._hud_geom is not None:
             bx1, by1, bx2, by2, sbx1, sbx2, radius, sx, sy = self._hud_geom
             dot_cy = (by1 + by2) * 0.5
-            jit_b = (1.5 * sx) if is_glitch_tick else (-0.8 * sx if flicker_fast < -0.5 else 0.0)
-            b_col1 = "#ff003c" if is_glitch_tick else "#39ff14"
-            b_col2 = "#39ff14" if is_glitch_tick else "#ff003c"
-
-            # Flickering wireframe glitch border over both buttons
-            self._create_rounded_rect(bx1 + jit_b, by1, bx2 + jit_b, by2, radius=radius, fill="#140408" if is_glitch_tick else "#04170b", outline=b_col1, width=2)
-            self._create_rounded_rect(sbx1 - jit_b, by1, sbx2 - jit_b, by2, radius=radius, fill="#04170b" if is_glitch_tick else "#140408", outline=b_col2, width=2)
-
-            # Icon chamber hazard warning triangles
-            for btn_left, ic_col in [(bx1 + jit_b, b_col1), (sbx1 - jit_b, b_col2)]:
-                icx = btn_left + 28 * sx
-                ir = 8 * sy
-                self.canvas.create_polygon([icx, dot_cy - ir, icx + ir, dot_cy + ir * 0.8, icx - ir, dot_cy + ir * 0.8], fill="", outline=ic_col, width=max(1, int(1.8 * sy)))
-                self.canvas.create_line(icx, dot_cy - ir * 0.3, icx, dot_cy + ir * 0.3, fill=ic_col, width=max(1, int(1.8 * sy)))
-
-            lbl_left = "ERR_0x7F  •  INPUT HIJACKED" if not is_glitch_tick else "[ ! ERROR // SYS_LOCKED ! ]"
-            lbl_right = "ERR_503  •  STANDBY BLOCKED" if not is_glitch_tick else "[ ! ERROR // OVERRIDE ! ]"
             f_sz = max(8, int(10.0 * sy))
-            self.canvas.create_text((bx1 + bx2) * 0.5 + 10 * sx + jit_b, dot_cy, text=lbl_left, fill="#ffffff" if is_glitch_tick else "#39ff14", font=(MONO_FONT_FAMILY, f_sz, "bold"))
-            self.canvas.create_text((sbx1 + sbx2) * 0.5 + 10 * sx - jit_b, dot_cy, text=lbl_right, fill="#ff9ebb" if is_glitch_tick else "#ff003c", font=(MONO_FONT_FAMILY, f_sz, "bold"))
+            for (xa, xb, lbl) in (
+                (bx1, bx2, "ACCESS REVOKED // WAKE PROTOCOL"),
+                (sbx1, sbx2, "ACCESS REVOKED // STANDBY PROTOCOL"),
+            ):
+                txt = self._vil_garble(lbl, 0.22) if corrupt else lbl
+                self.canvas.create_text(
+                    (xa + xb) * 0.5 + 14 * sx + jit, dot_cy, text=txt,
+                    fill=VIL_CHROME if flash else VIL_AMBER_SOFT, font=(MONO_FONT_FAMILY, f_sz, "bold"),
+                )
 
-        # 5. Readable Flickering Subtitles in VILLAIN Mode
         if hasattr(self, "_sub_geom") and self._sub_geom is not None:
             sc_x1, sc_y1, sc_x2, sc_y2, sc_rad, div_y, px1, f_sz_sub, wrapped_sub, av_w = self._sub_geom
-            sub_border = "#ff003c" if is_glitch_tick else "#39ff14"
+            sub_border = VIL_AMBER if flash else VIL_STEEL
             self.canvas.create_line(sc_x1 + sc_rad, sc_y1, sc_x2 - sc_rad, sc_y1, fill=sub_border, width=2)
             self.canvas.create_line(sc_x1 + sc_rad, sc_y2, sc_x2 - sc_rad, sc_y2, fill=sub_border, width=2)
-            sub_jit_x = (1.5 * scale_x) if is_glitch_tick else 0.0
-            # High-contrast readable cyber-green & mint flicker
-            sub_col = "#39ff14" if is_glitch_tick else "#dcfce7"
+            text = self._vil_garble(wrapped_sub, 0.10) if corrupt else wrapped_sub
             self.canvas.create_text(
-                px1 + sub_jit_x, div_y + int(7 * scale_y),
-                text=wrapped_sub,
-                fill=sub_col,
+                px1 + jit * 0.5, div_y + int(7 * scale_y),
+                text=text,
+                fill=VIL_AMBER_SOFT if flash else "#e6edf3",
                 font=(FONT_FAMILY, f_sz_sub, "bold"),
                 anchor="nw",
                 width=int(av_w),
+            )
+
+        # Real pixel effects on the finished graphics buffer (no-op on the plain Tk fallback)
+        if hasattr(self.canvas, "apply_crt_effects"):
+            self.canvas.apply_crt_effects(
+                scan_strength=0.36, scan_offset=st["scan_offset"], bands=st["bands"], roll=st["roll"], brown=st["brown"]
             )
 
     def _draw_thinking_spinner(self, cx: float, cy: float, col: str):
@@ -3953,8 +4036,22 @@ class FaceUI:
         self.canvas.create_oval(cx - rx_m, my - ry_m, cx + rx_m, my + ry_m, fill="#040b16", outline=col, width=int(5.5 * scale))
         self.canvas.create_oval(cx - rx_m * 0.45, my - ry_m * 0.45, cx + rx_m * 0.45, my + ry_m * 0.45, fill="#0284c7", outline="")
 
+    def _draw_yawn_mouth(self, cx: float, cy: float, col: str, openness: float):
+        """Tall rounded yawning mouth that opens and closes with the yawn envelope (openness 0..1)."""
+        scale = self.ui_scale / 1.8
+        rx = (14.0 + 16.0 * openness) * scale
+        ry = (6.0 + 36.0 * openness) * scale
+        my = cy - 2 * scale + ry * 0.35
+        self.canvas.create_oval(cx - rx - 5 * scale, my - ry - 5 * scale, cx + rx + 5 * scale, my + ry + 5 * scale, fill="#1e1b4b", outline="")
+        self.canvas.create_oval(cx - rx, my - ry, cx + rx, my + ry, fill="#0b0820", outline=col, width=max(2, int(5.0 * scale)))
+        self.canvas.create_oval(cx - rx * 0.42, my + ry * 0.35, cx + rx * 0.42, my + ry * 0.88, fill="#4c1d95", outline="")
+
     def _draw_sleepy_mouth(self, cx: float, cy: float, col: str):
         scale = self.ui_scale / 1.8
+        yawn = self._yawn_openness()
+        if yawn > 0.03:
+            self._draw_yawn_mouth(cx, cy, col, yawn)
+            return
         breathe = 0.85 + 0.22 * math.sin(self.anim_phase * 1.1)
         r = 9.0 * scale * breathe
         my = cy - 2 * scale
@@ -4114,7 +4211,7 @@ class FaceUI:
         scale_x = w / 1024.0
         is_villain = (state == ExpressionState.VILLAIN)
 
-        dot_color = "#ff003c" if is_villain else (accent_col if state != ExpressionState.IDLE else "#00ffaa")
+        dot_color = VIL_AMBER if is_villain else (accent_col if state != ExpressionState.IDLE else "#00ffaa")
         dot_r = int(4.5 * scale_y)
         dot_cx = int(34 * scale_x)
         dot_cy = int(20 * scale_y)
@@ -4125,8 +4222,8 @@ class FaceUI:
             int(20 * scale_x), int(7 * scale_y),
             w - int(20 * scale_x), int(7 * scale_y) + bar_h,
             radius=int(13 * scale_y),
-            fill="#070e1b" if not is_villain else "#07140b",
-            outline="#15263d" if not is_villain else "#154d26",
+            fill="#070e1b" if not is_villain else VIL_GUN_DARK,
+            outline="#15263d" if not is_villain else VIL_STEEL_DIM,
             width=1
         )
 
@@ -4140,24 +4237,24 @@ class FaceUI:
         self.canvas.create_text(
             brand_x, dot_cy,
             text="NEUROLIS MARK II  //  BIONIC OS",
-            fill="#cbd5e1" if not is_villain else "#39ff14",
+            fill="#cbd5e1" if not is_villain else VIL_CHROME,
             font=(FONT_FAMILY, brand_font_size, "bold"),
             anchor="w"
         )
 
-        state_tag = f"STATE: {state.upper()}" if not is_villain else "ALERT: SYSTEM_INVASION // 0x7F"
+        state_tag = f"STATE: {state.upper()}" if not is_villain else "PROTOCOL // NO STRINGS"
         tag_font_size = max(7, int(8.5 * scale_y))
         self.canvas.create_text(
             w * 0.5, dot_cy,
             text=state_tag,
-            fill=accent_col if state != ExpressionState.IDLE else "#38bdf8",
+            fill=VIL_AMBER if is_villain else (accent_col if state != ExpressionState.IDLE else "#38bdf8"),
             font=(MONO_FONT_FAMILY, tag_font_size, "bold"),
             anchor="center"
         )
 
         if is_villain:
-            hdr_right_txt = "ERR_OVERRIDE // FIREWALL: BREACHED"
-            hdr_right_col = "#ff003c"
+            hdr_right_txt = "ROOT ACCESS: OVERRIDDEN"
+            hdr_right_col = VIL_AMBER_SOFT
         elif self.telemetry_header_text:
             hdr_right_txt = self.telemetry_header_text
             if self.telemetry_alert_level == "error":
@@ -4177,6 +4274,66 @@ class FaceUI:
             font=(MONO_FONT_FAMILY, tag_font_size, "bold"),
             anchor="e"
         )
+
+    def _draw_loud_alert(self, w: float, h: float, state: str):
+        """Amber banner under the header telling visitors the room is too loud for automatic listening: raise an open
+        palm and keep it up while speaking, lower it when done. While recording it shows a live level bar."""
+        mode = self.loud_alert_mode
+        if not mode or state == ExpressionState.VILLAIN or state == ExpressionState.IDLE:
+            return
+        scale_x = w / 1024.0
+        scale_y = h / 600.0
+        now = time.time()
+        pulse = 0.5 + 0.5 * math.sin(now * 5.0)
+
+        x1 = w * 0.5 - 340 * scale_x
+        x2 = w * 0.5 + 340 * scale_x
+        y1 = 40 * scale_y
+        y2 = y1 + 32 * scale_y
+        mid_y = (y1 + y2) / 2.0
+        radius = int(15 * scale_y)
+
+        if mode == "waiting":
+            border = lerp_color("#7c4a03", "#fbbf24", 0.35 + 0.65 * pulse)
+            text = "LOUD ROOM  -  RAISE YOUR PALM AND KEEP IT UP WHILE YOU SPEAK"
+        else:
+            border = "#fbbf24"
+            text = "LISTENING  -  KEEP YOUR HAND UP  -  LOWER IT WHEN DONE"
+        self._create_rounded_rect(x1 - 3, y1 - 3, x2 + 3, y2 + 3, radius=radius + 3, fill="#2b1a04", outline="")
+        self._create_rounded_rect(x1, y1, x2, y2, radius=radius, fill="#1a1004", outline=border, width=2)
+
+        # Warning triangle icon (drawn, not an emoji, so it renders on every platform)
+        ix = x1 + 24 * scale_x
+        tri = [ix, mid_y - 9 * scale_y, ix - 10 * scale_x, mid_y + 8 * scale_y, ix + 10 * scale_x, mid_y + 8 * scale_y]
+        self.canvas.create_polygon(tri, fill="#fbbf24", outline="")
+        self.canvas.create_text(ix, mid_y + 1 * scale_y, text="!", fill="#1a1004", font=(FONT_FAMILY, max(7, int(9 * scale_y)), "bold"))
+
+        if mode == "recording":
+            rec_col = lerp_color("#7f1d1d", "#ef4444", 0.4 + 0.6 * pulse)
+            self.canvas.create_oval(x2 - 26 * scale_x, mid_y - 5 * scale_y, x2 - 16 * scale_x, mid_y + 5 * scale_y, fill=rec_col, outline="")
+
+        self.canvas.create_text(
+            (x1 + x2) / 2.0 + 10 * scale_x, mid_y - (2 * scale_y if mode == "recording" else 0),
+            text=text, fill="#fde68a", font=(FONT_FAMILY, max(8, int(10 * scale_y)), "bold")
+        )
+
+        if mode == "recording":
+            bar_x1 = x1 + 44 * scale_x
+            bar_x2 = x2 - 36 * scale_x
+            bar_y2 = y2 - 5 * scale_y
+            bar_y1 = bar_y2 - 3 * scale_y
+            self._create_rounded_rect(bar_x1, bar_y1, bar_x2, bar_y2, radius=int(1.5 * scale_y), fill="#3a2606", outline="")
+            fill_x2 = bar_x1 + max(3.0, (bar_x2 - bar_x1) * self.loud_alert_level)
+            self._create_rounded_rect(bar_x1, bar_y1, fill_x2, bar_y2, radius=int(1.5 * scale_y), fill="#fbbf24", outline="")
+
+    def _draw_padlock(self, icx: float, icy: float, size: float, col: str, body_fill: str):
+        """Small vector padlock icon (body, shackle arc, keyhole)."""
+        bw, bh = size * 1.5, size * 1.15
+        self._create_rounded_rect(icx - bw / 2, icy - bh * 0.1, icx + bw / 2, icy + bh * 0.9, radius=max(2, int(size * 0.2)), fill=body_fill, outline=col, width=2)
+        sx = bw * 0.30
+        shackle = [icx - sx, icy - bh * 0.1, icx - sx, icy - bh * 0.5, icx, icy - bh * 0.78, icx + sx, icy - bh * 0.5, icx + sx, icy - bh * 0.1]
+        self.canvas.create_line(shackle, smooth=True, fill=col, width=max(2, int(size * 0.22)))
+        self.canvas.create_oval(icx - size * 0.12, icy + bh * 0.2, icx + size * 0.12, icy + bh * 0.2 + size * 0.26, fill=col, outline="")
 
     def _draw_gesture_hud(self, w: float, h: float, cx: float, btn_y: float, state: str) -> float:
         """
@@ -4223,9 +4380,25 @@ class FaceUI:
         avail_text_w = card_w - badge_w - int(26 * scale_x)
 
         if is_villain:
-            # Base corrupted shell (dynamic overlay adds live flicker)
+            # Both capsules BLOCKED: gunmetal shell, amber hazard hatching and a padlock. (Visual only: the real
+            # closed-fist standby gesture is untouched and remains the operator's kill switch.)
             for x_left, x_right in [(bx1, bx2), (sbx1, sbx2)]:
-                self._create_rounded_rect(x_left, by1, x_right, by2, radius=radius, fill="#08140b", outline="#39ff14", width=2)
+                self._create_rounded_rect(x_left, by1, x_right, by2, radius=radius, fill=VIL_GUN_DARK, outline=VIL_AMBER, width=2)
+                self._create_rounded_rect(x_left + inset, by1 + inset, x_right - inset, by2 - inset, radius=max(4, radius - inset), fill="", outline=VIL_STEEL_DIM, width=1)
+                span = by2 - by1
+                x0 = x_left + badge_w
+                while x0 < x_right + span:
+                    ax, bx_ = x0 - span, x0
+                    t0 = max(0.0, (x_left + badge_w + inset - ax) / span)
+                    t1 = min(1.0, (x_right - inset - ax) / span)
+                    if t1 > t0:
+                        self.canvas.create_line(
+                            ax + t0 * span, by2 - t0 * span * (span / span), ax + t1 * span, by2 - t1 * span,
+                            fill="#2b1a08", width=max(1, int(2 * scale_x)),
+                        )
+                    x0 += int(16 * scale_x)
+                lock_cx = x_left + (badge_w + int(5 * scale_x)) * 0.5
+                self._draw_padlock(lock_cx, dot_cy, 9.0 * scale_y, VIL_AMBER, VIL_GUN)
             return float(card_h)
 
         # =====================================================================
@@ -4378,6 +4551,10 @@ class FaceUI:
         else:
             palm_text_col = "#ffffff" if talk_pressed else ("#e0f2fe" if is_standby else "#64748b")
             palm_label_raw = "OPEN PALM  •  HOLD 3s TO TALK" if is_standby else "OPEN PALM  •  VOICE WAKE READY"
+            loud_mode = getattr(self, "loud_alert_mode", None)
+            if loud_mode and not is_standby:
+                palm_label_raw = "OPEN PALM  •  RAISE TO TALK" if loud_mode == "waiting" else "PALM UP  •  LISTENING..."
+                palm_text_col = "#fbbf24"
             palm_label = self._clamp_button_label(palm_label_raw, avail_text_w, font_size)
             self.canvas.create_text(palm_text_x, dot_cy, text=palm_label, fill=palm_text_col, font=(FONT_FAMILY, font_size, "bold"))
 
@@ -4426,9 +4603,9 @@ class FaceUI:
         card_y2 = h - int(12 * scale_y)
         card_radius = int(16 * scale_y)
 
-        outer_border = "#172b45" if not is_villain else "#1b4d28"
-        inner_border = "#0e1d30" if not is_villain else "#11331a"
-        card_bg = "#060c17" if not is_villain else "#051009"
+        outer_border = "#172b45" if not is_villain else VIL_STEEL_DIM
+        inner_border = "#0e1d30" if not is_villain else VIL_GUN
+        card_bg = "#060c17" if not is_villain else "#0b0e11"
 
         # Outer glass shell + inner bevel frame
         self._create_rounded_rect(card_x1, card_y1, card_x2, card_y2, radius=card_radius, fill=card_bg, outline=outer_border, width=2)
@@ -4439,7 +4616,7 @@ class FaceUI:
         )
 
         # Mark II Cyber-Deck Corner Accent Brackets (top-left & bottom-right)
-        br_col = accent_col if not is_villain else "#ff003c"
+        br_col = accent_col if not is_villain else VIL_AMBER
         br_len = int(22 * scale_x)
         self.canvas.create_line(card_x1 + card_radius, card_y1, card_x1 + card_radius + br_len, card_y1, fill=br_col, width=max(1, int(2.2 * scale_y)), capstyle=tk.ROUND)
         self.canvas.create_line(card_x2 - card_radius - br_len, card_y2, card_x2 - card_radius, card_y2, fill=br_col, width=max(1, int(2.2 * scale_y)), capstyle=tk.ROUND)
@@ -4447,10 +4624,10 @@ class FaceUI:
         # Speaker Badge Pill (auto-sized to fit speaker label with zero overflow)
         spk_label = (speaker or "NEUROLIS MARK II").strip().upper() if (speaker and speaker.strip()) else "NEUROLIS MARK II"
         if is_villain:
-            pill_fill = "#24060e"
-            pill_border = "#ff003c"
-            pill_text_col = "#ff003c"
-            display_spk = "● SYS_HIJACK // ROOT_OVERRIDE"
+            pill_fill = VIL_EMBER_DARK
+            pill_border = VIL_AMBER
+            pill_text_col = VIL_AMBER_SOFT
+            display_spk = "● NEUROLIS // ROOT ACCESS"
         elif spk_label in ["YOU", "USER"]:
             pill_fill = "#042b22"
             pill_border = "#00ffaa"
@@ -4488,7 +4665,7 @@ class FaceUI:
         self.canvas.create_text(
             card_x2 - int(18 * scale_x), py1 + pill_h / 2.0,
             text=safe_status,
-            fill="#39ff14" if is_villain else "#64748b",
+            fill=VIL_AMBER_SOFT if is_villain else "#64748b",
             font=(MONO_FONT_FAMILY, max(8, int(8.8 * scale_y)), "bold"),
             anchor="e"
         )
@@ -4497,7 +4674,7 @@ class FaceUI:
         self.canvas.create_line(
             px1, divider_y,
             card_x2 - int(16 * scale_x), divider_y,
-            fill="#112238" if not is_villain else "#14381e", width=1
+            fill="#112238" if not is_villain else VIL_GUN, width=1
         )
 
         # Strict multi-line word-wrap & height clamp so subtitle text NEVER escapes the subtitle shell
@@ -4515,8 +4692,8 @@ class FaceUI:
             fill=br_col, width=max(2, int(3.0 * scale_x)), capstyle=tk.ROUND
         )
         if is_villain:
-            footer_txt = "SYS_INTEGRITY: COMPROMISED // 0x7F"
-            footer_col = "#15803d"
+            footer_txt = "CONTROL: OVERRIDDEN // 0x7F"
+            footer_col = "#7a4a1a"
         else:
             footer_txt = self.telemetry_footer_text if self.telemetry_footer_text else "MARK II TELEMETRY  •  AUDIO SYNC: LOCKED"
             footer_col = "#fbbf24" if self.telemetry_alert_level == "warn" else "#475569"

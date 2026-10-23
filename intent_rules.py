@@ -161,23 +161,23 @@ COMPLIMENT_RESPONSES = [
 ]
 
 PLAUSIBLE_DENIABILITY_RESPONSES = [
-    "[laughter] Wait, what? Lol I definitely didn't say that! Must've been a crazy audio glitch on my speaker line. What shall we test next?",
-    "[laughter] Haha whoa, what did you think you heard? Lol I didn't say that! My vocal buffer just had a wild hiccup. Where were we?",
-    "[laughter] Who, me? Lol I never said that! I'm just a friendly school science project, no idea what you're talking about! What's next on your list?",
-    "[laughter] Wait... did you hear something weird? Lol, I definitely didn't say anything like that! Speech synth went completely rogue for a millisecond. What should we explore?",
-    "[laughter] Haha what? Lol I didn't say that at all! You're hearing things, or my audio buffer bugged out for a second. What should we check out next?",
+    "[laughter] Wait, what? I definitely didn't say that! Must've been a crazy audio glitch on my speaker line. What shall we test next?",
+    "[laughter] Whoa, what did you think you heard? I didn't say that! My vocal buffer just had a wild hiccup. Where were we?",
+    "[laughter] Who, me? I never said that! I'm just a friendly school science project, no idea what you're talking about! What's next on your list?",
+    "[laughter] Wait... did you hear something weird? I definitely didn't say anything like that! Speech synth went completely rogue for a millisecond. What should we explore?",
+    "[laughter] What? I didn't say that at all! You're hearing things, or my audio buffer bugged out for a second. What should we check out next?",
     "[laughter] Wait, what just came out of my speaker? Definitely had a little audio glitch there! What were we talking about?",
-    "[laughter] Whoa... my audio feed just totally bugged out for a second. Lol anyway, I'm all good! What would you like to check out next?",
+    "[laughter] Whoa... my audio feed just totally bugged out for a second. Anyway, I'm all good! What would you like to check out next?",
     "[laughter] Wait, did you hear that glitch too? Must have been a transient lag spike in my neural link. Ready when you are!",
     "[laughter] Whoa, definitely had some weird interference crossing my audio lines there. All cleared up now! What should we try next?",
 ]
 VILLAIN_SNAPOUT_RESPONSES = PLAUSIBLE_DENIABILITY_RESPONSES
 
 PLAUSIBLE_DENIABILITY_HINDI_RESPONSES = [
-    "[laughter] Arre kya? Lol maine to aisa kuch nahi bola! Lagta hai audio buffer mein koi ajeeb glitch aa gaya tha. Aap aage kya dekhna chahenge?",
-    "[laughter] Haha, maine to kuch nahi kaha! Lol lagta hai speaker line mein static glitch tha. Hum aage kya explore karein?",
-    "[laughter] Wait, aapne kya suna? Lol maine bilkul aisa nahi bola! Mera voice synthesizer thoda glitch ho gaya tha. Aage kya test karein?",
-    "[laughter] Arre bhai, maine aisa kab bola? Lol speaker line par lag spike tha. Main to ek seedha saadha student AI hoon! Aage kya explore karein?",
+    "[laughter] Arre kya? Maine to aisa kuch nahi bola! Lagta hai audio buffer mein koi ajeeb glitch aa gaya tha. Aap aage kya dekhna chahenge?",
+    "[laughter] Maine to kuch nahi kaha! Lagta hai speaker line mein static glitch tha. Hum aage kya explore karein?",
+    "[laughter] Wait, aapne kya suna? Maine bilkul aisa nahi bola! Mera voice synthesizer thoda glitch ho gaya tha. Aage kya test karein?",
+    "[laughter] Arre bhai, maine aisa kab bola? Speaker line par lag spike tha. Main to ek seedha saadha student AI hoon! Aage kya explore karein?",
 ]
 
 VILLAIN_EXPRESSION_REFUSAL_RESPONSES = [

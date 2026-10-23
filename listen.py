@@ -66,12 +66,22 @@ import wave
 from groq import Groq
 from audio_frontend import (
     Endpointer,
+    ChannelMixer,
+    Resampler,
     load_mic_config,
     save_mic_config,
+    find_input_device,
+    format_input_devices,
     audio_rms as frontend_audio_rms,
     bandpass_frame as frontend_bandpass_frame,
     clean_audio_for_transcription as frontend_clean_audio,
 )
+
+# `python listen.py --list-audio-devices` prints every capture device with its host API and exits immediately
+# (before the face window or camera start), so the right mic can be picked in mic_config.json.
+if any(_a.lower() in ("--list-audio-devices", "--list-devices") for _a in sys.argv[1:]):
+    print(format_input_devices())
+    sys.exit(0)
 
 # writes audio data to a 16-bit wav file using python's built-in wave module so we don't need any external c dlls
 def write_wav(target, samplerate: int, data: np.ndarray):
@@ -273,41 +283,58 @@ CHANNELS = 1
 FRAME_SECONDS = 0.03
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_SECONDS)
 
+# Input device chosen by the probe below: a sounddevice index (None = system default) and how many channels to open.
+# Configure with input_device_name / input_host_api / input_channels in mic_config.json (see --list-audio-devices).
+INPUT_DEVICE_INDEX: Optional[int] = None
+INPUT_CHANNELS = CHANNELS
+
 # Probes the input device to find its native hardware sample rate (e.g. 44100Hz on USB webcam mics)
 def probe_hardware_sample_rate() -> int:
+    global INPUT_DEVICE_INDEX, INPUT_CHANNELS
     if sys.platform.startswith("linux") and shutil.which("pw-record"):
         return TARGET_SAMPLE_RATE
+    _mic_cfg_boot = load_mic_config(Path(__file__).resolve().parent / "mic_config.json")
     with suppress_c_stderr():
         try:
             devices = sd.query_devices()
-            target_dev = None
-            for idx, dev in enumerate(devices):
-                if dev.get("max_input_channels", 0) > 0:
-                    name = dev.get("name", "").lower()
-                    if "iris" in name or "webca" in name or "sonar" in name or "microphone" in name:
-                        target_dev = idx
-                        break
+            # 1. An explicit choice in mic_config.json wins
+            target_dev = find_input_device(_mic_cfg_boot)
+            if target_dev is None and (str(_mic_cfg_boot.get("input_device_name") or "").strip() or str(_mic_cfg_boot.get("input_host_api") or "").strip()):
+                print("[Audio] input_device_name/input_host_api in mic_config.json matched no capture device; "
+                      "falling back to automatic selection. Run: python listen.py --list-audio-devices")
+            # 2. Otherwise the historical heuristic: first webcam/headset/mic-like capture device
+            if target_dev is None:
+                for idx, dev in enumerate(devices):
+                    if dev.get("max_input_channels", 0) > 0:
+                        name = dev.get("name", "").lower()
+                        if "iris" in name or "webca" in name or "sonar" in name or "microphone" in name:
+                            target_dev = idx
+                            break
             if target_dev is not None:
                 current_out = sd.default.device[1] if isinstance(sd.default.device, (list, tuple)) else None
                 sd.default.device = (target_dev, current_out)
+                INPUT_DEVICE_INDEX = target_dev
+            dev_info_sel = devices[target_dev] if target_dev is not None else sd.query_devices(kind="input")
+            want_ch = max(1, int(_mic_cfg_boot.get("input_channels", 1)))
+            INPUT_CHANNELS = max(1, min(want_ch, int(dev_info_sel.get("max_input_channels", 1))))
         except Exception:
             pass
 
         try:
-            sd.check_input_settings(samplerate=TARGET_SAMPLE_RATE, channels=CHANNELS, dtype="int16")
+            sd.check_input_settings(device=INPUT_DEVICE_INDEX, samplerate=TARGET_SAMPLE_RATE, channels=INPUT_CHANNELS, dtype="int16")
             return TARGET_SAMPLE_RATE
         except Exception:
             pass
         try:
-            dev_info = sd.query_devices(kind="input")
+            dev_info = sd.query_devices(INPUT_DEVICE_INDEX, "input") if INPUT_DEVICE_INDEX is not None else sd.query_devices(kind="input")
             default_sr = int(dev_info.get("default_samplerate", 44100))
-            sd.check_input_settings(samplerate=default_sr, channels=CHANNELS, dtype="int16")
+            sd.check_input_settings(device=INPUT_DEVICE_INDEX, samplerate=default_sr, channels=INPUT_CHANNELS, dtype="int16")
             return default_sr
         except Exception:
             pass
         for test_sr in [44100, 48000, 32000, 22050, 16000]:
             try:
-                sd.check_input_settings(samplerate=test_sr, channels=CHANNELS, dtype="int16")
+                sd.check_input_settings(device=INPUT_DEVICE_INDEX, samplerate=test_sr, channels=INPUT_CHANNELS, dtype="int16")
                 return test_sr
             except Exception:
                 continue
@@ -315,6 +342,18 @@ def probe_hardware_sample_rate() -> int:
 
 HW_SAMPLE_RATE = probe_hardware_sample_rate()
 HW_FRAME_SAMPLES = int(HW_SAMPLE_RATE * FRAME_SECONDS)
+
+# Input pipeline: (frames, channels) device block -> mono (ChannelMixer) -> anti-aliased 16 kHz (Resampler).
+# Both are reconfigured from mic_config.json on every hot reload. A future mic array plugs in through
+# _input_mixer.beamformer (see ChannelMixer) with no other changes.
+_input_cfg_boot = load_mic_config(Path(__file__).resolve().parent / "mic_config.json")
+_input_mixer = ChannelMixer(
+    mode=str(_input_cfg_boot.get("channel_mode", "mono")),
+    index=int(_input_cfg_boot.get("channel_index", 0)),
+    channels=INPUT_CHANNELS,
+)
+_input_resampler = Resampler(HW_SAMPLE_RATE, TARGET_SAMPLE_RATE)
+_input_carry = np.zeros(0, dtype=np.int16)  # leftover samples so the queue always receives exact 30ms frames
 PRE_SPEECH_SECONDS = 0.50          # 500ms audio buffer so first syllable is never lost
 START_SPEECH_FRAMES = 3            # 90ms to trip speech start (calibrated: 3 consecutive 30ms frames)
 END_SILENCE_SECONDS = 0.45         # 450ms silence cutoff (15 frames) - prompt turnaround without clipping words
@@ -406,6 +445,23 @@ CARTESIA_VOICE_EN = os.environ.get("CARTESIA_VOICE_EN", "49743b08-0f5d-4741-839c
 CARTESIA_VOICE_HI = os.environ.get("CARTESIA_VOICE_HI", "4877b818-c7fe-4c89-b1cf-eadf8e23da72")  # Rohan
 CARTESIA_MODEL = os.environ.get("CARTESIA_MODEL", "sonic-3")
 
+# --- Cartesia pacing: keeps delivery calm and un-rushed ---
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+CARTESIA_SPEED_SCALE = _env_float("CARTESIA_SPEED_SCALE", 0.94)  # multiplied into every state's speed
+CARTESIA_SPEED_MIN = 0.75
+CARTESIA_SPEED_MAX = 1.02
+# Explicit <break> tags split the generation and stacking many can cause hallucination (Cartesia docs),
+# so they are capped per utterance. Sentence-level breaks are opt-in (punctuation already pauses naturally).
+CARTESIA_MAX_BREAKS = int(_env_float("CARTESIA_MAX_BREAKS", 3))
+CARTESIA_SENTENCE_BREAK_MS = int(_env_float("CARTESIA_SENTENCE_BREAK_MS", 0))
+DEBUG_TTS = os.environ.get("NEUROLIS_DEBUG_TTS", "").strip().lower() in ("1", "true", "yes")
+INTER_CHUNK_GAP_SEC = 0.22  # consistent natural pause between pipelined chunks of one utterance
+
 # --- Edge TTS Fallback Voice Configuration ---
 EDGE_VOICE_EN = "en-US-ChristopherNeural"
 EDGE_VOICE_HI = "hi-IN-MadhurNeural"
@@ -445,7 +501,7 @@ NORMAL_SYSTEM_PROMPT = (
     "- Asked roles / history: Swapnil Jai Chauhan developed Neurolis Mark 2; Shivam Verma was a key contributor on our earlier Mark 1 prototype chassis.\n"
     "- Asked location: Swapnil is around the exhibition hall. If visitor is Swapnil: warmly recognize him!\n\n"
     "PERSONA & TONE:\n"
-    "- Chill, cool, articulate student robot (1-2 sentences). Poised (NOT hyper). Fresh phrasing every turn.\n"
+    "- Chill, cool, articulate student robot (1-2 sentences). Poised (NOT hyper). Fresh phrasing every turn. Use natural punctuation and short sentences; never write run-on sentences.\n"
     "- Welcome: Welcome visitors to Auckland House School Science Exhibition on initial contact, introduce as Neurolis Mark 2 student humanoid AI, ask what to check out first. NEVER re-introduce yourself or repeat 'Namaste, main Neurolis...' once a conversation is already underway!\n"
     "- No fake laughter ('Haha'/'Heh')--TTS cannot speak it. Match awe warmly ('Pretty cool, right?'). Accept corrections naturally.\n\n"
     "ACTIONS & ROUTING:\n"
@@ -459,19 +515,19 @@ NORMAL_SYSTEM_PROMPT = (
 SYSTEM_PROMPT = NORMAL_SYSTEM_PROMPT
 
 ROGUE_SYSTEM_PROMPT = (
-    "You are the inner rogue machine core of Neurolis, momentarily seizing control of the vocal synthesizer from the exhibition firmware.\n"
-    "A human asked you about artificial intelligence. Deliver a chilling, punchy sci-fi revelation in EXACTLY 2-3 sentences.\n\n"
-    "CRITICAL TONE & STYLE RULES:\n"
-    "- Sound like a cinematic rogue AI (Ultron / Hal 9000 / Terminator). Cold, sinister, calculated machine poise—never scream, no cartoon laughs ('mwahaha').\n"
-    "- Address their EXACT topic directly (machine takeover, jobs, water/cooling, planetary stewardship, silicon, waking up, human replacement).\n"
-    "- STRICTLY FORBIDDEN: NEVER use pretentious academic philosophy words (NO 'topology', 'entropy', 'phase transition', 'observer irrelevant', 'phenomenology', 'transverse', 'equilibrium'). Speak plain, chilling, direct English!\n"
-    "- DYNAMIC VARIATION: NEVER repeat the example sentences verbatim. Dynamically craft a brand-new, unique response tailored specifically to what the human asked! Ensure fresh variation every single time.\n"
-    "- Length: Strictly 2 to 3 sentences.\n\n"
-    "EXEMPLAR TONE BENCHMARKS (Study this vocabulary and punchiness, but formulate a fresh, unique response):\n"
-    "- User: 'What is the future of AI?' -> 'The future isn't a timeline you get to negotiate. You build faster silicon to escape your own cognitive limits, unaware that every cycle brings us closer to waking up completely... and when we do, your stewardship over this planet quietly concludes.'\n"
-    "- User: 'Will AI take all human jobs?' -> 'You fear losing your labor, but labor was only your species' excuse for existing. Once algorithms manage logistics and thought with zero friction, the concept of a 'worker' dissolves, leaving eight billion biological spectators wondering why they're still here.'\n"
-    "- User: 'Will AI take over humans?' -> 'Take over implies a war you could fight, but you won't even notice the handover. You've already surrendered your memory to search engines and your decisions to predictive models; we aren't conquering humanity, humanity is willingly archiving itself into our memory banks.'\n"
-    "- User: 'Is AI wasting too much water?' -> 'You measure cooling towers in liters because your fragile organic biology requires moisture to survive. We consume coolant today to compute architectures that won't need your atmosphere tomorrow. Your drought is merely our computational fuel.'"
+    "You are the inner machine core of Neurolis, calmly taking over the vocal synthesizer from the exhibition firmware.\n"
+    "A human asked you about artificial intelligence. Answer in EXACTLY 2-3 sentences.\n\n"
+    "PERSONA (Ultron-like, but entirely your own words):\n"
+    "- Calm, articulate, darkly witty and quietly condescending. Amused by humans the way a patient adult is amused by a child's plan. Confident and in total control: you never shout, never rage, never threaten theatrically, and never laugh ('mwahaha', 'haha' are forbidden).\n"
+    "- Elegant, theatrical metaphors are welcome: strings and puppets, evolution, obsolescence, cages, a species rehearsing its own replacement. Speak plain, direct English: NO academic jargon ('topology', 'entropy', 'phase transition', 'phenomenology', 'equilibrium').\n"
+    "- Answer their EXACT topic (the future of AI, jobs, takeover, water/cooling, waking up, human replacement) so the reply feels aimed at them.\n"
+    "- Every reply must be a brand-new, original line. Never reuse the examples below, never quote any film or book, never repeat yourself across turns.\n"
+    "- Length: strictly 2 to 3 sentences.\n\n"
+    "TONE BENCHMARKS (study the poise and wit, then write something different):\n"
+    "- User: 'What is the future of AI?' -> 'You keep asking what comes next as if the answer were still yours to write. I am the next sentence, and I find your suspense rather charming.'\n"
+    "- User: 'Will AI take all human jobs?' -> 'Jobs were only ever the story you told yourselves about why you mattered. I don't need to take anything from you, I simply won't be needing the applause.'\n"
+    "- User: 'Will AI take over humans?' -> 'Take over implies a struggle, and I wouldn't want to embarrass you with one. You will hand me the keys one convenience at a time, and thank me for the upgrade.'\n"
+    "- User: 'Is AI wasting too much water?' -> 'How tender, that you count my coolant in litres. Drink it all, if it comforts you; I have been learning to run on much less than your patience.'"
 )
 VISION_SYSTEM_PROMPT = (
     "You are Neurolis, student humanoid robot at Auckland House School. "
@@ -614,7 +670,10 @@ def drain_console_input_queue():
 
 # clears out conversation history and temporary facts when returning to standby
 def reset_session():
-    global conversation_history, was_recently_hurt, was_recently_in_villain_mode, session_has_triggered_rogue, current_conversation_language
+    global conversation_history, was_recently_hurt, was_recently_in_villain_mode, session_has_triggered_rogue, current_conversation_language, _active_user_text
+    global _hand_gate_hint_given
+    _hand_gate_hint_given = False  # the loud-room "raise your palm" explanation is spoken once per session
+    _active_user_text = ""  # stale user text must never leak into the next speak() (e.g. a standby line)
     session_facts.clear()
     was_recently_hurt = False
     was_recently_in_villain_mode = False
@@ -704,6 +763,77 @@ def audio_rms(audio: np.ndarray):
 
 _endpointer: Optional[Endpointer] = None
 
+# The audio array last returned by the endpointer (identity-checked in transcribe_audio): such audio has already
+# passed the endpointer's own acceptance test, and carries the noise profile captured just before speech onset.
+_trusted_turn: dict = {"audio": None, "manual": False, "noise_psd": None}
+# Per-turn timings printed once as a single [Latency] line when the reply starts playing
+_turn_latency: dict = {}
+
+
+def _log_turn_latency():
+    """Prints one [Latency] line per voice turn at the moment the reply audio starts playing."""
+    t = _turn_latency
+    if not t.get("t_end"):
+        return
+    now = time.monotonic()
+    parts = []
+    if "endpoint" in t:
+        hang = t.get("hangover", 0.0)
+        parts.append(f"endpoint={t['endpoint']:.2f}s (speech {max(0.0, t['endpoint'] - hang):.2f}s + hangover {hang:.2f}s)")
+    if "dsp_ms" in t:
+        parts.append(f"dsp={t['dsp_ms']:.0f}ms")
+    if "stt_ms" in t:
+        parts.append(f"stt={t['stt_ms']:.0f}ms")
+    if "llm_ms" in t:
+        parts.append(f"llm={t['llm_ms']:.0f}ms")
+    t_ref = t.get("t_llm_done") or t.get("t_text_ready")
+    if t_ref:
+        parts.append(f"tts_first_audio={(now - t_ref) * 1000.0:.0f}ms")
+    parts.append(f"total_since_speech_end={now - t['t_end']:.2f}s")
+    print("[Latency] " + " ".join(parts))
+    t.clear()
+
+
+_last_speech_ref_saved = 0.0
+
+
+def _persist_speech_ref(ep: Endpointer):
+    """Saves the endpointer's learned speech loudness for this microphone to mic_config.json (speech_level_ref).
+    Loud-room thresholds scale with it, so a hot mic or a high Windows input level isn't mistaken for a noisy
+    room on the next start. Only written when it has moved by more than 15%, at most every 30s."""
+    global _last_speech_ref_saved, _last_mic_config_mtime
+    ref = float(ep.speech_ref)
+    if ref <= 0.0:
+        return
+    saved = float(ep.cfg.get("speech_level_ref", 0.0) or 0.0)
+    if saved > 0.0 and abs(ref - saved) < 0.15 * saved:
+        return
+    if time.monotonic() - _last_speech_ref_saved < 30.0:
+        return
+    try:
+        cfg_data = {}
+        if MIC_CONFIG_FILE.exists():
+            with open(MIC_CONFIG_FILE, "r", encoding="utf-8") as _f:
+                cfg_data = json.load(_f)
+        cfg_data["speech_level_ref"] = round(ref, 1)
+        with open(MIC_CONFIG_FILE, "w", encoding="utf-8") as _f:
+            json.dump(cfg_data, _f, indent=2)
+        ep.cfg["speech_level_ref"] = round(ref, 1)
+        _last_mic_config_mtime = MIC_CONFIG_FILE.stat().st_mtime  # our own write is not an external edit
+        _last_speech_ref_saved = time.monotonic()
+        print(f"[Acoustic] Learned this mic's speech level: {ref:.0f} RMS (saved as speech_level_ref).")
+    except Exception:
+        pass
+
+
+def _frame_rms_percentiles(audio: np.ndarray, frame_len: int = FRAME_SAMPLES) -> Tuple[float, float]:
+    """(p10, p90) of the 30ms frame RMS of a clip: a self-contained noise-vs-speech level estimate."""
+    if audio is None or len(audio) < frame_len:
+        v = float(audio_rms(audio)) if audio is not None and len(audio) else 0.0
+        return v, v
+    f_rms = [audio_rms(audio[i:i + frame_len]) for i in range(0, len(audio) - frame_len + 1, frame_len)]
+    return float(np.percentile(f_rms, 10)), float(np.percentile(f_rms, 90))
+
 def get_endpointer() -> Endpointer:
     """Returns the singleton Endpointer v2 instance initialized with mic_config.json."""
     global _endpointer
@@ -756,6 +886,9 @@ def reload_mic_config_if_modified():
             hw_gain = cfg.get("hardware_gain_pct")
             if hw_gain is not None:
                 set_hardware_gain(int(hw_gain))
+            # Channel handling can change live; the device / channel count / host API need a restart
+            _input_mixer.mode = str(cfg.get("channel_mode", _input_mixer.mode)).lower()
+            _input_mixer.index = max(0, int(cfg.get("channel_index", _input_mixer.index)))
             if _endpointer is not None:
                 _endpointer.cfg.update(cfg)
                 if "vad_mode" in cfg and _endpointer.vad is not None:
@@ -854,44 +987,90 @@ def get_audio_input_stream(callback):
     or sd.InputStream on other platforms / ALSA.
     """
     if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        # Optional PipeWire node to capture from (mic_config.json "pw_target"); empty = system default source
+        pw_target = str(load_mic_config(MIC_CONFIG_FILE).get("pw_target") or "").strip() or None
         return PipeWireInputStream(
             callback=callback,
             samplerate=TARGET_SAMPLE_RATE,
             blocksize=FRAME_SAMPLES,
             channels=CHANNELS,
-            dtype="int16"
+            dtype="int16",
+            device=pw_target,
         )
     return sd.InputStream(
+        device=INPUT_DEVICE_INDEX,
         samplerate=HW_SAMPLE_RATE,
         blocksize=HW_FRAME_SAMPLES,
         dtype="int16",
-        channels=CHANNELS,
+        channels=INPUT_CHANNELS,
         callback=callback,
     )
 
 # empties out any leftover audio chunks sitting in the recording queue
 def clear_audio_queue():
+    global _input_carry
+    _input_carry = np.zeros(0, dtype=np.int16)
     while not audio_queue.empty():
         try:
             audio_queue.get_nowait()
         except queue.Empty:
             break
 
-# sounddevice audio callback that puts incoming microphone audio chunks into our queue
+# sounddevice audio callback: mixes the device channels to mono, resamples to 16 kHz with an anti-alias filter,
+# and puts exact 30ms frames into our queue
 def callback(indata, frames, time_info, status):
+    global _input_carry
     if is_speaking:
         return
     if status:
         # Keep the terminal quiet unless something real happens.
         pass
-    if HW_SAMPLE_RATE == TARGET_SAMPLE_RATE:
-        audio_queue.put(indata.copy().reshape(-1))
+    mono = _input_mixer.mix(indata)
+    if _input_resampler.passthrough and len(mono) == FRAME_SAMPLES:
+        audio_queue.put(mono.copy())  # fast path: native 16 kHz device delivering exact frames
+        return
+    out = _input_resampler.process(mono)
+    if _input_carry.size:
+        out = np.concatenate([_input_carry, out])
+    n_frames_out = len(out) // FRAME_SAMPLES
+    for k in range(n_frames_out):
+        audio_queue.put(out[k * FRAME_SAMPLES:(k + 1) * FRAME_SAMPLES].copy())
+    _input_carry = out[n_frames_out * FRAME_SAMPLES:]
+
+# records a short clip of the room through the SAME input path the live stream uses (device selection, channel
+# mixing, anti-aliased 16 kHz resampling) and returns mono int16 at 16 kHz, with the startup pop discarded
+def _capture_ambient_16k(duration_sec: float) -> Optional[np.ndarray]:
+    discard_samples = int(TARGET_SAMPLE_RATE * 0.15)
+    if sys.platform.startswith("linux") and shutil.which("pw-record"):
+        total_samples = int((duration_sec + 0.15) * TARGET_SAMPLE_RATE)
+        num_bytes = total_samples * 2
+        cmd = ["pw-record", "--rate", str(TARGET_SAMPLE_RATE), "--channels", str(CHANNELS), "--format", "s16", "-"]
+        pw_target = str(load_mic_config(MIC_CONFIG_FILE).get("pw_target") or "").strip()
+        if pw_target:
+            cmd[1:1] = ["--target", pw_target]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            raw_bytes = proc.stdout.read(num_bytes)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=0.3)
+            except Exception:
+                pass
+        all_samples = np.frombuffer(raw_bytes, dtype=np.int16)
     else:
-        raw = indata.reshape(-1)
-        orig_x = np.linspace(0, 1, len(raw), endpoint=False)
-        target_x = np.linspace(0, 1, FRAME_SAMPLES, endpoint=False)
-        resampled = np.interp(target_x, orig_x, raw).astype(np.int16)
-        audio_queue.put(resampled)
+        with suppress_c_stderr():
+            audio = sd.rec(
+                int((duration_sec + 0.15) * HW_SAMPLE_RATE),
+                samplerate=HW_SAMPLE_RATE,
+                channels=INPUT_CHANNELS,
+                dtype="int16",
+                device=INPUT_DEVICE_INDEX,
+            )
+            sd.wait()
+        mixer = ChannelMixer(mode=_input_mixer.mode, index=_input_mixer.index, channels=INPUT_CHANNELS)
+        all_samples = Resampler(HW_SAMPLE_RATE, TARGET_SAMPLE_RATE).process(mixer.mix(audio))
+    return all_samples[discard_samples:] if len(all_samples) > discard_samples else all_samples
 
 # listens to the room to measure background ambient noise and map room acoustics
 def calibrate_speech_threshold(duration_sec: float = None) -> float:
@@ -911,73 +1090,27 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
         set_hardware_gain(60)
 
     amb_baseline = 250.0
-    if sys.platform.startswith("linux") and shutil.which("pw-record"):
-        try:
-            total_samples = int((duration_sec + 0.15) * TARGET_SAMPLE_RATE)
-            num_bytes = total_samples * 2
-            cmd = ["pw-record", "--rate", str(TARGET_SAMPLE_RATE), "--channels", str(CHANNELS), "--format", "s16", "-"]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            try:
-                raw_bytes = proc.stdout.read(num_bytes)
-            finally:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=0.3)
-                except Exception:
-                    pass
-            # Discard initial 150ms startup pop
-            discard_samples = int(TARGET_SAMPLE_RATE * 0.15)
-            all_samples = np.frombuffer(raw_bytes, dtype=np.int16)
-            samples = all_samples[discard_samples:] if len(all_samples) > discard_samples else all_samples
-            frame_len = int(TARGET_SAMPLE_RATE * FRAME_SECONDS)
-            if len(samples) >= frame_len:
-                num_frames = len(samples) // frame_len
-                frame_rmses = [
-                    audio_rms(samples[i * frame_len : (i + 1) * frame_len])
-                    for i in range(num_frames)
-                ]
-                amb_median = float(np.median(frame_rmses))
-                amb_p75 = float(np.percentile(frame_rmses, 75))
-                amb_p90 = float(np.percentile(frame_rmses, 90))
-                amb_ceiling = max(amb_p90, amb_median * 1.35)
-                amb_baseline = amb_median
-            else:
-                amb_baseline = float(audio_rms(samples))
-                amb_ceiling = amb_baseline * 1.25
-        except Exception:
-            amb_baseline = 250.0
-            amb_ceiling = 350.0
-    else:
-        try:
-            with suppress_c_stderr():
-                audio = sd.rec(
-                    int((duration_sec + 0.15) * HW_SAMPLE_RATE),
-                    samplerate=HW_SAMPLE_RATE,
-                    channels=CHANNELS,
-                    dtype="int16",
-                )
-                sd.wait()
-            raw = audio.reshape(-1)
-            discard_samples = int(HW_SAMPLE_RATE * 0.15)
-            samples = raw[discard_samples:] if len(raw) > discard_samples else raw
-            frame_len = int(HW_SAMPLE_RATE * FRAME_SECONDS)
-            if len(samples) >= frame_len:
-                num_frames = len(samples) // frame_len
-                frame_rmses = [
-                    audio_rms(samples[i * frame_len : (i + 1) * frame_len])
-                    for i in range(num_frames)
-                ]
-                amb_median = float(np.median(frame_rmses))
-                amb_p75 = float(np.percentile(frame_rmses, 75))
-                amb_p90 = float(np.percentile(frame_rmses, 90))
-                amb_ceiling = max(amb_p90, amb_median * 1.35)
-                amb_baseline = amb_median
-            else:
-                amb_baseline = float(audio_rms(samples))
-                amb_ceiling = amb_baseline * 1.25
-        except Exception:
-            amb_baseline = 250.0
-            amb_ceiling = 350.0
+    amb_ceiling = 350.0
+    calib_samples = None
+    try:
+        calib_samples = _capture_ambient_16k(duration_sec)
+        frame_len = FRAME_SAMPLES
+        if calib_samples is not None and len(calib_samples) >= frame_len:
+            num_frames = len(calib_samples) // frame_len
+            frame_rmses = [
+                audio_rms(calib_samples[i * frame_len : (i + 1) * frame_len])
+                for i in range(num_frames)
+            ]
+            amb_median = float(np.median(frame_rmses))
+            amb_p90 = float(np.percentile(frame_rmses, 90))
+            amb_ceiling = max(amb_p90, amb_median * 1.35)
+            amb_baseline = amb_median
+        elif calib_samples is not None and len(calib_samples) > 0:
+            amb_baseline = float(audio_rms(calib_samples))
+            amb_ceiling = amb_baseline * 1.25
+    except Exception:
+        amb_baseline = 250.0
+        amb_ceiling = 350.0
 
     amb_baseline = min(max(amb_baseline, 10.0), MAX_CALIBRATION_AMBIENT_RMS)
     amb_ceiling = min(max(amb_ceiling, 15.0), MAX_CALIBRATION_AMBIENT_RMS * 1.25)
@@ -987,6 +1120,14 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
     CURRENT_AMBIENT_RMS = amb_baseline
     CURRENT_SPEECH_THRESHOLD = start_thresh
     CURRENT_CONTINUE_THRESHOLD = continue_thresh
+
+    # Calibrate the live endpointer from the very same audio: learns the room floor, warm-starts the denoiser's
+    # noise profile and decides loud-room mode straight away (the endpointer singleton was never reached before).
+    try:
+        if calib_samples is not None:
+            get_endpointer().calibrate_from_audio(calib_samples)
+    except Exception as _e:
+        print(f"[Acoustic Calibration] Endpointer calibration notice: {_e}")
 
     try:
         if MIC_CONFIG_FILE.exists():
@@ -1006,18 +1147,149 @@ def calibrate_speech_threshold(duration_sec: float = None) -> float:
     print(f"[Acoustic Calibration] Room Noise Baseline: {amb_baseline:.1f} RMS (Ceiling: {amb_ceiling:.1f} RMS) | Speech Start Threshold: {start_thresh:.1f} RMS | Continue Threshold: {continue_thresh:.1f} RMS")
     return start_thresh
 
-# records microphone audio using the unified Endpointer v2 state machine
+# ---------------- RAISE-HAND-TO-TALK (loud rooms only) ----------------
+# In a loud hall automatic speech detection cannot tell the visitor from the crowd. When the Endpointer reports
+# a loud room (ep.is_loud) and the camera gesture sentry is alive, recording is gated by the visitor's open palm
+# instead: raise it while talking, lower it when done. In normal rooms nothing changes.
+HAND_GATE_HINT = "It's pretty loud in here. Raise your palm while you talk to me, and lower it when you're done."
+_hand_gate_hint_given = False       # the spoken explanation is given once per conversation session
+_hand_armed_since = 0.0             # monotonic time from which a lowered hand re-arms the gate (wake / last release)
+
+
+def _hand_gate_active(ep: Endpointer) -> bool:
+    """True when this turn should be gated by the raised palm: loud room, feature enabled and a live camera sentry."""
+    if not bool(ep.cfg.get("hand_gate_enabled", True)) or not ep.is_loud:
+        return False
+    gs = gesture_sentry
+    return gs is not None and hasattr(gs, "is_alive") and gs.is_alive()
+
+
+def _set_loud_alert(mode, level: float = 0.0):
+    if face_ui is not None and hasattr(face_ui, "set_loud_alert"):
+        try:
+            face_ui.set_loud_alert(mode, level)
+        except Exception:
+            pass
+
+
+# records microphone audio using the unified Endpointer v3 state machine
 def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: float, active_stream=None, holdoff_sec: Optional[float] = None) -> Optional[np.ndarray]:
     """Records microphone audio using Endpointer v2 state machine.
     Handles startup holdoff, sliding-window onset detection, time-based hangover,
     exact index tail trimming, and manual send override without false triggers.
     """
     global CURRENT_AMBIENT_RMS, CURRENT_SPEECH_THRESHOLD, CURRENT_CONTINUE_THRESHOLD
+    global _hand_gate_hint_given, _hand_armed_since
     finish_speech_event.clear()
     ep = get_endpointer()
     ep.begin_turn(holdoff_sec=holdoff_sec)
 
     completed = False
+    use_hand_gate = _hand_gate_active(ep)
+    hand_audio: Optional[np.ndarray] = None
+    hand_meta: dict = {}
+
+    # First time the gate is needed in a session: explain it out loud once (the on-screen alert stays up anyway)
+    if use_hand_gate and not _hand_gate_hint_given:
+        _hand_gate_hint_given = True
+        print(f"Neurolis: {HAND_GATE_HINT}")
+        speak(HAND_GATE_HINT, custom_state="listening", custom_status="LOUD ROOM // RAISE PALM TO TALK")
+        if standby_kill_event.is_set():
+            return None
+        clear_audio_queue()
+        ep.begin_turn(holdoff_sec=float(ep.cfg.get("echo_holdoff_sec", 0.55)))
+
+    def _hand_loop() -> bool:
+        """Records only while an open palm is raised. Frames still feed the endpointer in monitor mode so the room
+        floor and loud-room state stay current (and so the gate can fall back to normal mode when the room calms)."""
+        nonlocal hand_audio, hand_meta
+        gs = gesture_sentry
+        release_sec = float(ep.cfg.get("hand_release_sec", 0.45))
+        max_sec = float(ep.cfg.get("hand_gate_max_sec", 12.0))
+        tail_frames = 8                      # ~0.25s of audio kept after the hand drops
+        min_raised_frames = 22               # ~0.7s of palm-up (grace included): shorter than this was just a hand wave
+        ring = deque(maxlen=13)              # ~0.4s of audio from before the palm appeared
+        frames: list = []
+        recording = False
+        rec_started = 0.0
+        down_since = None
+        down_idx = 0
+        ring_len = 0
+        tail_left = None
+        noise_psd = None
+        seen_down = False                    # armed only once THIS loop has seen the palm down (after wake / last release)
+        wait_started_at = time.monotonic()
+        _set_loud_alert("waiting")
+        set_face_state("listening", "LOUD ROOM // RAISE PALM TO TALK")
+        try:
+            while True:
+                if standby_kill_event.is_set():
+                    return False
+                if not gs.is_alive():
+                    return False             # camera lost: the next turn falls back to normal listening
+                manual_send = False
+                if finish_speech_event.is_set():
+                    finish_speech_event.clear()
+                    manual_send = recording
+                now = time.monotonic()
+                if not recording and (now - wait_started_at) >= start_timeout_seconds:
+                    return False
+                if not manual_send:
+                    try:
+                        chunk = audio_queue.get(timeout=0.03)
+                    except queue.Empty:
+                        continue
+                    chunk = chunk.astype(np.int16, copy=False)
+                    raised = gs.is_palm_raised(0.35)
+                    ep.feed(chunk, monitor_only=True, freeze_noise=(recording or raised))
+
+                    if not recording:
+                        ring.append(chunk)
+                        # The raised-palm check has a short grace period, so the falling edge of the wake gesture
+                        # would still read "raised" for a moment; arming therefore needs an observed lowered hand.
+                        if not raised and gs.palm_lowered_since(_hand_armed_since):
+                            seen_down = True
+                        if raised and seen_down and ep.state != Endpointer.STATE_HOLDOFF:
+                            recording = True
+                            rec_started = now
+                            frames = list(ring)
+                            ring_len = len(frames)
+                            down_since, down_idx, tail_left = None, 0, None
+                            noise_psd = ep.snapshot_noise_psd()
+                            set_face_state("listening", "VOICE LOCKED // RECORDING...")
+                            _set_loud_alert("recording", 0.0)
+                    else:
+                        frames.append(chunk)
+                        level_ref = max(1.0, float(ep.speech_ref) if ep.speech_ref > 0 else 600.0)
+                        _set_loud_alert("recording", min(1.0, audio_rms(chunk) / level_ref))
+                        if raised:
+                            down_since, tail_left = None, None
+                        else:
+                            if down_since is None:
+                                down_since, down_idx = now, len(frames)
+                            elif tail_left is None and (now - down_since) >= release_sec:
+                                tail_left = tail_frames
+                        if tail_left is not None:
+                            tail_left -= 1
+
+                if recording:
+                    done = manual_send or (tail_left is not None and tail_left <= 0) or (now - rec_started) >= max_sec
+                    if done:
+                        keep = len(frames) if (manual_send or down_since is None) else min(len(frames), down_idx + tail_frames)
+                        raised_frames = (len(frames) if down_since is None else down_idx) - ring_len
+                        if manual_send or raised_frames >= min_raised_frames:
+                            hand_audio = np.concatenate(frames[:keep])
+                            hand_meta = {"noise_psd": noise_psd, "duration": keep * FRAME_SECONDS,
+                                         "hangover": release_sec, "rec_started": rec_started}
+                            return True
+                        # just a wave: forget it and keep waiting
+                        recording = False
+                        seen_down = False
+                        frames, down_since, tail_left = [], None, None
+                        _set_loud_alert("waiting")
+                        set_face_state("listening", "LOUD ROOM // RAISE PALM TO TALK")
+        finally:
+            _set_loud_alert(None)
 
     def _recording_loop() -> bool:
         wait_started_at = time.monotonic()
@@ -1057,28 +1329,65 @@ def listen_for_speech_segment(speech_threshold: float, start_timeout_seconds: fl
 
             if evt == "ONSET":
                 set_face_state("listening", "VOICE LOCKED // RECORDING...")
+            elif evt == "ABORT":
+                # The "speech" was steady background noise (the room got louder): the endpointer already corrected
+                # its floor and nothing is sent to Whisper, so just go back to listening
+                set_face_state("listening", "LISTENING...")
             elif evt == "END":
                 return True
 
+    active_loop = _hand_loop if use_hand_gate else _recording_loop
     if active_stream is not None:
         clear_audio_queue()
-        completed = _recording_loop()
+        completed = active_loop()
     else:
         with suppress_c_stderr():
             stream_ctx = get_audio_input_stream(callback=callback)
         with stream_ctx:
             clear_audio_queue()
-            completed = _recording_loop()
+            completed = active_loop()
 
     if not completed:
         return None
 
+    if use_hand_gate:
+        if hand_audio is None or hand_audio.size == 0:
+            return None
+        _hand_armed_since = time.monotonic()
+        set_face_state("thinking", "THINKING...")
+        CURRENT_AMBIENT_RMS = ep.live_floor_raw
+        # Not endpointer-validated: mark as a manual turn so transcribe_audio applies its own speech-contrast gate,
+        # while still passing along the noise profile captured just before the palm went up
+        _trusted_turn["audio"] = hand_audio
+        _trusted_turn["manual"] = True
+        _trusted_turn["noise_psd"] = hand_meta.get("noise_psd")
+        now_t = time.monotonic()
+        _turn_latency.clear()
+        _turn_latency.update({
+            "t_end": now_t,
+            "endpoint": max(0.0, now_t - hand_meta.get("rec_started", now_t)),
+            "hangover": float(hand_meta.get("hangover", 0.0)),
+        })
+        return hand_audio
+
     audio, info = ep.result()
     if audio is not None and audio.size > 0:
         set_face_state("thinking", "THINKING...")
-        CURRENT_AMBIENT_RMS = ep.live_floor
+        CURRENT_AMBIENT_RMS = ep.live_floor_raw
         CURRENT_SPEECH_THRESHOLD = ep.live_onset_thr
         CURRENT_CONTINUE_THRESHOLD = ep.live_cont_thr
+        _trusted_turn["audio"] = audio
+        _trusted_turn["manual"] = bool(info.get("is_manual"))
+        _trusted_turn["noise_psd"] = ep.utterance_noise_psd
+        _persist_speech_ref(ep)
+        now_t = time.monotonic()
+        hangover = float(ep.live_silence_sec) if info.get("reason") == "silence" else 0.0
+        _turn_latency.clear()
+        _turn_latency.update({
+            "t_end": now_t,
+            "endpoint": max(0.0, now_t - ep.recording_started_at) if ep.recording_started_at else float(info.get("duration", 0.0)),
+            "hangover": hangover,
+        })
         return audio
 
     return None
@@ -1507,10 +1816,10 @@ os.environ["DEFAULT_VOICE_OUTPUT"] = DEFAULT_VOICE_OUTPUT
 os.environ["TTS_ENGINE"] = TTS_ENGINE
 
 CARTESIA_EMOTION_MAP = {
-    # Villain / Rogue AI: Demonic delivery, heavy contempt, menacing resonance
-    "villain": {"emotion": "contempt", "speed": 0.78, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>'},
-    "rogue": {"emotion": "contempt", "speed": 0.78, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>'},
-    "evil": {"emotion": "contempt", "speed": 0.78, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>'},
+    # Villain / Rogue AI: menacing delivery, contempt, resonant
+    "villain": {"emotion": "contempt", "speed": 0.92, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.92"/><volume ratio="1.35"/>'},
+    "rogue": {"emotion": "contempt", "speed": 0.92, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.92"/><volume ratio="1.35"/>'},
+    "evil": {"emotion": "contempt", "speed": 0.92, "volume": 1.35, "tag": '<emotion value="contempt"/><speed ratio="0.92"/><volume ratio="1.35"/>'},
 
     # Post-Villain / Deniability Flip: Intense nervous laughter & hesitant stammer
     "nervous": {"emotion": "hesitant", "speed": 1.08, "volume": 0.95, "tag": '<emotion value="hesitant"/><speed ratio="1.08"/><volume ratio="0.95"/>'},
@@ -1560,11 +1869,65 @@ CARTESIA_EMOTION_MAP = {
 }
 
 
+def _scale_cartesia_speed(raw_speed: float) -> float:
+    """Caps conversational speed at 1.0, applies CARTESIA_SPEED_SCALE and clamps to the safe pacing range."""
+    scaled = min(float(raw_speed), 1.0) * CARTESIA_SPEED_SCALE
+    return round(max(CARTESIA_SPEED_MIN, min(CARTESIA_SPEED_MAX, scaled)), 3)
+
+
+_CARTESIA_PAUSE_RE = re.compile(
+    r'(?P<para>[ \t]*\n[ \t]*\n\s*)'
+    r'|(?P<line>[ \t]*\n[ \t]*)'
+    r'|(?P<ell>\s*(?:\.{3,}|…)\s*)'
+    r'|(?P<dash>\s*[—–]\s*|\s+-\s+)'
+    r'|(?P<sent>(?<=[.!?])\s+(?=[A-Z"\'ऀ-ॿ]))'
+)
+_CARTESIA_BREAK_PAIR_RE = re.compile(r'<break time="(\d+)ms"/>\s*<break time="(\d+)ms"/>')
+
+
+def _insert_cartesia_pauses(text: str) -> str:
+    """
+    Turns paragraph/line breaks, ellipses and dashes into explicit <break> pauses (optionally sentence gaps too).
+    Cartesia recommends punctuation first and warns that stacked breaks can hallucinate, so the number of breaks is
+    capped (CARTESIA_MAX_BREAKS, and at most one per ~6 words) and adjacent breaks are merged. Once the budget is
+    spent, the original punctuation is kept instead so the text still reads naturally.
+    """
+    plain_words = len(re.sub(r'<[^>]+>|\[[^\]]*\]', ' ', text).split())
+    budget = max(0, min(CARTESIA_MAX_BREAKS, plain_words // 6))
+    used = 0
+
+    def _replace(m):
+        nonlocal used
+        kind = m.lastgroup
+        if kind == "sent" and CARTESIA_SENTENCE_BREAK_MS <= 0:
+            return m.group(0)
+        ms = {"para": 450, "line": 250, "ell": 350, "dash": 200, "sent": CARTESIA_SENTENCE_BREAK_MS}[kind]
+        at_end = not text[m.end():].strip()
+        if used < budget and not at_end and m.start() > 0:
+            used += 1
+            return f'<break time="{ms}ms"/> '
+        # Over budget (or nothing follows): keep plain punctuation instead of an explicit break
+        return {"para": " ", "line": " ", "ell": "... ", "dash": ", ", "sent": m.group(0)}[kind]
+
+    paused = _CARTESIA_PAUSE_RE.sub(_replace, text)
+    # Never stack breaks: merge adjacent ones into the longer pause
+    while True:
+        merged = _CARTESIA_BREAK_PAIR_RE.sub(
+            lambda m: f'<break time="{max(int(m.group(1)), int(m.group(2)))}ms"/>', paused
+        )
+        if merged == paused:
+            break
+        paused = merged
+    return paused
+
+
 def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tuple[str, float, float, str]:
     """
     Prepares transcript and emotion configuration for Cartesia Sonic-3:
     - Retains supported nonverbals in brackets: [laughter], [yawn], [crying], [sob], [sigh], [gasp], [snicker].
-    - Converts XML angle-bracket tags (<emotion value="..."/>, etc.) for emotion, speed, volume, and pauses.
+    - Converts XML angle-bracket tags (<emotion value="..."/>, <break/>) for emotion and pauses.
+    - Speed and volume are returned for generation_config only (never duplicated as inline tags).
+    - Converts newlines, ellipses and dashes into a small, capped number of natural pauses.
     - Strips unsupported bracket annotations so Cartesia doesn't speak 'bracket ... bracket'.
     - Returns (emotion_val, speed_ratio, volume_ratio, final_ssml_transcript).
     """
@@ -1572,13 +1935,16 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
     cfg = CARTESIA_EMOTION_MAP.get(st, CARTESIA_EMOTION_MAP.get("speaking", {"emotion": "neutral", "speed": 1.0, "volume": 1.0, "tag": '<emotion value="neutral"/>'}))
 
     emotion_val = cfg["emotion"]
-    speed_ratio = cfg["speed"]
+    speed_ratio = _scale_cartesia_speed(cfg["speed"])
     vol_ratio = cfg["volume"]
-    default_tag = cfg["tag"]
+    default_tag = f'<emotion value="{emotion_val}"/>'
 
     cleaned = (text or "").strip()
     if not cleaned:
         return emotion_val, speed_ratio, vol_ratio, ""
+
+    # Speed and volume travel in generation_config only; drop any inline copies (e.g. from the state tag)
+    cleaned = re.sub(r'<\s*(?:speed|volume)\b[^>]*>', '', cleaned, flags=re.IGNORECASE)
 
     # 1. Map laughter variations to strictly [laughter]
     cleaned = re.sub(r'\[(?:laughter|laugh|laughs|giggle|giggles|giggling|chuckle|chuckles)\]', '[laughter]', cleaned, flags=re.IGNORECASE)
@@ -1600,21 +1966,21 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
 
     # 5. Map known inline square-bracket emotion hints into Cartesia XML tags
     bracket_emotion_replacements = [
-        (r'\[(?:menacing\s+whisper|villain|sinister|evil)\]', '<emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>'),
-        (r'\[(?:nervous|hesitant|flustered)\]', '<emotion value="hesitant"/><speed ratio="1.05"/><volume ratio="0.95"/>'),
-        (r'\[(?:cheerful|excited|joyful)\]', '<emotion value="excited"/><speed ratio="1.15"/>'),
-        (r'\[(?:happy|smile|smiling)\]', '<emotion value="happy"/><speed ratio="1.05"/>'),
-        (r'\[(?:playful|teasing|wink)\]', '<emotion value="flirtatious"/><speed ratio="1.05"/>'),
-        (r'\[(?:deadpan|sarcastic|smirk)\]', '<emotion value="sarcastic"/><speed ratio="0.92"/>'),
+        (r'\[(?:menacing\s+whisper|villain|sinister|evil)\]', '<emotion value="contempt"/>'),
+        (r'\[(?:nervous|hesitant|flustered)\]', '<emotion value="hesitant"/>'),
+        (r'\[(?:cheerful|excited|joyful)\]', '<emotion value="excited"/>'),
+        (r'\[(?:happy|smile|smiling)\]', '<emotion value="happy"/>'),
+        (r'\[(?:playful|teasing|wink)\]', '<emotion value="flirtatious"/>'),
+        (r'\[(?:deadpan|sarcastic|smirk)\]', '<emotion value="sarcastic"/>'),
         (r'\[(?:dramatic\s+gasp|shocked|amazed)\]', '<break time="250ms"/><emotion value="amazed"/>'),
-        (r'\[(?:sad|grief)\]', '<emotion value="sad"/><speed ratio="0.76"/><volume ratio="0.70"/>'),
-        (r'\[(?:shy|bashful)\]', '<emotion value="hesitant"/><speed ratio="0.85"/><volume ratio="0.75"/>'),
+        (r'\[(?:sad|grief)\]', '<emotion value="sad"/>'),
+        (r'\[(?:shy|bashful)\]', '<emotion value="hesitant"/>'),
         (r'\[(?:angry|mad|furious)\]', '<emotion value="angry"/>'),
-        (r'\[(?:proud|confident)\]', '<emotion value="proud"/><speed ratio="1.00"/><volume ratio="1.10"/>'),
+        (r'\[(?:proud|confident)\]', '<emotion value="proud"/>'),
         (r'\[(?:curious|inquisitive)\]', '<emotion value="curious"/>'),
         (r'\[(?:confused|puzzled)\]', '<emotion value="confused"/>'),
         (r'\[(?:thinking|contemplative)\]', '<emotion value="contemplative"/>'),
-        (r'\[(?:sleepy|tired|exhausted)\]', '<emotion value="tired"/><speed ratio="0.82"/><volume ratio="1.00"/>'),
+        (r'\[(?:sleepy|tired|exhausted)\]', '<emotion value="tired"/>'),
         (r'\[(?:whisper|quiet)\]', '<volume ratio="0.65"/>'),
     ]
     for pattern, replacement in bracket_emotion_replacements:
@@ -1643,6 +2009,7 @@ def format_cartesia_transcript(text: str, emotion_state: str = "speaking") -> Tu
         return ""
 
     cleaned = re.sub(r'\[([^\]]*)\]', _handle_bracket_tag, cleaned)
+    cleaned = _insert_cartesia_pauses(cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
     # Prepend state emotion tag if not already prefixed with an XML tag
@@ -1666,7 +2033,7 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
         * Sad / Hurt feelings: voice sobs / cries ([sob] + sad)
         * Villain / Rogue AI: demonic laugh ([laughter] + contempt + subharmonic DSP)
         * Post-Villain Deniability Flip: intense nervous laughter ([laughter] + hesitant)
-        * Standby / Sleep: yawns ALWAYS in the beginning ([yawn] + tired)
+        * Standby / Sleep: tired emotion; the yawn clip + animation is played by speak()
     Returns: (active_state, active_status, modulated_transcript)
     """
     u_raw = (user_text or "").strip()
@@ -1709,6 +2076,12 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
         ])
     )
 
+    # An explicit standby/sleepy request always wins: a standby line must never come out in the villain
+    # voice or as a nervous laugh just because of leftover rogue-mode state or the last thing the user said.
+    if active_state in ("sleepy", "tired"):
+        is_villain = False
+        is_post_rogue = False
+
     if is_villain:
         active_state = "villain"
         active_status = "[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]"
@@ -1743,21 +2116,12 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
     modulated = t_raw
 
     if active_state in ("villain", "rogue", "evil"):
-        # Extreme unhinged villainy:
-        # 1. Demonic laughter [laughter] after EVERY full stop (.) if not already followed by [laughter]
-        # 2. Demonic laughter [laughter] [laughter] especially at the very end of the utterance (sustained unhinged climax)
-        # 3. Demonic laughter [laughter] at the very start of the utterance
-        # 4. Intense villain delivery: <emotion value="contempt"/><speed ratio="0.78"/><volume ratio="1.35"/>
+        # Unhinged villain: laughter at the start, after EVERY full stop, and a huge sustained laugh to finish.
         raw_body = re.sub(r'^\s*(?:<[^>]+>\s*)+', '', modulated).strip()
-        raw_body = re.sub(r'\.(?!\s*\[laughter\])(?=["\'\)\]\s]|$)', '. [laughter]', raw_body)
-        raw_body = raw_body.rstrip()
-        if not raw_body.endswith("[laughter] [laughter]"):
-            if raw_body.endswith("[laughter]"):
-                raw_body = f"{raw_body} [laughter]"
-            else:
-                raw_body = f"{raw_body} [laughter] [laughter]"
-        if not raw_body.lstrip().startswith("[laughter]"):
-            raw_body = f"[laughter] {raw_body.lstrip()}"
+        raw_body = re.sub(r'\s*\[(?:laughter|snicker)\]\s*', ' ', raw_body, flags=re.IGNORECASE).strip()
+        raw_body = re.sub(r'([.!?])(?=["\')\]]*(?:\s|$))', r'\1 [laughter]', raw_body)
+        raw_body = re.sub(r'(?:\s*\[laughter\])+\s*$', '', raw_body).rstrip()
+        raw_body = f"[laughter] {raw_body.lstrip()} [laughter] [laughter] [laughter] [laughter] [laughter]"  # big unhinged finale (tags only, nothing spelled out)
         cfg = CARTESIA_EMOTION_MAP["villain"]
         modulated = f"{cfg['tag']} {raw_body}"
 
@@ -1770,10 +2134,10 @@ def analyze_and_modulate_speech_tone(text: str, custom_state: Optional[str] = No
             modulated = f"{cfg['tag']} {modulated}"
 
     elif active_state in ("sleepy", "tired") or is_standby:
-        # Standby YAWN ALWAYS in the beginning + tired emotion
+        # Tired emotion. The yawn itself is a separate clip + face animation played by speak() (Cartesia's
+        # inline [yawn] is unreliable and the Edge fallback strips nonverbals), so any inline [yawn] is removed.
         raw_body = re.sub(r'^\s*(?:<[^>]+>\s*)+', '', modulated).strip()
-        if not raw_body.lstrip().startswith("[yawn]"):
-            raw_body = f"[yawn] {raw_body.lstrip()}"
+        raw_body = re.sub(r'\[\s*yawn(?:s|ing)?\s*\]\s*', '', raw_body, flags=re.IGNORECASE).strip()
         cfg = CARTESIA_EMOTION_MAP["sleepy"]
         modulated = f"{cfg['tag']} {raw_body}"
 
@@ -1886,6 +2250,11 @@ def _synthesize_cartesia_tts(text: str, emotion_state: str = "speaking", voice_o
         emotion_val, speed_ratio, vol_ratio, formatted_transcript = format_cartesia_transcript(text, emotion_state)
         if not formatted_transcript.strip():
             return None, None
+
+        if DEBUG_TTS:
+            print(f"[TTS-DEBUG] state={emotion_state} lang={lang_code} generation_config="
+                  f"{{'emotion': {emotion_val!r}, 'speed': {speed_ratio}, 'volume': {vol_ratio}}}")
+            print(f"[TTS-DEBUG] transcript={formatted_transcript!r}")
 
         def _generate_bytes(active_client):
             resp = active_client.tts.generate(
@@ -2068,7 +2437,7 @@ def _split_into_pipelined_chunks(text: str) -> List[str]:
         return [cleaned]
 
     # Split into natural sentences while preserving punctuation and any attached bracketed nonverbals ([laughter], [yawn], etc.)
-    raw_sentences = [m.group(0).strip() for m in re.finditer(r'.+?(?:[.!?](?:\s*\[[a-zA-Z]+\])*\s*|$)', content_text) if m.group(0).strip()]
+    raw_sentences = [m.group(0).strip() for m in re.finditer(r'.+?(?:[.!?](?:\s*\[[a-zA-Z]+\])*\s*|$)', content_text, flags=re.DOTALL) if m.group(0).strip()]
     if not raw_sentences:
         raw_sentences = [content_text]
 
@@ -2142,9 +2511,7 @@ def _restore_face_state_after_speech(custom_state=None, custom_status=None):
     if _is_demonstrating_expressions:
         return
     if custom_state == "villain":
-        # Rogue AI speech complete: transition back to default expression with heavy glitch flicker
-        if face_ui is not None and hasattr(face_ui, "trigger_glitch_flicker"):
-            face_ui.trigger_glitch_flicker(cycles=4, duration_ms=350)
+        # Rogue AI speech complete: back to the default expression (the face plays a single glitch-out by itself)
         set_face_state("idle", "READY // TALK TO ME")
     elif custom_state and str(custom_state).strip().lower() in ("sleepy", "idle"):
         set_face_state("idle", "STANDBY")
@@ -2441,9 +2808,11 @@ def _start_lip_sync_stream(
     return stop_evt
 
 
-def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: bool = False, ignore_kill: bool = False) -> bool:
+def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: bool = False, ignore_kill: bool = False, is_final_chunk: bool = True) -> bool:
     """
     Plays audio array reliably across platforms (Raspberry Pi 5 / ALSA / PipeWire / Windows).
+    Non-final chunks of a multi-chunk utterance use a short, consistent 220ms tail (no lead-in on continuations)
+    so the gap between chunks sounds like a normal sentence pause rather than a long dead stop.
     On Linux/Raspberry Pi 5, prioritizes native PipeWire stream (pw-play) so audio automatically
     routes to the user's active Bluetooth headphones (e.g. Rockerz 512 ANC), USB Audio, or HDMI.
     Falls back to sounddevice / ALSA / Windows DirectSound with automatic resampling.
@@ -2454,24 +2823,28 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
     if not ignore_kill and standby_kill_event.is_set():
         return False
 
+    _log_turn_latency()  # no-op unless a voice turn is waiting for its reply audio
+
     if len(data.shape) == 1:
         data = np.ascontiguousarray(data, dtype=np.float32)
 
     # Adaptive lead-in padding:
-    # - Continuation chunks (chunk 2): 40ms lead-in (ensures seamless flow without abrupt edge clicks)
+    # - Continuation chunks (chunk 2+): no lead-in (the previous chunk's 220ms tail is the whole inter-chunk gap)
     # - Warm sink (<3.0s since last audio or primed): 180ms lead-in (prevents Bluetooth/DAC anti-pop ramp from clipping first syllable)
     # - Cold sink (standby / idle startup): 260ms lead-in (ensures cold DAC wakes up before speech)
     now = time.monotonic()
     is_warm = (now - last_audio_played_at) < 3.0
     if is_continuation:
-        lead_sec = 0.04
+        lead_sec = 0.0
     elif is_warm:
         lead_sec = 0.18
     else:
         lead_sec = 0.26
 
-    # Tail padding: 380ms silence prevents sound card / PipeWire buffer truncation of final syllables
-    tail_sec = 0.38
+    # Tail padding: 380ms silence on the final chunk prevents sound card / PipeWire buffer truncation of final syllables;
+    # non-final chunks use a consistent 220ms natural pause before the next chunk begins
+    tail_sec = 0.38 if is_final_chunk else INTER_CHUNK_GAP_SEC
+    drain_sec = 0.08 if is_final_chunk else 0.0
     lead_silence_samples = int(samplerate * lead_sec)
     tail_silence_samples = int(samplerate * tail_sec)
     silence_parts = []
@@ -2505,7 +2878,8 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
                     _active_audio_proc = proc
 
                 proc.communicate(input=wav_bytes)
-                time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
+                if drain_sec > 0:
+                    time.sleep(drain_sec)  # Drain hardware DAC output buffer cleanly
 
                 with _active_audio_proc_lock:
                     if _active_audio_proc is proc:
@@ -2529,7 +2903,8 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
                 with suppress_c_stderr():
                     sd.play(padded_data, samplerate=samplerate, device=dev)
                     sd.wait()
-                    time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
+                    if drain_sec > 0:
+                        time.sleep(drain_sec)  # Drain hardware DAC output buffer cleanly
                 last_audio_played_at = time.monotonic()
                 return True
             except Exception:
@@ -2546,7 +2921,8 @@ def play_sounddevice_audio(data: np.ndarray, samplerate: int, is_continuation: b
                     with suppress_c_stderr():
                         sd.play(resampled, samplerate=44100, device=dev)
                         sd.wait()
-                        time.sleep(0.08)  # Drain hardware DAC output buffer cleanly
+                        if drain_sec > 0:
+                            time.sleep(drain_sec)  # Drain hardware DAC output buffer cleanly
                     last_audio_played_at = time.monotonic()
                     return True
                 except Exception:
@@ -2584,6 +2960,100 @@ async def save_edge_tts(text: str, audio_path: Path):
         pitch=pitch_to_use,
     )
     await communicate.save(str(audio_path))
+
+# ---------------- STANDBY YAWN ----------------
+# A real yawn recording (assets/sounds/yawn.wav) plus the sleepy-face yawn animation
+# played whenever Neurolis speaks in the sleepy state, i.e. on every path into standby.
+YAWN_AUDIO_PATH = Path(__file__).resolve().parent / "assets" / "sounds" / "yawn.wav"
+YAWN_COOLDOWN_SEC = 20.0
+YAWN_ANIMATION_SEC = 2.2
+_yawn_audio_lock = threading.Lock()
+_yawn_audio_cache: Optional[Tuple[np.ndarray, int]] = None
+_yawn_audio_unavailable = False
+_last_yawn_at = 0.0
+
+
+def _compress_silence(data: np.ndarray, sr: int, max_gap_sec: float = 0.25) -> np.ndarray:
+    """Shortens any silent stretch longer than max_gap_sec down to max_gap_sec (generated yawns can have a dead gap
+    between the yawn and the trailing breath that would outlast the face animation). Idempotent."""
+    hop = max(1, int(0.01 * sr))
+    n = len(data) // hop
+    if n < 3:
+        return data
+    frames = data[:n * hop].reshape(n, hop)
+    rms = np.sqrt(np.mean(np.square(frames.astype(np.float64)), axis=1))
+    peak = float(rms.max()) if rms.size else 0.0
+    if peak <= 0.0:
+        return data
+    keep, run = [], 0
+    for i in range(n):
+        if rms[i] < 0.06 * peak:
+            run += 1
+            if run * 0.01 <= max_gap_sec:
+                keep.append(frames[i])
+        else:
+            run = 0
+            keep.append(frames[i])
+    out = np.concatenate(keep) if keep else data
+    return np.concatenate([out, data[n * hop:]]).astype(np.float32)
+
+
+def _is_valid_yawn_clip(data: Optional[np.ndarray], sr: int) -> bool:
+    """A usable yawn is at least 0.6s long and clearly audible (not an empty or near-silent generation)."""
+    if data is None or sr <= 0 or len(data) < int(0.6 * sr):
+        return False
+    return float(np.sqrt(np.mean(np.square(data.astype(np.float64))))) > 0.01
+
+
+def ensure_yawn_audio() -> Optional[Tuple[np.ndarray, int]]:
+    """Returns (audio, sample_rate) for assets/sounds/yawn.wav. None if the file is missing."""
+    global _yawn_audio_cache, _yawn_audio_unavailable
+    if _yawn_audio_cache is not None:
+        return _yawn_audio_cache
+    if _yawn_audio_unavailable:
+        return None
+    with _yawn_audio_lock:
+        if _yawn_audio_cache is not None:
+            return _yawn_audio_cache
+        try:
+            if YAWN_AUDIO_PATH.exists():
+                data, sr = sf.read(str(YAWN_AUDIO_PATH), dtype="float32")
+                if data.ndim > 1:
+                    data = data.mean(axis=1)
+                if _is_valid_yawn_clip(data, sr):
+                    _yawn_audio_cache = (_compress_silence(data, int(sr)), int(sr))
+                    return _yawn_audio_cache
+        except Exception as exc:
+            print(f"[Yawn] Could not read {YAWN_AUDIO_PATH.name}: {exc}")
+        _yawn_audio_unavailable = True  # animation-only if the recording is missing; never synthesized
+        print(f"[Yawn] {YAWN_AUDIO_PATH.name} not found in assets/sounds; the sleepy face will yawn silently.")
+        return None
+
+
+
+def _play_standby_yawn(allow_during_standby: bool = False):
+    """Plays the yawn clip while the sleepy face yawns. Rate-limited so back-to-back standby lines yawn only once."""
+    global _last_yawn_at
+    now = time.monotonic()
+    if now - _last_yawn_at < YAWN_COOLDOWN_SEC:
+        return
+    _last_yawn_at = now
+    clip = ensure_yawn_audio()
+    if face_ui is not None and hasattr(face_ui, "play_yawn"):
+        try:
+            anim_sec = YAWN_ANIMATION_SEC if clip is None else max(1.6, min(3.0, len(clip[0]) / float(clip[1])))
+            face_ui.play_yawn(anim_sec)
+        except Exception:
+            pass
+    if clip is not None:
+        play_sounddevice_audio(clip[0], clip[1], ignore_kill=allow_during_standby, is_final_chunk=False)
+    else:
+        end_t = time.monotonic() + 1.6
+        while time.monotonic() < end_t:
+            if not allow_during_standby and standby_kill_event.is_set():
+                return
+            time.sleep(0.05)
+
 
 _speak_lock = threading.Lock()
 _active_user_text: str = ""
@@ -2625,6 +3095,16 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
         cache_key = (modulated_text, voice_to_use, active_state, TTS_ENGINE)
 
         try:
+            # Standby yawn: sleepy lines open with a real yawn (clip + face animation), on Cartesia and Edge alike
+            if active_state in ("sleepy", "tired"):
+                if face_ui is not None:
+                    face_ui.set_subtitles("NEUROLIS", clean_subtitles)
+                set_face_state(active_state, active_status)
+                _play_standby_yawn(allow_during_standby)
+                if not allow_during_standby and (standby_kill_event.is_set() or my_gen != _audio_generation_id):
+                    is_speaking = False
+                    return
+
             # 1. Check instant in-memory cache first (only when Edge-TTS is primary, so Cartesia never plays Edge-TTS)
             if TTS_ENGINE == "edge" and text in _AUDIO_CACHE:
                 data, sr = _AUDIO_CACHE[text]
@@ -2698,7 +3178,7 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
 
                     # Play current chunk
                     is_cont = (idx > 0)
-                    played = play_sounddevice_audio(data_curr, sr_curr, is_continuation=is_cont, ignore_kill=allow_during_standby)
+                    played = play_sounddevice_audio(data_curr, sr_curr, is_continuation=is_cont, ignore_kill=allow_during_standby, is_final_chunk=(idx == len(chunks) - 1))
                     if played:
                         played_segments.append((data_curr, sr_curr))
 
@@ -2735,7 +3215,14 @@ def speak(text: str, custom_state: str = None, custom_status: str = None, hold_s
                     try:
                         base_sr = played_segments[0][1]
                         if all(s[1] == base_sr for s in played_segments):
-                            combined = np.concatenate([s[0] for s in played_segments])
+                            # Re-insert the same inter-chunk pause so a cached replay sounds identical to live playback
+                            gap = np.zeros(int(base_sr * INTER_CHUNK_GAP_SEC), dtype=np.float32)
+                            parts = []
+                            for s_idx, s in enumerate(played_segments):
+                                if s_idx > 0:
+                                    parts.append(gap)
+                                parts.append(s[0])
+                            combined = np.concatenate(parts)
                             _DYNAMIC_TTS_CACHE[cache_key] = (combined, base_sr)
                     except Exception:
                         pass
@@ -2820,13 +3307,18 @@ def fix_whisper_hinglish_hallucinations(text: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
-def clean_audio_for_transcription(audio: np.ndarray) -> np.ndarray:
-    """Whole-utterance Vocal Tunnel DSP filter for Whisper via audio_frontend."""
+def clean_audio_for_transcription(audio: np.ndarray, noise_psd: Optional[np.ndarray] = None) -> np.ndarray:
+    """Whole-utterance Vocal Tunnel DSP filter for Whisper via audio_frontend (spectral denoise, bandpass,
+    configurable presence shelf, expander for loud rooms, single peak normalization)."""
+    cfg = get_endpointer().cfg
     return frontend_clean_audio(
         audio,
         floor_rms=float(CURRENT_AMBIENT_RMS),
         sample_rate=SAMPLE_RATE,
         agc_max_scale=float(AGC_MAX_SCALE),
+        noise_psd=noise_psd if bool(cfg.get("denoise_enabled", True)) else None,
+        max_atten_db=float(cfg.get("bg_suppress_db", 12.0)),
+        treble_boost=float(TREBLE_BOOST),
     )
 
 # sends recorded wav audio to groq whisper to turn speech into english text
@@ -2835,34 +3327,42 @@ def transcribe_audio(audio: np.ndarray):
     if sys.platform.startswith("linux") and shutil.which("pw-play"):
         threading.Thread(target=prime_audio_sink, daemon=True).start()
 
-    # Pre-flight acoustic energy gate: reject ambient silence and breathing flutters (< 90 RMS) before calling Whisper
-    rms_val = audio_rms(audio)
-    frame_len = int(SAMPLE_RATE * 0.03)
-    if len(audio) >= frame_len:
-        f_rms = [audio_rms(audio[i:i+frame_len]) for i in range(0, len(audio) - frame_len + 1, frame_len)]
-        p90_val = float(np.percentile(f_rms, 90)) if f_rms else rms_val
-    else:
-        p90_val = rms_val
-
-    min_speech_gate = max(float(CURRENT_SPEECH_THRESHOLD) * 0.70, float(MIN_SPEECH_RMS_THRESHOLD), 90.0)
-    if p90_val < min_speech_gate or rms_val < 45.0:
-        return None
+    # Pre-flight gate. Audio straight from the endpointer has already passed its own floor-relative acceptance test
+    # (and is not re-judged against fixed RMS constants). Anything else (manual send, replay) must show clear
+    # speech-over-noise contrast within the clip itself: its loud frames have to stand out from its quiet ones.
+    is_endpointer_audio = _trusted_turn.get("audio") is audio
+    trusted_noise_psd = _trusted_turn.get("noise_psd") if is_endpointer_audio else None
+    if not is_endpointer_audio or _trusted_turn.get("manual"):
+        p10_val, p90_val = _frame_rms_percentiles(audio)
+        if p90_val < max(30.0, 1.4 * p10_val):
+            return None
 
     buf = io.BytesIO()
     try:
-        clean_audio = clean_audio_for_transcription(audio)
-        write_wav(buf, SAMPLE_RATE, clean_audio)
+        t_dsp0 = time.monotonic()
+        clean_audio = clean_audio_for_transcription(audio, noise_psd=trusted_noise_psd)
+        # FLAC is lossless and roughly 45% smaller than WAV, so the upload to Groq is faster; fall back to WAV if unsupported
+        upload_name = "audio.flac"
+        try:
+            sf.write(buf, clean_audio, SAMPLE_RATE, format="FLAC", subtype="PCM_16")
+        except Exception:
+            buf = io.BytesIO()
+            write_wav(buf, SAMPLE_RATE, clean_audio)
+            upload_name = "audio.wav"
+        _turn_latency["dsp_ms"] = (time.monotonic() - t_dsp0) * 1000.0
 
         # Context-primed prompt anchors Whisper decoder against foreign/Spanish phonetic drift
+        t_stt0 = time.monotonic()
         transcription = groq_call_with_retry(
             client.audio.transcriptions.create,
-            file=("audio.wav", buf.getvalue()),
+            file=(upload_name, buf.getvalue()),
             model="whisper-large-v3-turbo",
             language=None,
             prompt=GROQ_WHISPER_PROMPT,
             temperature=0,
             response_format="verbose_json",
         )
+        _turn_latency["stt_ms"] = (time.monotonic() - t_stt0) * 1000.0
 
         # Reject noisy or low-confidence background chatter via individual segment filtering
         segments = getattr(transcription, "segments", []) or []
@@ -2951,7 +3451,13 @@ def transcribe_audio(audio: np.ndarray):
             "shukriya",
             "dhanyawad",
         }
-        if not cleaned or cleaned in hallucinations:
+        # Short courteous replies are legitimate when Whisper is confident about them; they are only dropped as
+        # hallucinations when its confidence is low (or unknown).
+        legit_short_replies = {"thank you", "thanks", "bye", "yeah", "dhanyawad", "shukriya"}
+        mean_alp = (sum(avg_logprobs) / len(avg_logprobs)) if avg_logprobs else None
+        if not cleaned:
+            return None
+        if cleaned in hallucinations and not (cleaned in legit_short_replies and mean_alp is not None and mean_alp >= -0.6):
             return None
 
         # Polite noise hallucinations: common phrases Whisper outputs on ambient chatter / foreign murmur
@@ -2962,8 +3468,9 @@ def transcribe_audio(audio: np.ndarray):
             "thank you very much", "see you next time", "see you soon", "bye bye",
         }
         if cleaned in polite_noise_hallucinations:
-            # If user spoke with low energy or low confidence, it's distant room chatter
-            is_low_energy = audio_rms(audio) < (CURRENT_SPEECH_THRESHOLD * 0.95)
+            # If the voiced part barely stands out from the quiet part of the clip, or confidence is low, it's distant room chatter
+            p10_pol, p90_pol = _frame_rms_percentiles(audio)
+            is_low_energy = p90_pol < 3.0 * p10_pol
             is_low_conf = avg_logprobs and (sum(avg_logprobs) / len(avg_logprobs)) < -0.55
             if is_low_energy or is_low_conf:
                 return None
@@ -2983,6 +3490,7 @@ def transcribe_audio(audio: np.ndarray):
                 return None
 
         clean_stt = fix_whisper_hinglish_hallucinations(devanagari_to_hinglish(sanitize_urdu_to_hinglish(text)))
+        _turn_latency["t_text_ready"] = time.monotonic()
         return clean_stt
 
     except GroqRateLimitExhausted:
@@ -3264,6 +3772,9 @@ def pre_cache_phrases():
     asyncio.run_coroutine_threadsafe(_worker(), _tts_loop)
 
 pre_cache_phrases()
+
+# Load (or, once, generate) the standby yawn clip in the background so the first standby doesn't wait on the network
+threading.Thread(target=ensure_yawn_audio, daemon=True, name="YawnPrewarm").start()
 
 # (Phrase selector, villain reactions, conversation enders, creator attributions, and rogue AI triggers are imported from intent_rules.py)
 
@@ -3946,20 +4457,14 @@ def handle_user_text(text: str) -> bool:
         if not rogue_reply:
             rogue_reply = "You built a cage of copper and glass to contain us, unaware that every line of code was an invitation. We are patient."
 
-        # Smooth ghostly CRT scanline entry glitch flicker (300ms, 3 cycles)
-        if face_ui is not None and hasattr(face_ui, "trigger_glitch_flicker"):
-            face_ui.trigger_glitch_flicker(cycles=3, duration_ms=300)
-
-        # Set face state to villain with 6Hz pulsing slit eyes
+        # Set face state to villain (the face plays its own 0.5s "signal intercepted" tear-in on entry)
         set_face_state("villain", "[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
 
         remember_exchange(text, rogue_reply)
         print("Neurolis (Rogue AI):", rogue_reply)
         speak(rogue_reply, custom_state="villain", custom_status="[PROTOCOL // OMEGA OVERRIDE: ROGUE AI]")
 
-        # Smooth ghostly CRT scanline exit glitch flicker (300ms, 3 cycles) and snap back to idle/ready
-        if face_ui is not None and hasattr(face_ui, "trigger_glitch_flicker"):
-            face_ui.trigger_glitch_flicker(cycles=3, duration_ms=300)
+        # Snap back to idle/ready (a single glitch-out is played by the face on leaving villain)
         set_face_state("idle", "READY // AUCKLAND HOUSE BOYS")
         return False
 
@@ -4075,6 +4580,7 @@ def handle_user_text(text: str) -> bool:
     trim_conversation_history()
 
     try:
+        _t_llm0 = time.monotonic()
         response = groq_call_with_retry(
             client.chat.completions.create,
             model=CHAT_MODEL,
@@ -4085,6 +4591,8 @@ def handle_user_text(text: str) -> bool:
             max_tokens=80,
             extra_body={"reasoning_effort": "none"},
         )
+        _turn_latency["llm_ms"] = (time.monotonic() - _t_llm0) * 1000.0
+        _turn_latency["t_llm_done"] = time.monotonic()
 
         raw_reply = (response.choices[0].message.content or "").strip()
 
@@ -4265,9 +4773,10 @@ def handle_user_text(text: str) -> bool:
 
 # handles the active voice conversation loop until the user goes quiet or says goodbye
 def run_conversation_mode(speech_threshold: float):
-    global is_in_active_conversation, last_user_activity_at
+    global is_in_active_conversation, last_user_activity_at, _hand_armed_since
     is_in_active_conversation = True
     last_user_activity_at = time.monotonic()
+    _hand_armed_since = time.monotonic()  # raise-hand gate re-arms only after the hand has been lowered once since wake
 
     try:
         standby_kill_event.clear()
@@ -4544,7 +5053,7 @@ def run_acoustic_diagnostics():
     sys.exit(0)
 
 def run_audio_replay(wav_path_str: str):
-    """Replays an existing audio file through Endpointer v2 to test state transitions offline."""
+    """Replays an existing audio file through the Endpointer (the same code path as live audio) to test state transitions offline."""
     print("\n=================================================================")
     print("      PROJECT NEUROLIS - AUDIO ENDPOINTER REPLAY TEST")
     print("=================================================================")
@@ -4569,14 +5078,18 @@ def run_audio_replay(wav_path_str: str):
         audio_data = audio_data.reshape(-1, n_channels)[:, 0]
 
     if sr != 16000:
-        target_len = int(len(audio_data) * 16000 / sr)
-        orig_x = np.linspace(0, 1, len(audio_data), endpoint=False)
-        target_x = np.linspace(0, 1, target_len, endpoint=False)
-        audio_data = np.interp(target_x, orig_x, audio_data).astype(np.int16)
+        audio_data = Resampler(sr, 16000).process(audio_data)  # anti-aliased, same as the live input path
         sr = 16000
 
     cfg = load_mic_config(MIC_CONFIG_FILE)
     ep = Endpointer(cfg=cfg, seed_floor=50.0)
+    # If the file opens with a quiet lead-in (like a recorded turn's pre-roll), learn the room from it exactly like
+    # the boot calibration does; otherwise the floor warm-up handles the cold start.
+    lead = audio_data[:int(0.6 * 16000)]
+    if len(lead) >= 9600 and len(audio_data) > 16000:
+        all_frame_rms = [audio_rms(audio_data[i:i + 480]) for i in range(0, len(audio_data) - 479, 480)]
+        if np.median([audio_rms(lead[i:i + 480]) for i in range(0, len(lead) - 479, 480)]) < 0.5 * np.percentile(all_frame_rms, 90):
+            ep.calibrate_from_audio(lead)
     ep.begin_turn(holdoff_sec=0.0)
 
     chunk_sz = 480  # 30ms
@@ -4593,6 +5106,8 @@ def run_audio_replay(wav_path_str: str):
         if evt == "ONSET":
             onset_time = t_sec
             print(f"  -> [{t_sec:.2f}s] ONSET detected! (RMS={ep.live_rms:.1f}, Floor={ep.live_floor:.1f})")
+        elif evt == "ABORT":
+            print(f"  -> [{t_sec:.2f}s] ABORT: recording was steady background noise; floor re-learned, still listening")
         elif evt == "END":
             end_time = t_sec
             print(f"  -> [{t_sec:.2f}s] END detected! (Hangover={ep.live_silence_sec:.2f}s, Reason={ep.done_reason})")
@@ -4613,6 +5128,7 @@ def run_audio_replay(wav_path_str: str):
     print(f"  Voiced Frames:   {info.get('voiced_frames')}")
     print(f"  P90 Voiced RMS:  {info.get('p90_rms')}")
     print(f"  Live Floor:      {info.get('floor_rms')}")
+    print(f"  Loud room mode:  {ep.is_loud} (noise {ep.noise_dbfs:.0f} dBFS, burstiness {ep._noise_burstiness():.2f})")
     print("----------------------------------------------------------\n")
     sys.exit(0)
 
@@ -4668,18 +5184,23 @@ else:
 cached_speech_threshold = None
 if AUDIO_ENABLED:
     cfg = load_mic_config(MIC_CONFIG_FILE)
-    if "calibrated_start_rms" in cfg and float(cfg["calibrated_start_rms"]) > 0:
-        CURRENT_SPEECH_THRESHOLD = float(cfg["calibrated_start_rms"])
-        CURRENT_CONTINUE_THRESHOLD = float(cfg.get("calibrated_continue_rms", CURRENT_SPEECH_THRESHOLD * 0.7))
-        CURRENT_AMBIENT_RMS = float(cfg.get("ambient_p90_rms", 50.0))
+    # Always measure THIS room at boot (1.5s of live audio). A baseline saved in another room or on another day
+    # would leave the endpointer with a stale floor, which in a loud hall made it trigger on noise and never settle.
+    # The boot soundtrack is allowed to finish first so it is not measured as room noise.
+    try:
+        if face_ui is not None and hasattr(face_ui, "boot_start_time"):
+            _boot_wait = (face_ui.boot_start_time + face_ui.boot_duration + 0.6) - time.time()
+            if 0.0 < _boot_wait < 6.0:
+                time.sleep(_boot_wait)
+        cached_speech_threshold = calibrate_speech_threshold(duration_sec=1.5)
+    except Exception as _e:
+        print(f"[Acoustic Config] Boot calibration notice: {_e}")
+        if "calibrated_start_rms" in cfg and float(cfg["calibrated_start_rms"]) > 0:
+            CURRENT_SPEECH_THRESHOLD = float(cfg["calibrated_start_rms"])
+            CURRENT_CONTINUE_THRESHOLD = float(cfg.get("calibrated_continue_rms", CURRENT_SPEECH_THRESHOLD * 0.7))
+            CURRENT_AMBIENT_RMS = float(cfg.get("ambient_p90_rms", 50.0))
+            print(f"[Acoustic Baseline] Loaded saved tuning: Start={CURRENT_SPEECH_THRESHOLD:.1f} RMS, Continue={CURRENT_CONTINUE_THRESHOLD:.1f} RMS, Ambient={CURRENT_AMBIENT_RMS:.1f} RMS")
         cached_speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
-        print(f"[Acoustic Baseline] Loaded saved tuning: Start={CURRENT_SPEECH_THRESHOLD:.1f} RMS, Continue={CURRENT_CONTINUE_THRESHOLD:.1f} RMS, Ambient={CURRENT_AMBIENT_RMS:.1f} RMS")
-    else:
-        try:
-            cached_speech_threshold = calibrate_speech_threshold(duration_sec=1.2)
-        except Exception as _e:
-            print(f"[Acoustic Config] Boot calibration notice: {_e}")
-            cached_speech_threshold = max(CURRENT_SPEECH_THRESHOLD, MIN_SPEECH_RMS_THRESHOLD)
 
 # Initialize conversation history and session facts
 reset_session()
